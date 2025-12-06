@@ -51,6 +51,7 @@ streamlit run poc.py
 The first run will take a moment to download the model weights from Hugging Face.
 
 📦 Tech Stack
+
 Frontend: Streamlit
 
 OCR: Doctr (Document Text Recognition)
