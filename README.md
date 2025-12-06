@@ -1,14 +1,10 @@
 # 🥗 AI-Powered Nutritional Tracker
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)]([Streamlit App](https://nutritionaltracker.streamlit.app/))
-[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-yellow)](YOUR_HUGGINGFACE_REPO_URL_HERE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
-
 A Generative AI application that extracts structured nutritional information from images of food labels. This project leverages a fine-tuned **LongT5 model** to parse OCR output into clean, structured JSON data.
 
 ## 🚀 Live Demo
 
-**[Click here to try the App on Streamlit Cloud]([Here! ](https://nutritionaltracker.streamlit.app/))**
+**Click here to try the App on Streamlit Cloud([Here! ](https://nutritionaltracker.streamlit.app/))**
 
 ---
 
