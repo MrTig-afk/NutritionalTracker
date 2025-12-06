@@ -38,7 +38,7 @@ If you want to run this project locally on your machine:
 
 **1. Clone the repository**
 ```bash
-git clone [https://github.com/MrTig-afk/NutritionalTracker.git](https://github.com/MrTig-afk/NutritionalTracker.git)
+git clone https://github.com/MrTig-afk/NutritionalTracker.git
 ```
 **2. Install Dependencies**
 ```bash
