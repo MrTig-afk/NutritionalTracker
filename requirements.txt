@@ -1,0 +1,10 @@
+streamlit
+streamlit-cropper
+pillow
+torch
+transformers
+huggingface-hub
+python-dotenv
+python-doctr
+opencv-python-headless
+python-doctr[torch]
