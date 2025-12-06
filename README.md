@@ -4,7 +4,7 @@ A Generative AI application that extracts structured nutritional information fro
 
 ## 🚀 Live Demo
 
-**Click here to try the App on Streamlit Cloud([Here! ](https://nutritionaltracker.streamlit.app/))**
+**Click here to try the App on Streamlit Cloud([Here!](https://nutritionaltracker.streamlit.app/))**
 
 ---
 
@@ -38,8 +38,7 @@ If you want to run this project locally on your machine:
 
 **1. Clone the repository**
 ```bash
-git clone [https://github.com/MrTig/NutritionalTracker-App.git](https://github.com/MrTig/NutritionalTracker-App.git)
-cd NutritionalTracker-App
+git clone [https://github.com/MrTig-afk/NutritionalTracker.git](https://github.com/MrTig-afk/NutritionalTracker.git)
 ```
 **2. Install Dependencies**
 ```bash
