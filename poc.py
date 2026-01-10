@@ -2,141 +2,86 @@ import os
 import json
 import torch
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps
 from streamlit_cropper import st_cropper
-from transformers import AutoTokenizer, LongT5ForConditionalGeneration
-from dotenv import load_dotenv
-
-# Import your local helper modules
 from ocr import run_ocr
+from transformers import AutoTokenizer, LongT5ForConditionalGeneration
 from repair import repair_output
+from dotenv import load_dotenv
 
 load_dotenv()
 
-# ------------------------------
-# Configuration
-# ------------------------------
+MODEL_DIR = os.getenv("MODEL_DIR")
+if not MODEL_DIR:
+    raise ValueError("Please set the path to the Model Weights.")
 
-# ✅ UPDATED: Your Hugging Face Repo ID
-HF_MODEL_ID = "MrTig/NutritinalTracker-checkpoints"
-
-# Set up a temporary save directory for the cropped images
-SAVE_DIR = os.getenv("SAVE_DIR", "temp_images")
+SAVE_DIR = os.getenv("SAVE_DIR")
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# Set Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# ------------------------------
-# Load tokenizer + model (from Hugging Face)
-# ------------------------------
 @st.cache_resource
 def load_model():
-    """
-    Loads the model and tokenizer from the Hugging Face Hub.
-    Results are cached so this only runs once.
-    """
-    st.info(f"Loading model from Hugging Face Hub: {HF_MODEL_ID}...")
-    try:
-        # This will download config.json, model.safetensors, etc. automatically
-        tokenizer = AutoTokenizer.from_pretrained(HF_MODEL_ID)
-        model = LongT5ForConditionalGeneration.from_pretrained(HF_MODEL_ID).to(device)
-        model.eval()
-        return tokenizer, model
-    except Exception as e:
-        st.error(f"❌ Error loading model: {e}")
-        st.error(f"Could not find repo: {HF_MODEL_ID}. Please check if the repo is private (requires token) or if the name is spelled correctly.")
-        st.stop()
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+    model = LongT5ForConditionalGeneration.from_pretrained(MODEL_DIR).to(device)
+    model.eval()
+    return tokenizer, model
 
 tokenizer, model = load_model()
 
-# ------------------------------
-# Streamlit UI
-# ------------------------------
-st.title("POC: Image → Nutritional Information")
+st.title("POC: Screenshot → Nutrition Info")
 
-uploaded_file = st.file_uploader("Upload an image", type=["png", "jpg", "jpeg"])
+uploaded_file = st.file_uploader("Upload screenshot", type=["png", "jpg", "jpeg", "heic"])
+
 if uploaded_file:
     img = Image.open(uploaded_file)
+    img = ImageOps.exif_transpose(img)
 
-    # --------------------------
-    # Rotation controls
-    # --------------------------
-    if "rotation" not in st.session_state:
-        st.session_state.rotation = 0
+    # CRITICAL FIXES FOR IPHONE
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
 
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        if st.button("↺ Rotate Left"):
-            st.session_state.rotation = (st.session_state.rotation - 90) % 360
-    with col2:
-        if st.button("↻ Rotate Right"):
-            st.session_state.rotation = (st.session_state.rotation + 90) % 360
-    with col3:
-        if st.button("⟳ Reset"):
-            st.session_state.rotation = 0
+    img.thumbnail((1000, 1000))
 
-    rotated_img = img.rotate(st.session_state.rotation, expand=True)
+    use_cropper = st.checkbox("Crop Image", value=True)
 
-    # --------------------------
-    # Crop after rotation
-    # --------------------------
-    st.write("Crop the image to focus on the nutritional table:")
-    cropped_img = st_cropper(rotated_img, aspect_ratio=None)
-    st.image(cropped_img, caption="Preview", width=400)
+    if use_cropper:
+        cropped_img = st_cropper(img, aspect_ratio=None, box_color="red")
+        st.caption("Tip: If the cropper freezes, uncheck 'Crop Image'.")
+    else:
+        cropped_img = img
+        st.image(img, caption="Using Full Screenshot", width=400)
 
-    # --------------------------
-    # Barcode input
-    # --------------------------
-    barcode = st.text_input("Enter barcode (digits only, max 13 digits)")
+    barcode = st.text_input("Enter barcode (digits only)", max_chars=13)
 
-    # --------------------------
-    # Run model
-    # --------------------------
     if st.button("Run Model"):
-        # Basic validation
-        if barcode and (not barcode.isdigit() or len(barcode) > 13):
-            st.error("❌ Invalid barcode: must be digits only and ≤13 digits.")
-        else:
-            safe_barcode = barcode if barcode else "unknown_item"
+        safe_name = barcode if (barcode and barcode.isdigit()) else "temp_screenshot"
+        filename = f"{safe_name}.jpg"
+        save_path = os.path.join(SAVE_DIR, filename)
 
-            # Save cropped image locally for OCR processing
-            filename = f"{safe_barcode}.jpg"
-            save_path = os.path.join(SAVE_DIR, filename)
-            cropped_img.save(save_path, format="JPEG")
+        cropped_img.save(save_path, format="JPEG", quality=85)
 
-            # Run OCR
-            st.info("🔍 Running OCR on image...")
-            try:
-                ocr_output = run_ocr(save_path)
-            except Exception as e:
-                st.error(f"OCR Failed: {e}")
-                st.stop()
+        ocr_output = run_ocr(save_path)
 
-            # Model inference
-            st.info("🤖 Processing with AI Model...")
-            input_text = json.dumps(ocr_output, separators=(",", ":"))
+        st.info("🤖 Processing Nutrition Data...")
+        input_text = json.dumps(ocr_output, separators=(",", ":"))
+        inputs = tokenizer(
+            input_text,
+            return_tensors="pt",
+            padding=True,
+            truncation=False
+        ).to(device)
 
-            # Tokenize with truncation to ensure we don't exceed model limits
-            inputs = tokenizer(
-                input_text,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=2048 
-            ).to(device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=2048,
+                num_beams=4,
+                early_stopping=True
+            )
 
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=2048,
-                    num_beams=4,
-                    early_stopping=True
-                )
+        decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        repaired = repair_output(decoded)
 
-            decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-            # Repair JSON
-            repaired = repair_output(decoded)
-            st.subheader("Model Output")
-            st.json(repaired)
+        st.subheader("Result")
+        st.json(repaired)
