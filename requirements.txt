@@ -8,3 +8,5 @@ python-dotenv
 python-doctr
 opencv-python-headless
 python-doctr[torch]
+streamlit-image-coordinates
+streamlit-javascript
