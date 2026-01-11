@@ -3,7 +3,7 @@ import io
 import json
 import torch
 import streamlit as st
-from PIL import Image
+from PIL import Image, ExifTags
 from streamlit_cropper import st_cropper
 from transformers import AutoTokenizer, LongT5ForConditionalGeneration
 from dotenv import load_dotenv
@@ -34,7 +34,36 @@ tokenizer, model = load_model()
 
 
 # ------------------------------
-# FIXED: Nested Data Table Display
+# FIXED: Fix iPhone image orientation
+# ------------------------------
+def fix_iphone_orientation(image):
+    """Fix iPhone image orientation based on EXIF data"""
+    try:
+        # Check for EXIF orientation tag
+        if hasattr(image, '_getexif'):
+            exif = image._getexif()
+            if exif:
+                # Get orientation tag
+                for orientation in ExifTags.TAGS.keys():
+                    if ExifTags.TAGS[orientation] == 'Orientation':
+                        break
+                
+                orientation_value = exif.get(orientation)
+                
+                if orientation_value == 3:
+                    image = image.rotate(180, expand=True)
+                elif orientation_value == 6:
+                    image = image.rotate(270, expand=True)
+                elif orientation_value == 8:
+                    image = image.rotate(90, expand=True)
+    except Exception as e:
+        st.warning(f"Note: Could not fix image orientation: {e}")
+    
+    return image
+
+
+# ------------------------------
+# FIXED: Nested Data Table Display with responsive design
 # ------------------------------
 def display_nutrition_data(data, cropped_image):
     """Display nutrition data always with all keys populated with cropped image side by side"""
@@ -82,82 +111,118 @@ def display_nutrition_data(data, cropped_image):
                     val_serving = f"{val_serving}kCal"
         rows_html += f"<tr><td>{label}</td><td>{val_100g}</td><td>{val_serving}</td></tr>"
 
-    # Create two columns for side-by-side layout
-    col1, col2 = st.columns([1, 1])
+    # FIXED: Use responsive columns for mobile
+    st.markdown("""
+    <style>
+        @media (max-width: 768px) {
+            .main .block-container {
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+            .stButton > button {
+                width: 100% !important;
+                margin-bottom: 10px;
+            }
+            .mobile-stack {
+                flex-direction: column !important;
+            }
+        }
+        .nutrition-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: Arial, sans-serif;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .nutrition-table th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-size: 14px;
+        }
+        .nutrition-table td {
+            padding: 8px;
+            border: 1px solid #ddd;
+            text-align: center;
+            font-size: 14px;
+        }
+        .nutrition-table tr:nth-child(even) {
+            background: #f8f8f8;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # FIXED: Stack columns on mobile
+    st.markdown('<div class="mobile-stack" style="display: flex; flex-wrap: wrap; gap: 20px;">', unsafe_allow_html=True)
     
-    with col1:
-        # REMOVED: use_column_width parameter
-        st.image(cropped_image, caption="Cropped Nutrition Label")
+    # Image column
+    st.markdown('<div style="flex: 1; min-width: 300px;">', unsafe_allow_html=True)
+    st.image(cropped_image, caption="Cropped Nutrition Label", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    with col2:
-        st.markdown(f"""
-        <style>
-            .nutrition-table {{
-                width: 100%;
-                border-collapse: collapse;
-                font-family: Arial, sans-serif;
-                border-radius: 8px;
-                overflow: hidden;
-                margin-bottom: 20px;
-            }}
-            .nutrition-table th {{
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 10px;
-                text-align: center;
-            }}
-            .nutrition-table td {{
-                padding: 8px;
-                border: 1px solid #ddd;
-                text-align: center;
-            }}
-            .nutrition-table tr:nth-child(even) {{
-                background: #f8f8f8;
-            }}
-        </style>
+    # Table column
+    st.markdown('<div style="flex: 1; min-width: 300px;">', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="margin-bottom:15px;">
+        <strong>Serving Size:</strong> {serving_size}
+    </div>
 
-        <div style="margin-bottom:15px;">
-            <strong>Serving Size:</strong> {serving_size}
-        </div>
+    <table class="nutrition-table">
+        <thead>
+            <tr>
+                <th>Macros</th>
+                <th>Per 100g</th>
+                <th>Per Serving</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html}
+        </tbody>
+    </table>
+    """, unsafe_allow_html=True)
 
-        <table class="nutrition-table">
-            <thead>
-                <tr>
-                    <th>Macros</th>
-                    <th>Per 100g</th>
-                    <th>Per Serving</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        """, unsafe_allow_html=True)
-
-        # FIXED: Use columns for download button so table doesn't disappear
-        col_btn1, col_btn2 = st.columns([1, 1])
-        with col_btn1:
-            # Download JSON
-            result_str = json.dumps(data, indent=2)
-            st.download_button(
-                label="📥 Download JSON",
-                data=result_str,
-                file_name="nutrition_data.json",
-                mime="application/json",
-                use_container_width=True,
-                key="download_json"  # Add key to prevent rerun
-            )
-        with col_btn2:
-            if st.button("🔄 Process Another Image", use_container_width=True):
-                for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data"]:
-                    st.session_state[key] = None if "image" in key else False
-                st.rerun()
+    # FIXED: Stack buttons on mobile
+    col_btn1, col_btn2 = st.columns([1, 1])
+    with col_btn1:
+        # Download JSON
+        result_str = json.dumps(data, indent=2)
+        st.download_button(
+            label="📥 Download JSON",
+            data=result_str,
+            file_name="nutrition_data.json",
+            mime="application/json",
+            use_container_width=True,
+            key="download_json"  # Add key to prevent rerun
+        )
+    with col_btn2:
+        if st.button("🔄 Process Another Image", use_container_width=True):
+            for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data"]:
+                st.session_state[key] = None if "image" in key else False
+            st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ------------------------------
-# Streamlit UI
+# Streamlit UI - iPhone compatible
 # ------------------------------
-st.set_page_config(layout="wide", page_title="Nutritional Tracker")
+st.set_page_config(
+    layout="wide", 
+    page_title="Nutritional Tracker",
+    initial_sidebar_state="collapsed"
+)
+
+# Mobile viewport meta tag
+st.markdown("""
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+""", unsafe_allow_html=True)
 
 st.title("🍎 Nutritional Information Extractor")
 
@@ -166,123 +231,134 @@ for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "re
     if key not in st.session_state:
         st.session_state[key] = None if "image" in key else False
 
-# File uploader
-uploaded_file = st.file_uploader("", type=["png","jpg","jpeg"], label_visibility="collapsed")
+# File uploader - optimized for mobile
+uploaded_file = st.file_uploader(
+    "Choose a nutrition label image", 
+    type=["png","jpg","jpeg"], 
+    help="Take a clear photo of the nutrition label or select from gallery"
+)
 
 if uploaded_file:
     if st.session_state.original_image is None:
-        st.session_state.original_image = Image.open(uploaded_file).convert("RGB")
+        # FIXED: Apply iPhone orientation fix
+        image = Image.open(uploaded_file).convert("RGB")
+        image = fix_iphone_orientation(image)
+        st.session_state.original_image = image
         st.session_state.crop_confirmed = False
         st.session_state.cropped_image = None
         st.session_state.results_data = None
 
     img = st.session_state.original_image
 
-    # Step 1: Crop
+    # Step 1: Crop - optimized for mobile
     if not st.session_state.crop_confirmed:
         st.subheader("📐 Step 1: Crop the Nutrition Label")
         
-        # FIXED: Add rotation controls to reduce blankness
-        col_rot1, col_rot2, col_rot3, col_rot4 = st.columns(4)
-        with col_rot1:
-            if st.button("↺ Rotate Left", use_container_width=True):
+        # FIXED: Mobile-friendly rotation controls
+        st.markdown("**Adjust orientation:**")
+        rot_col1, rot_col2, rot_col3 = st.columns(3)
+        with rot_col1:
+            if st.button("↺ Left", use_container_width=True, help="Rotate 90° left"):
                 st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
                 st.rerun()
-        with col_rot2:
-            if st.button("↻ Rotate Right", use_container_width=True):
+        with rot_col2:
+            if st.button("↻ Right", use_container_width=True, help="Rotate 90° right"):
                 st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
                 st.rerun()
-        with col_rot3:
-            if st.button("⟳ Reset Rotation", use_container_width=True):
+        with rot_col3:
+            if st.button("Reset", use_container_width=True, help="Reset rotation"):
                 st.session_state.rotation = 0
-                st.rerun()
-        with col_rot4:
-            if st.button("🗑️ Clear Crop", use_container_width=True):
-                st.session_state.cropped_image = None
                 st.rerun()
         
         rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
         
-        # FIXED: Show instructions and preview to reduce blankness
-        st.info("🔍 **Drag to select the nutrition facts area, then click Confirm Crop**")
+        # FIXED: Mobile-friendly instructions
+        st.info("👆 **Drag to select nutrition facts area**")
         
-        col_crop1, col_crop2 = st.columns([1, 1])
+        # FIXED: Stack crop area and preview vertically on mobile
+        cropped_img = st_cropper(
+            rotated_img, 
+            realtime_update=True, 
+            box_color='#FF0000', 
+            aspect_ratio=None,
+            return_type="image",
+            key=f"cropper_{st.session_state.get('rotation', 0)}"
+        )
+        st.session_state.cropped_image = cropped_img
         
-        with col_crop1:
-            cropped_img = st_cropper(
-                rotated_img, 
-                realtime_update=True, 
-                box_color='#FF0000', 
-                aspect_ratio=None,
-                return_type="image"
-            )
-            st.session_state.cropped_image = cropped_img
+        # Show preview
+        if cropped_img and cropped_img.size != rotated_img.size:
+            st.markdown("**Preview:**")
+            st.image(cropped_img, caption="Your selection", use_container_width=True)
+            st.success("✅ Ready to crop!")
         
-        with col_crop2:
-            # FIXED: Show preview of cropped area
-            st.write("**Preview of Cropped Area:**")
-            if cropped_img and cropped_img.size != rotated_img.size:
-                # REMOVED: use_column_width parameter
-                st.image(cropped_img, caption="Your selection")
-                st.success("✅ Area selected! Click 'Confirm Crop' below to proceed.")
-            else:
-                # REMOVED: use_column_width parameter
-                st.image(rotated_img, caption="Original image - drag on left to select")
-                st.warning("👈 Drag on the left image to select nutrition facts area")
-        
-        # Confirm button at bottom
-        if st.button("✅ Confirm Crop & Continue →", type="primary", use_container_width=True):
-            if st.session_state.cropped_image and st.session_state.cropped_image.size != rotated_img.size:
-                st.session_state.crop_confirmed = True
+        # FIXED: Mobile-friendly action buttons
+        col_action1, col_action2 = st.columns(2)
+        with col_action1:
+            if st.button("🗑️ Clear", use_container_width=True, type="secondary"):
+                st.session_state.cropped_image = None
                 st.rerun()
-            else:
-                st.error("Please select an area to crop first!")
+        with col_action2:
+            if st.button("✅ Confirm Crop", use_container_width=True, type="primary"):
+                if st.session_state.cropped_image and st.session_state.cropped_image.size != rotated_img.size:
+                    st.session_state.crop_confirmed = True
+                    st.rerun()
+                else:
+                    st.error("Please select an area first!")
 
-    # Step 2: Process
+    # Step 2: Process - optimized for mobile
     elif st.session_state.crop_confirmed and not st.session_state.results_data:
         st.subheader("⚙️ Step 2: Process the Image")
         
-        # FIXED: Show preview and processing area
-        col_process1, col_process2 = st.columns([1, 1])
+        # FIXED: Stack image and form on mobile
+        st.markdown("**Selected area:**")
+        st.image(st.session_state.cropped_image, caption="Nutrition label to analyze", use_container_width=True)
         
-        with col_process1:
-            # REMOVED: use_column_width parameter
-            st.image(st.session_state.cropped_image, caption="Selected Nutrition Label")
-            if st.button("✏️ Edit Crop", use_container_width=True):
-                st.session_state.crop_confirmed = False
-                st.rerun()
+        if st.button("✏️ Edit Crop", use_container_width=True, type="secondary"):
+            st.session_state.crop_confirmed = False
+            st.rerun()
         
-        with col_process2:
-            st.markdown("### Enter Product Details")
-            barcode = st.text_input("**Barcode (Required)**", placeholder="Enter 13-digit barcode")
-            
-            st.markdown("---")
-            st.markdown("**Instructions:**")
-            st.markdown("1. Enter the 13-digit barcode")
-            st.markdown("2. Click 'Extract Nutrition Data'")
-            st.markdown("3. Wait for processing to complete")
-            
-            if st.button("🚀 Extract Nutrition Data", type="primary", use_container_width=True):
-                if not barcode or len(barcode) != 13 or not barcode.isdigit():
-                    st.error("Please enter a valid 13-digit barcode")
-                else:
-                    with st.spinner("🔍 Processing image..."):
-                        save_path = os.path.join(SAVE_DIR, f"{barcode}.jpg")
-                        st.session_state.cropped_image.save(save_path, format="JPEG")
+        st.markdown("---")
+        st.markdown("**Enter product barcode:**")
+        
+        # FIXED: Better mobile input
+        barcode = st.text_input(
+            "Barcode (13 digits)", 
+            placeholder="0000000000000",
+            label_visibility="collapsed",
+            max_chars=13,
+            help="Enter the 13-digit barcode from the product"
+        )
+        
+        # Show barcode validation
+        if barcode:
+            if len(barcode) == 13 and barcode.isdigit():
+                st.success("✓ Valid barcode format")
+            else:
+                st.error("Barcode must be 13 digits")
+        
+        # FIXED: Mobile-friendly process button
+        if st.button("🚀 Extract Nutrition Data", type="primary", use_container_width=True, disabled=not barcode):
+            if not barcode or len(barcode) != 13 or not barcode.isdigit():
+                st.error("Please enter a valid 13-digit barcode")
+            else:
+                with st.spinner("Processing image..."):
+                    save_path = os.path.join(SAVE_DIR, f"{barcode}.jpg")
+                    st.session_state.cropped_image.save(save_path, format="JPEG")
+                    
+                    try:
+                        ocr_output = run_ocr(save_path)
+                        input_text = json.dumps(ocr_output, separators=(",", ":"))
+                        inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True, max_length=2048).to(device)
+                        with torch.no_grad():
+                            outputs = model.generate(**inputs, max_new_tokens=2048, num_beams=4, early_stopping=True)
+                        decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                        repaired = repair_output(decoded)
+                        st.session_state.results_data = repaired
+                        st.rerun()
                         
-                        try:
-                            ocr_output = run_ocr(save_path)
-                            input_text = json.dumps(ocr_output, separators=(",", ":"))
-                            inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True, max_length=2048).to(device)
-                            with torch.no_grad():
-                                outputs = model.generate(**inputs, max_new_tokens=2048, num_beams=4, early_stopping=True)
-                            decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                            repaired = repair_output(decoded)
-                            st.session_state.results_data = repaired
-                            st.rerun()
-                            
-                        except Exception as e:
-                            st.error(f"❌ Analysis failed: {e}")
+                    except Exception as e:
+                        st.error(f"❌ Analysis failed: {e}")
 
     # Step 3: Display Results
     elif st.session_state.results_data:
@@ -290,21 +366,31 @@ if uploaded_file:
         display_nutrition_data(st.session_state.results_data, st.session_state.cropped_image)
 
 else:
-    st.info("📤 Upload a nutrition label image to begin analysis.")
-    # FIXED: Add more informative empty state
+    # FIXED: Better mobile-first empty state
+    st.info("📤 Upload a nutrition label image to begin.")
+    
     st.markdown("""
-    <div style="text-align: center; padding: 40px 20px; border-radius: 10px; 
+    <div style="text-align: center; padding: 30px 15px; border-radius: 10px; 
                 background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-                border: 2px dashed #667eea; margin-top: 20px;">
-        <h3 style="color: #2c3e50;">How to use this tool:</h3>
-        <div style="text-align: left; display: inline-block; margin-top: 20px;">
-            <p>📸 <strong>Step 1:</strong> Upload a clear photo of the nutrition label</p>
-            <p>✂️ <strong>Step 2:</strong> Crop the nutrition facts area</p>
-            <p>🔢 <strong>Step 3:</strong> Enter the product barcode</p>
-            <p>📊 <strong>Step 4:</strong> View and download the extracted data</p>
+                border: 2px dashed #667eea; margin: 20px 0;">
+        <div style="font-size: 48px; margin-bottom: 15px;">📸</div>
+        <h3 style="color: #2c3e50; margin-bottom: 15px;">How to use:</h3>
+        <div style="text-align: left; display: inline-block;">
+            <div style="margin: 10px 0; font-size: 14px;">
+                <strong>1.</strong> Take a clear photo of the nutrition label
+            </div>
+            <div style="margin: 10px 0; font-size: 14px;">
+                <strong>2.</strong> Crop the nutrition facts area
+            </div>
+            <div style="margin: 10px 0; font-size: 14px;">
+                <strong>3.</strong> Enter the product barcode
+            </div>
+            <div style="margin: 10px 0; font-size: 14px;">
+                <strong>4.</strong> Get instant nutrition data
+            </div>
         </div>
-        <p style="margin-top: 20px; color: #7f8c8d;">
-            Supported formats: PNG, JPG, JPEG
-        </p>
+        <div style="margin-top: 20px; font-size: 12px; color: #7f8c8d;">
+            📱 Optimized for iPhone & mobile devices
+        </div>
     </div>
     """, unsafe_allow_html=True)
