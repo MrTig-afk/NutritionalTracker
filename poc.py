@@ -3,12 +3,19 @@ import io
 import json
 import torch
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageOps
 from streamlit_cropper import st_cropper
 from transformers import AutoTokenizer, LongT5ForConditionalGeneration
 from dotenv import load_dotenv
 from ocr import run_ocr
 from repair import repair_output
+
+# IMPORTANT: For HEIC support, add these lines at the very top after imports
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    print("Warning: pillow-heif not installed. HEIC images may not work on iPhone.")
 
 load_dotenv()
 
@@ -34,10 +41,44 @@ tokenizer, model = load_model()
 
 
 # ------------------------------
-# FIXED: Nested Data Table Display
+# FIXED: Handle iPhone Image Issues
+# ------------------------------
+def process_uploaded_image(uploaded_file):
+    """
+    Process uploaded image handling iPhone-specific issues:
+    - HEIC format conversion
+    - EXIF orientation correction
+    - Color mode standardization
+    """
+    try:
+        # Read the image
+        image = Image.open(uploaded_file)
+        
+        # FIXED: Auto-rotate based on EXIF orientation (critical for iPhone)
+        image = ImageOps.exif_transpose(image)
+        
+        # Convert to RGB (handles RGBA, grayscale, etc.)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # FIXED: Resize very large images to prevent memory issues on mobile
+        max_dimension = 2000
+        if max(image.size) > max_dimension:
+            ratio = max_dimension / max(image.size)
+            new_size = tuple(int(dim * ratio) for dim in image.size)
+            image = image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        return image
+    except Exception as e:
+        st.error(f"Error processing image: {e}")
+        return None
+
+
+# ------------------------------
+# Display Nutrition Data
 # ------------------------------
 def display_nutrition_data(data, cropped_image):
-    """Display nutrition data always with all keys populated with cropped image side by side"""
+    """Display nutrition data with cropped image side by side"""
     if not isinstance(data, dict):
         st.error("Invalid data")
         return
@@ -50,9 +91,8 @@ def display_nutrition_data(data, cropped_image):
     per_serving = data.get("per_serving", {})
     serving_size = data.get("serving_size", "-")
 
-    # FIXED: Use 'calories' key instead of 'energy' to match JSON
     rows = [
-        ("Calories", ["calories"]),  # FIXED: Use 'calories' to match JSON key
+        ("Calories", ["calories"]),
         ("Total Fat", ["fat", "total_fat"]),
         ("Saturated Fat", ["saturated_fat", "saturated"]),
         ("Trans Fat", ["trans_fat", "trans"]),
@@ -72,12 +112,10 @@ def display_nutrition_data(data, cropped_image):
         for k in keys:
             if k in per_100g and per_100g[k] is not None:
                 val_100g = per_100g[k]
-                # Add "kCal" to calories if not present
                 if label == "Calories" and "kcal" not in str(val_100g).lower():
                     val_100g = f"{val_100g}kCal"
             if k in per_serving and per_serving[k] is not None:
                 val_serving = per_serving[k]
-                # Add "kCal" to calories if not present
                 if label == "Calories" and "kcal" not in str(val_serving).lower():
                     val_serving = f"{val_serving}kCal"
         rows_html += f"<tr><td>{label}</td><td>{val_100g}</td><td>{val_serving}</td></tr>"
@@ -86,7 +124,6 @@ def display_nutrition_data(data, cropped_image):
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        # REMOVED: use_column_width parameter
         st.image(cropped_image, caption="Cropped Nutrition Label")
     
     with col2:
@@ -134,10 +171,8 @@ def display_nutrition_data(data, cropped_image):
         </table>
         """, unsafe_allow_html=True)
 
-        # FIXED: Use columns for download button so table doesn't disappear
         col_btn1, col_btn2 = st.columns([1, 1])
         with col_btn1:
-            # Download JSON
             result_str = json.dumps(data, indent=2)
             st.download_button(
                 label="📥 Download JSON",
@@ -145,7 +180,7 @@ def display_nutrition_data(data, cropped_image):
                 file_name="nutrition_data.json",
                 mime="application/json",
                 use_container_width=True,
-                key="download_json"  # Add key to prevent rerun
+                key="download_json"
             )
         with col_btn2:
             if st.button("🔄 Process Another Image", use_container_width=True):
@@ -166,12 +201,21 @@ for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "re
     if key not in st.session_state:
         st.session_state[key] = None if "image" in key else False
 
-# File uploader
-uploaded_file = st.file_uploader("", type=["png","jpg","jpeg"], label_visibility="collapsed")
+# FIXED: Add HEIC to supported file types for iPhone
+uploaded_file = st.file_uploader(
+    "", 
+    type=["png", "jpg", "jpeg", "heic", "heif"],
+    label_visibility="collapsed"
+)
 
 if uploaded_file:
     if st.session_state.original_image is None:
-        st.session_state.original_image = Image.open(uploaded_file).convert("RGB")
+        # FIXED: Use new image processing function
+        processed_img = process_uploaded_image(uploaded_file)
+        if processed_img is None:
+            st.stop()
+        
+        st.session_state.original_image = processed_img
         st.session_state.crop_confirmed = False
         st.session_state.cropped_image = None
         st.session_state.results_data = None
@@ -182,7 +226,6 @@ if uploaded_file:
     if not st.session_state.crop_confirmed:
         st.subheader("📐 Step 1: Crop the Nutrition Label")
         
-        # FIXED: Add rotation controls to reduce blankness
         col_rot1, col_rot2, col_rot3, col_rot4 = st.columns(4)
         with col_rot1:
             if st.button("↺ Rotate Left", use_container_width=True):
@@ -203,34 +246,31 @@ if uploaded_file:
         
         rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
         
-        # FIXED: Show instructions and preview to reduce blankness
         st.info("🔍 **Drag to select the nutrition facts area, then click Confirm Crop**")
         
         col_crop1, col_crop2 = st.columns([1, 1])
         
         with col_crop1:
+            # FIXED: Add key to prevent cropper issues on iOS
             cropped_img = st_cropper(
                 rotated_img, 
                 realtime_update=True, 
                 box_color='#FF0000', 
                 aspect_ratio=None,
-                return_type="image"
+                return_type="image",
+                key=f"cropper_{st.session_state.get('rotation', 0)}"
             )
             st.session_state.cropped_image = cropped_img
         
         with col_crop2:
-            # FIXED: Show preview of cropped area
             st.write("**Preview of Cropped Area:**")
             if cropped_img and cropped_img.size != rotated_img.size:
-                # REMOVED: use_column_width parameter
                 st.image(cropped_img, caption="Your selection")
                 st.success("✅ Area selected! Click 'Confirm Crop' below to proceed.")
             else:
-                # REMOVED: use_column_width parameter
                 st.image(rotated_img, caption="Original image - drag on left to select")
                 st.warning("👈 Drag on the left image to select nutrition facts area")
         
-        # Confirm button at bottom
         if st.button("✅ Confirm Crop & Continue →", type="primary", use_container_width=True):
             if st.session_state.cropped_image and st.session_state.cropped_image.size != rotated_img.size:
                 st.session_state.crop_confirmed = True
@@ -242,11 +282,9 @@ if uploaded_file:
     elif st.session_state.crop_confirmed and not st.session_state.results_data:
         st.subheader("⚙️ Step 2: Process the Image")
         
-        # FIXED: Show preview and processing area
         col_process1, col_process2 = st.columns([1, 1])
         
         with col_process1:
-            # REMOVED: use_column_width parameter
             st.image(st.session_state.cropped_image, caption="Selected Nutrition Label")
             if st.button("✏️ Edit Crop", use_container_width=True):
                 st.session_state.crop_confirmed = False
@@ -291,7 +329,6 @@ if uploaded_file:
 
 else:
     st.info("📤 Upload a nutrition label image to begin analysis.")
-    # FIXED: Add more informative empty state
     st.markdown("""
     <div style="text-align: center; padding: 40px 20px; border-radius: 10px; 
                 background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
@@ -304,7 +341,7 @@ else:
             <p>📊 <strong>Step 4:</strong> View and download the extracted data</p>
         </div>
         <p style="margin-top: 20px; color: #7f8c8d;">
-            Supported formats: PNG, JPG, JPEG
+            Supported formats: PNG, JPG, JPEG, HEIC (iPhone)
         </p>
     </div>
     """, unsafe_allow_html=True)
