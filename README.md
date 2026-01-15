@@ -4,7 +4,7 @@ A Generative AI application that extracts structured nutritional information fro
 
 ## 🚀 Live Demo
 
-**Click here to try the App on Streamlit Cloud([Here!](https://nutritionaltracker.streamlit.app/))**
+**Click here to try the App on Streamlit Cloud([Here!](https://nutritional-tracker.streamlit.app/))**
 
 ---
 
