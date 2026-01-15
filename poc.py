@@ -38,7 +38,7 @@ def load_model():
 tokenizer, model = load_model()
 
 # ------------------------------
-# Image Processing (iPhone/Android Fixes)
+# Image Processing
 # ------------------------------
 def process_uploaded_image(uploaded_file):
     try:
@@ -187,14 +187,11 @@ uploaded_file = st.file_uploader(
 # FIXED: Logic for Single-Upload & No Random Balloons
 # ------------------------------
 if uploaded_file:
-    # Create a stable ID based on the file content/metadata only
-    # Do NOT use time.time() here, or it will change every time you click a button
+    # Create a stable ID based on file content only (Fixes balloons on button click)
     file_signature = f"{uploaded_file.name}-{uploaded_file.size}-{uploaded_file.type}"
     
-    # Check if this exact file has already been processed in this session
+    # Process only if this specific file hasn't been processed yet (Fixes double upload)
     if st.session_state.last_processed_file != file_signature:
-        # It's a NEW file (or the first one). Process it.
-        
         with st.spinner("📸 Processing image..."):
             processed_img = process_uploaded_image(uploaded_file)
             
@@ -207,7 +204,7 @@ if uploaded_file:
                 st.session_state.rotation = 0
                 st.session_state.zoom_level = 1.0
                 
-                # Update the tracker so we don't process it again next click
+                # Update tracker so we don't re-process on next button click
                 st.session_state.last_processed_file = file_signature
                 st.session_state.upload_counter += 1
                 
@@ -219,10 +216,6 @@ if uploaded_file:
                 st.rerun()
             else:
                 st.error("Failed to process image.")
-    else:
-        # This is the SAME file. Do nothing, just show the UI.
-        # This prevents balloons from showing when you click buttons.
-        pass
 
     # ------------------------------
     # App Logic (Runs only if image is loaded)
@@ -246,6 +239,7 @@ if uploaded_file:
                 st.rerun()
             if r4.button("🗑️ Clear", use_container_width=True):
                 st.session_state.last_processed_file = None
+                st.session_state.original_image = None
                 st.rerun()
             
             rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
@@ -253,6 +247,7 @@ if uploaded_file:
             c1, c2 = st.columns([1, 1])
             with c1:
                 zoomed_img = mobile_crop_helper(rotated_img)
+                # Unique key prevents crop box from jumping around
                 cropped_img = st_cropper(
                     zoomed_img, 
                     realtime_update=True, 
