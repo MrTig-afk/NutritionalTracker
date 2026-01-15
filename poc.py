@@ -51,8 +51,14 @@ def process_uploaded_image(uploaded_file):
     - Color mode standardization
     """
     try:
-        # Read the image
-        image = Image.open(uploaded_file)
+        # CRITICAL: Reset file pointer for Android camera uploads
+        uploaded_file.seek(0)
+        
+        # Read the file content into bytes first (more reliable for camera uploads)
+        file_bytes = uploaded_file.read()
+        
+        # Create image from bytes
+        image = Image.open(io.BytesIO(file_bytes))
         
         # FIXED: Auto-rotate based on EXIF orientation (critical for iPhone)
         image = ImageOps.exif_transpose(image)
@@ -68,9 +74,14 @@ def process_uploaded_image(uploaded_file):
             new_size = tuple(int(dim * ratio) for dim in image.size)
             image = image.resize(new_size, Image.Resampling.LANCZOS)
         
+        print(f"✅ Image processed successfully: {image.size}, mode: {image.mode}")
         return image
+        
     except Exception as e:
+        print(f"❌ Error in process_uploaded_image: {e}")
         st.error(f"Error processing image: {e}")
+        import traceback
+        st.code(traceback.format_exc())
         return None
 
 
@@ -253,42 +264,59 @@ for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "re
     if key not in st.session_state:
         st.session_state[key] = None if "image" in key else (False if "confirmed" in key else 1.0)
 
-# FIXED: Add accept parameter for better mobile camera support
+# FIXED: Better mobile camera support with explicit accept parameter
 uploaded_file = st.file_uploader(
     "📷 Upload or take a photo of the nutrition label", 
-    type=["png", "jpg", "jpeg", "heic", "heif"],
+    type=["png", "jpg", "jpeg", "heic", "heif", "webp"],  # Added webp for Android
+    accept_multiple_files=False,
     label_visibility="visible",
-    help="You can upload from gallery or take a new photo",
+    help="📸 Tap to upload from gallery or take a new photo with camera",
     key="file_uploader"
 )
 
-# FIXED: Track file changes properly
+# FIXED: Better file tracking that works with Android camera
 if uploaded_file:
-    # Generate unique file ID based on name and size
-    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+    # Debug info (remove after testing)
+    st.write(f"🔍 Debug: File name: `{uploaded_file.name}`, Size: `{uploaded_file.size}` bytes, Type: `{uploaded_file.type}`")
+    
+    # Generate unique file ID - use both name, size, and type
+    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}_{uploaded_file.type}"
     
     # Only process if it's a NEW file
     if st.session_state.file_id != current_file_id:
+        st.info(f"🆕 New file detected! Processing...")
         st.session_state.file_id = current_file_id
         
         # Process the new image
         with st.spinner("📸 Processing uploaded image..."):
-            processed_img = process_uploaded_image(uploaded_file)
-            
-            if processed_img is None:
-                st.error("Failed to process image. Please try again.")
+            try:
+                # Reset the file pointer to beginning (important for Android)
+                uploaded_file.seek(0)
+                
+                processed_img = process_uploaded_image(uploaded_file)
+                
+                if processed_img is None:
+                    st.error("❌ Failed to process image. Please try again.")
+                    st.stop()
+                
+                # Reset all state for new image
+                st.session_state.original_image = processed_img
+                st.session_state.crop_confirmed = False
+                st.session_state.cropped_image = None
+                st.session_state.results_data = None
+                st.session_state.rotation = 0
+                st.session_state.zoom_level = 1.0
+                
+                st.success("✅ Image uploaded successfully!")
+                st.balloons()
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Error processing image: {e}")
+                st.exception(e)
                 st.stop()
-            
-            # Reset all state for new image
-            st.session_state.original_image = processed_img
-            st.session_state.crop_confirmed = False
-            st.session_state.cropped_image = None
-            st.session_state.results_data = None
-            st.session_state.rotation = 0
-            st.session_state.zoom_level = 1.0
-        
-        st.success("✅ Image uploaded successfully!")
-        st.rerun()
+    else:
+        st.info("ℹ️ Using previously uploaded image")
 
     img = st.session_state.original_image
 
