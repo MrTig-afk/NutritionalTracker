@@ -3,7 +3,7 @@ import io
 import json
 import torch
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 from streamlit_cropper import st_cropper
 from transformers import AutoTokenizer, LongT5ForConditionalGeneration
 from dotenv import load_dotenv
@@ -38,30 +38,53 @@ def load_model():
 tokenizer, model = load_model()
 
 # ------------------------------
-# Image Processing
+# Image Processing & Quality Booster
 # ------------------------------
-def process_uploaded_image(uploaded_file):
+def process_image(image_file, source_type="upload"):
     try:
-        # CRITICAL: Reset file pointer for Android camera uploads
-        uploaded_file.seek(0)
-        file_bytes = uploaded_file.read()
+        # Reset file pointer
+        image_file.seek(0)
+        file_bytes = image_file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # Auto-rotate (Critical for iPhone)
+        # 1. Fix Orientation (iPhone/Android rotation issues)
         image = ImageOps.exif_transpose(image)
         
-        # Convert to RGB
+        # 2. Convert to RGB
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Resize if too huge (Prevents crash on mobile)
-        max_dimension = 2000
-        if max(image.size) > max_dimension:
-            ratio = max_dimension / max(image.size)
+        width, height = image.size
+        
+        # 3. SMART ENHANCEMENT LOGIC
+        if source_type == "camera" or max(width, height) < 1200:
+            # Case A: Low Quality / Webcam (st.camera_input)
+            # Upscale and Sharpen to make text readable for OCR
+            
+            # Upscale 2x
+            new_size = (int(width * 2), int(height * 2))
+            image = image.resize(new_size, Image.Resampling.BICUBIC)
+            
+            # Sharpen edges (Clarifies text)
+            image = image.filter(ImageFilter.SHARPEN)
+            
+            # Enhance Contrast (Separates text from background)
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(1.4)  # +40% contrast
+            
+            # Enhance Sharpness again slightly
+            enhancer_sharp = ImageEnhance.Sharpness(image)
+            image = enhancer_sharp.enhance(1.5)
+
+        elif max(width, height) > 2000:
+            # Case B: Huge Image (Native Camera Upload)
+            # Resize down slightly to save RAM/Processing time
+            ratio = 2000 / max(width, height)
             new_size = tuple(int(dim * ratio) for dim in image.size)
             image = image.resize(new_size, Image.Resampling.LANCZOS)
-        
+            
         return image
+
     except Exception as e:
         st.error(f"Error processing image: {e}")
         return None
@@ -166,7 +189,7 @@ def mobile_crop_helper(image):
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 st.title("🍎 Nutritional Information Extractor")
 
-# Clean up any potential crash-causing state
+# Crash Prevention: Clear legacy time variables if they exist
 if "last_processed_time" in st.session_state:
     del st.session_state["last_processed_time"]
 
@@ -183,49 +206,51 @@ for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "re
 # ------------------------------
 # INPUT METHOD SELECTION
 # ------------------------------
-# This toggle allows users to stay in the browser (Camera) or upload from gallery
 input_method = st.radio(
     "Choose Input Method:", 
-    ["📤 Upload File (Gallery/Desktop)", "📸 Take Photo (In-App Camera)"],
+    ["📤 Upload (Highest Quality)", "📸 In-App Camera (Stable)"],
     horizontal=True,
-    help="Use 'Take Photo' on Android to prevent the app from reloading."
+    help="Use 'In-App Camera' if your browser crashes when taking photos."
 )
 
-uploaded_file = None
-
-if input_method == "📤 Upload File (Gallery/Desktop)":
+if input_method == "📤 Upload (Highest Quality)":
+    st.info("💡 **Android Tip:** If the app reloads/crashes, take the photo FIRST, then select 'Files/Gallery' here.")
     uploaded_file = st.file_uploader(
         "Upload Image", 
         type=["png", "jpg", "jpeg", "heic", "heif", "webp"],
         key="file_uploader"
     )
+    source = "upload"
 else:
-    # Camera Input keeps the user IN the browser, preventing the 'reload' crash
-    uploaded_file = st.camera_input("Capture Nutrition Label", key="camera_input")
+    st.warning("⚡ **Stabilized Mode:** Uses webcam. We will automatically sharpen the image for better results.")
+    uploaded_file = st.camera_input("Capture Label", key="camera_input")
+    source = "camera"
 
 # ------------------------------
 # PROCESSING LOGIC
 # ------------------------------
 if uploaded_file:
-    # Signature check to prevent reprocessing the same file on button clicks
+    # Signature check to prevent random re-processing
     file_signature = f"{uploaded_file.name}-{uploaded_file.size}-{uploaded_file.type}"
     
     if st.session_state.last_processed_file != file_signature:
-        with st.spinner("📸 Processing image..."):
-            processed_img = process_uploaded_image(uploaded_file)
+        with st.spinner("Processing & Enhancing Image..."):
+            processed_img = process_image(uploaded_file, source_type=source)
             
             if processed_img:
                 st.session_state.original_image = processed_img
+                # Reset downstream steps
                 st.session_state.crop_confirmed = False
                 st.session_state.cropped_image = None
                 st.session_state.results_data = None
                 st.session_state.rotation = 0
                 st.session_state.zoom_level = 1.0
                 
+                # Mark as processed
                 st.session_state.last_processed_file = file_signature
                 st.session_state.upload_counter += 1
                 
-                st.success("✅ Image loaded successfully!")
+                st.success("✅ Image loaded!")
                 st.rerun()
             else:
                 st.error("Failed to process image.")
