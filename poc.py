@@ -183,10 +183,59 @@ def display_nutrition_data(data, cropped_image):
                 key="download_json"
             )
         with col_btn2:
-            if st.button("🔄 Process Another Image", use_container_width=True):
-                for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data"]:
-                    st.session_state[key] = None if "image" in key else False
+            # FIXED: Clear uploaded file properly
+            if st.button("🔄 Process Another Image", use_container_width=True, key="reset_btn"):
+                # Clear ALL session state including file uploader
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
                 st.rerun()
+
+
+# ------------------------------
+# FIXED: Mobile-friendly cropping helper
+# ------------------------------
+def mobile_crop_helper(image):
+    """
+    Provide mobile-friendly cropping with zoom controls
+    """
+    st.markdown("""
+    <style>
+        /* Make cropper more mobile-friendly */
+        .stCropper > div {
+            touch-action: pan-x pan-y pinch-zoom !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Add zoom controls for mobile
+    st.markdown("**🔍 Zoom Controls (for mobile users):**")
+    zoom_col1, zoom_col2, zoom_col3 = st.columns(3)
+    
+    with zoom_col1:
+        if st.button("➕ Zoom In", use_container_width=True, key="zoom_in"):
+            current_zoom = st.session_state.get("zoom_level", 1.0)
+            st.session_state.zoom_level = min(current_zoom + 0.2, 3.0)
+            st.rerun()
+    
+    with zoom_col2:
+        if st.button("➖ Zoom Out", use_container_width=True, key="zoom_out"):
+            current_zoom = st.session_state.get("zoom_level", 1.0)
+            st.session_state.zoom_level = max(current_zoom - 0.2, 0.5)
+            st.rerun()
+    
+    with zoom_col3:
+        if st.button("🔄 Reset Zoom", use_container_width=True, key="reset_zoom"):
+            st.session_state.zoom_level = 1.0
+            st.rerun()
+    
+    # Apply zoom
+    zoom_level = st.session_state.get("zoom_level", 1.0)
+    if zoom_level != 1.0:
+        new_size = tuple(int(dim * zoom_level) for dim in image.size)
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+        st.info(f"Current zoom: {int(zoom_level * 100)}%")
+    
+    return image
 
 
 # ------------------------------
@@ -196,29 +245,50 @@ st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 
 st.title("🍎 Nutritional Information Extractor")
 
-# Initialize session state
-for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data"]:
-    if key not in st.session_state:
-        st.session_state[key] = None if "image" in key else False
+# FIXED: Initialize session state with unique file ID tracking
+if "file_id" not in st.session_state:
+    st.session_state.file_id = None
 
-# FIXED: Add HEIC to supported file types for iPhone
+for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data", "zoom_level"]:
+    if key not in st.session_state:
+        st.session_state[key] = None if "image" in key else (False if "confirmed" in key else 1.0)
+
+# FIXED: Add accept parameter for better mobile camera support
 uploaded_file = st.file_uploader(
-    "", 
+    "📷 Upload or take a photo of the nutrition label", 
     type=["png", "jpg", "jpeg", "heic", "heif"],
-    label_visibility="collapsed"
+    label_visibility="visible",
+    help="You can upload from gallery or take a new photo",
+    key="file_uploader"
 )
 
+# FIXED: Track file changes properly
 if uploaded_file:
-    if st.session_state.original_image is None:
-        # FIXED: Use new image processing function
-        processed_img = process_uploaded_image(uploaded_file)
-        if processed_img is None:
-            st.stop()
+    # Generate unique file ID based on name and size
+    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+    
+    # Only process if it's a NEW file
+    if st.session_state.file_id != current_file_id:
+        st.session_state.file_id = current_file_id
         
-        st.session_state.original_image = processed_img
-        st.session_state.crop_confirmed = False
-        st.session_state.cropped_image = None
-        st.session_state.results_data = None
+        # Process the new image
+        with st.spinner("📸 Processing uploaded image..."):
+            processed_img = process_uploaded_image(uploaded_file)
+            
+            if processed_img is None:
+                st.error("Failed to process image. Please try again.")
+                st.stop()
+            
+            # Reset all state for new image
+            st.session_state.original_image = processed_img
+            st.session_state.crop_confirmed = False
+            st.session_state.cropped_image = None
+            st.session_state.results_data = None
+            st.session_state.rotation = 0
+            st.session_state.zoom_level = 1.0
+        
+        st.success("✅ Image uploaded successfully!")
+        st.rerun()
 
     img = st.session_state.original_image
 
@@ -226,22 +296,24 @@ if uploaded_file:
     if not st.session_state.crop_confirmed:
         st.subheader("📐 Step 1: Crop the Nutrition Label")
         
+        # Rotation controls
         col_rot1, col_rot2, col_rot3, col_rot4 = st.columns(4)
         with col_rot1:
-            if st.button("↺ Rotate Left", use_container_width=True):
+            if st.button("↺ Rotate Left", use_container_width=True, key="rot_left"):
                 st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
                 st.rerun()
         with col_rot2:
-            if st.button("↻ Rotate Right", use_container_width=True):
+            if st.button("↻ Rotate Right", use_container_width=True, key="rot_right"):
                 st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
                 st.rerun()
         with col_rot3:
-            if st.button("⟳ Reset Rotation", use_container_width=True):
+            if st.button("⟳ Reset Rotation", use_container_width=True, key="rot_reset"):
                 st.session_state.rotation = 0
                 st.rerun()
         with col_rot4:
-            if st.button("🗑️ Clear Crop", use_container_width=True):
+            if st.button("🗑️ Clear Crop", use_container_width=True, key="clear_crop"):
                 st.session_state.cropped_image = None
+                st.session_state.zoom_level = 1.0
                 st.rerun()
         
         rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
@@ -251,15 +323,25 @@ if uploaded_file:
         col_crop1, col_crop2 = st.columns([1, 1])
         
         with col_crop1:
-            # FIXED: Add key to prevent cropper issues on iOS
+            # FIXED: Apply zoom for mobile-friendly cropping
+            zoomed_img = mobile_crop_helper(rotated_img)
+            
+            # Cropper with unique key
             cropped_img = st_cropper(
-                rotated_img, 
+                zoomed_img, 
                 realtime_update=True, 
                 box_color='#FF0000', 
                 aspect_ratio=None,
                 return_type="image",
-                key=f"cropper_{st.session_state.get('rotation', 0)}"
+                key=f"cropper_{st.session_state.get('rotation', 0)}_{st.session_state.get('zoom_level', 1.0)}"
             )
+            
+            # Scale back if zoomed
+            if st.session_state.get("zoom_level", 1.0) != 1.0:
+                zoom = st.session_state.zoom_level
+                original_size = tuple(int(dim / zoom) for dim in cropped_img.size)
+                cropped_img = cropped_img.resize(original_size, Image.Resampling.LANCZOS)
+            
             st.session_state.cropped_image = cropped_img
         
         with col_crop2:
@@ -271,7 +353,7 @@ if uploaded_file:
                 st.image(rotated_img, caption="Original image - drag on left to select")
                 st.warning("👈 Drag on the left image to select nutrition facts area")
         
-        if st.button("✅ Confirm Crop & Continue →", type="primary", use_container_width=True):
+        if st.button("✅ Confirm Crop & Continue →", type="primary", use_container_width=True, key="confirm_crop"):
             if st.session_state.cropped_image and st.session_state.cropped_image.size != rotated_img.size:
                 st.session_state.crop_confirmed = True
                 st.rerun()
@@ -286,13 +368,13 @@ if uploaded_file:
         
         with col_process1:
             st.image(st.session_state.cropped_image, caption="Selected Nutrition Label")
-            if st.button("✏️ Edit Crop", use_container_width=True):
+            if st.button("✏️ Edit Crop", use_container_width=True, key="edit_crop"):
                 st.session_state.crop_confirmed = False
                 st.rerun()
         
         with col_process2:
             st.markdown("### Enter Product Details")
-            barcode = st.text_input("**Barcode (Required)**", placeholder="Enter 13-digit barcode")
+            barcode = st.text_input("**Barcode (Required)**", placeholder="Enter 13-digit barcode", key="barcode_input")
             
             st.markdown("---")
             st.markdown("**Instructions:**")
@@ -300,7 +382,7 @@ if uploaded_file:
             st.markdown("2. Click 'Extract Nutrition Data'")
             st.markdown("3. Wait for processing to complete")
             
-            if st.button("🚀 Extract Nutrition Data", type="primary", use_container_width=True):
+            if st.button("🚀 Extract Nutrition Data", type="primary", use_container_width=True, key="extract_btn"):
                 if not barcode or len(barcode) != 13 or not barcode.isdigit():
                     st.error("Please enter a valid 13-digit barcode")
                 else:
@@ -321,6 +403,7 @@ if uploaded_file:
                             
                         except Exception as e:
                             st.error(f"❌ Analysis failed: {e}")
+                            st.exception(e)
 
     # Step 3: Display Results
     elif st.session_state.results_data:
@@ -336,12 +419,15 @@ else:
         <h3 style="color: #2c3e50;">How to use this tool:</h3>
         <div style="text-align: left; display: inline-block; margin-top: 20px;">
             <p>📸 <strong>Step 1:</strong> Upload a clear photo of the nutrition label</p>
-            <p>✂️ <strong>Step 2:</strong> Crop the nutrition facts area</p>
+            <p>✂️ <strong>Step 2:</strong> Crop the nutrition facts area (use zoom controls on mobile)</p>
             <p>🔢 <strong>Step 3:</strong> Enter the product barcode</p>
             <p>📊 <strong>Step 4:</strong> View and download the extracted data</p>
         </div>
         <p style="margin-top: 20px; color: #7f8c8d;">
             Supported formats: PNG, JPG, JPEG, HEIC (iPhone)
+        </p>
+        <p style="margin-top: 10px; color: #95a5a6; font-size: 0.9em;">
+            💡 <strong>Mobile Tip:</strong> Use the zoom controls to make cropping easier!
         </p>
     </div>
     """, unsafe_allow_html=True)
