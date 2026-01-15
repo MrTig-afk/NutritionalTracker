@@ -1,11 +1,17 @@
 [server]
-# Prevents the app from checking connection health too aggressively
+# Existing settings
 enableCORS = false
 enableXsrfProtection = false
+maxUploadSize = 800
 
-# Allow larger payloads (helps with high-res Android photos)
-maxUploadSize = 200
+# NEW: Increase the WebSocket ping interval and timeout
+# This tells Streamlit: "Don't disconnect if you don't hear from the phone for a while."
+# Default is usually much lower (around 1s-10s).
+heartbeatTimeout = 120    # Wait 2 minutes before killing the connection
 
 [browser]
-# stopping usage stats sometimes speeds up the re-connection
 gatherUsageStats = false
+
+# NEW: Force the server to keep the session data longer
+[runner]
+magicEnabled = false      # Slight performance boost
