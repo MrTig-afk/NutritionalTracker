@@ -3,7 +3,7 @@ import io
 import json
 import torch
 import streamlit as st
-from PIL import Image, ImageOps, ImageEnhance, ImageFilter
+from PIL import Image, ImageOps
 from streamlit_cropper import st_cropper
 from transformers import AutoTokenizer, LongT5ForConditionalGeneration
 from dotenv import load_dotenv
@@ -15,7 +15,7 @@ try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
 except ImportError:
-    print("Warning: pillow-heif not installed. HEIC images may not work on iPhone.")
+    pass # HEIC support optional on Android
 
 load_dotenv()
 
@@ -38,59 +38,36 @@ def load_model():
 tokenizer, model = load_model()
 
 # ------------------------------
-# Image Processing & Quality Booster
+# Image Processing
 # ------------------------------
-def process_image(image_file, source_type="upload"):
+def process_uploaded_image(uploaded_file):
     try:
-        # Reset file pointer
-        image_file.seek(0)
-        file_bytes = image_file.read()
+        # CRITICAL: Reset file pointer for Android camera uploads
+        uploaded_file.seek(0)
+        file_bytes = uploaded_file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # 1. Fix Orientation (iPhone/Android rotation issues)
+        # Auto-rotate (Critical for iPhone/Android)
         image = ImageOps.exif_transpose(image)
         
-        # 2. Convert to RGB
+        # Convert to RGB
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        width, height = image.size
-        
-        # 3. SMART ENHANCEMENT LOGIC
-        if source_type == "camera" or max(width, height) < 1200:
-            # Case A: Low Quality / Webcam (st.camera_input)
-            # Upscale and Sharpen to make text readable for OCR
-            
-            # Upscale 2x
-            new_size = (int(width * 2), int(height * 2))
-            image = image.resize(new_size, Image.Resampling.BICUBIC)
-            
-            # Sharpen edges (Clarifies text)
-            image = image.filter(ImageFilter.SHARPEN)
-            
-            # Enhance Contrast (Separates text from background)
-            enhancer = ImageEnhance.Contrast(image)
-            image = enhancer.enhance(1.4)  # +40% contrast
-            
-            # Enhance Sharpness again slightly
-            enhancer_sharp = ImageEnhance.Sharpness(image)
-            image = enhancer_sharp.enhance(1.5)
-
-        elif max(width, height) > 2000:
-            # Case B: Huge Image (Native Camera Upload)
-            # Resize down slightly to save RAM/Processing time
-            ratio = 2000 / max(width, height)
+        # Resize if too huge (Prevents crash on mobile RAM)
+        max_dimension = 2000
+        if max(image.size) > max_dimension:
+            ratio = max_dimension / max(image.size)
             new_size = tuple(int(dim * ratio) for dim in image.size)
             image = image.resize(new_size, Image.Resampling.LANCZOS)
-            
+        
         return image
-
     except Exception as e:
         st.error(f"Error processing image: {e}")
         return None
 
 # ------------------------------
-# Display Data Helper
+# Display Helper
 # ------------------------------
 def display_nutrition_data(data, cropped_image):
     if not isinstance(data, dict):
@@ -189,7 +166,7 @@ def mobile_crop_helper(image):
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 st.title("🍎 Nutritional Information Extractor")
 
-# Crash Prevention: Clear legacy time variables if they exist
+# Crash Prevention
 if "last_processed_time" in st.session_state:
     del st.session_state["last_processed_time"]
 
@@ -204,38 +181,25 @@ for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "re
         st.session_state[key] = None if "image" in key else (False if "confirmed" in key else 1.0)
 
 # ------------------------------
-# INPUT METHOD SELECTION
+# FILE UPLOADER (Native)
 # ------------------------------
-input_method = st.radio(
-    "Choose Input Method:", 
-    ["📤 Upload (Highest Quality)", "📸 In-App Camera (Stable)"],
-    horizontal=True,
-    help="Use 'In-App Camera' if your browser crashes when taking photos."
+uploaded_file = st.file_uploader(
+    "📷 Upload or take a photo", 
+    type=["png", "jpg", "jpeg", "heic", "heif", "webp"],
+    accept_multiple_files=False,
+    key="file_uploader"
 )
 
-if input_method == "📤 Upload (Highest Quality)":
-    st.info("💡 **Android Tip:** If the app reloads/crashes, take the photo FIRST, then select 'Files/Gallery' here.")
-    uploaded_file = st.file_uploader(
-        "Upload Image", 
-        type=["png", "jpg", "jpeg", "heic", "heif", "webp"],
-        key="file_uploader"
-    )
-    source = "upload"
-else:
-    st.warning("⚡ **Stabilized Mode:** Uses webcam. We will automatically sharpen the image for better results.")
-    uploaded_file = st.camera_input("Capture Label", key="camera_input")
-    source = "camera"
-
 # ------------------------------
-# PROCESSING LOGIC
+# LOGIC
 # ------------------------------
 if uploaded_file:
-    # Signature check to prevent random re-processing
+    # Stable signature check
     file_signature = f"{uploaded_file.name}-{uploaded_file.size}-{uploaded_file.type}"
     
     if st.session_state.last_processed_file != file_signature:
-        with st.spinner("Processing & Enhancing Image..."):
-            processed_img = process_image(uploaded_file, source_type=source)
+        with st.spinner("📸 Processing image..."):
+            processed_img = process_uploaded_image(uploaded_file)
             
             if processed_img:
                 st.session_state.original_image = processed_img
@@ -250,13 +214,13 @@ if uploaded_file:
                 st.session_state.last_processed_file = file_signature
                 st.session_state.upload_counter += 1
                 
-                st.success("✅ Image loaded!")
+                st.success("✅ Image uploaded!")
                 st.rerun()
             else:
                 st.error("Failed to process image.")
 
     # ------------------------------
-    # App Logic (Runs if image is loaded)
+    # App runs if image is loaded
     # ------------------------------
     if st.session_state.original_image:
         img = st.session_state.original_image
@@ -342,4 +306,4 @@ if uploaded_file:
             display_nutrition_data(st.session_state.results_data, st.session_state.cropped_image)
 
 else:
-    st.info("👆 Choose an input method to start.")
+    st.info("👆 Upload an image to start.")

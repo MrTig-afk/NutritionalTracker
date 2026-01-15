@@ -1,0 +1,11 @@
+[server]
+# Prevents the app from checking connection health too aggressively
+enableCORS = false
+enableXsrfProtection = false
+
+# Allow larger payloads (helps with high-res Android photos)
+maxUploadSize = 200
+
+[browser]
+# stopping usage stats sometimes speeds up the re-connection
+gatherUsageStats = false
