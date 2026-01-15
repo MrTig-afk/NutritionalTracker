@@ -137,30 +137,6 @@ def display_nutrition_data(data, cropped_image):
                 st.rerun()
 
 # ------------------------------
-# Mobile Crop Helper
-# ------------------------------
-def mobile_crop_helper(image):
-    st.markdown("""<style>.stCropper > div { touch-action: pan-x pan-y pinch-zoom !important; }</style>""", unsafe_allow_html=True)
-    
-    st.markdown("**🔍 Zoom (Mobile):**")
-    z1, z2, z3 = st.columns(3)
-    if z1.button("➕ In", use_container_width=True):
-        st.session_state.zoom_level = min(st.session_state.get("zoom_level", 1.0) + 0.2, 3.0)
-        st.rerun()
-    if z2.button("➖ Out", use_container_width=True):
-        st.session_state.zoom_level = max(st.session_state.get("zoom_level", 1.0) - 0.2, 0.5)
-        st.rerun()
-    if z3.button("🔄 Reset", use_container_width=True):
-        st.session_state.zoom_level = 1.0
-        st.rerun()
-    
-    zoom = st.session_state.get("zoom_level", 1.0)
-    if zoom != 1.0:
-        new_size = tuple(int(dim * zoom) for dim in image.size)
-        image = image.resize(new_size, Image.Resampling.LANCZOS)
-    return image
-
-# ------------------------------
 # Main UI
 # ------------------------------
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
@@ -229,39 +205,66 @@ if uploaded_file:
         if not st.session_state.crop_confirmed:
             st.subheader("1️⃣ Crop Label")
             
-            r1, r2, r3, r4 = st.columns(4)
-            if r1.button("↺ Left", use_container_width=True):
-                st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
-                st.rerun()
-            if r2.button("↻ Right", use_container_width=True):
-                st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
-                st.rerun()
-            if r3.button("Reset", use_container_width=True):
-                st.session_state.rotation = 0
-                st.rerun()
-            if r4.button("🗑️ Clear", use_container_width=True):
-                st.session_state.last_processed_file = None
-                st.session_state.original_image = None
-                st.rerun()
+            # --- REPLACED BUTTONS WITH SLIDER CONTROLS ---
+            control_col1, control_col2 = st.columns([2, 1])
             
+            with control_col1:
+                # Slider for Zoom
+                zoom_val = st.slider(
+                    "🔍 Zoom Level", 
+                    min_value=1.0, 
+                    max_value=3.0, 
+                    value=st.session_state.get("zoom_level", 1.0),
+                    step=0.1,
+                    key="zoom_slider"
+                )
+                # Update session state if slider moved
+                if zoom_val != st.session_state.get("zoom_level", 1.0):
+                    st.session_state.zoom_level = zoom_val
+                    st.rerun()
+
+            with control_col2:
+                # Rotation Controls (Compact)
+                rot_col1, rot_col2, rot_col3 = st.columns(3)
+                if rot_col1.button("↺", help="Rotate Left"):
+                    st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
+                    st.rerun()
+                if rot_col2.button("↻", help="Rotate Right"):
+                    st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
+                    st.rerun()
+                if rot_col3.button("🗑️", help="Clear Image"):
+                    st.session_state.last_processed_file = None
+                    st.session_state.original_image = None
+                    st.rerun()
+            
+            # Apply Rotation
             rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
             
+            # Apply Zoom (Scaling)
+            zoom = st.session_state.get("zoom_level", 1.0)
+            if zoom != 1.0:
+                new_size = tuple(int(dim * zoom) for dim in rotated_img.size)
+                # Use Resampling.NEAREST for speed during crop preview, or LANCZOS for quality
+                display_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
+            else:
+                display_img = rotated_img
+
             c1, c2 = st.columns([1, 1])
             with c1:
-                zoomed_img = mobile_crop_helper(rotated_img)
+                # Add a hint for mobile users about the slider
+                st.caption("📱 Use the slider above to zoom. Drag corners to crop.")
+                
+                # Unique key prevents crop box from jumping around
                 cropped_img = st_cropper(
-                    zoomed_img, 
+                    display_img, 
                     realtime_update=True, 
                     box_color='#FF0000', 
                     return_type="image",
-                    key=f"crop_{st.session_state.upload_counter}_{st.session_state.get('rotation',0)}_{st.session_state.get('zoom_level',1)}"
+                    key=f"crop_{st.session_state.upload_counter}_{st.session_state.get('rotation',0)}_{zoom}"
                 )
                 
-                zoom = st.session_state.get("zoom_level", 1.0)
-                if zoom != 1.0:
-                    original_size = tuple(int(dim / zoom) for dim in cropped_img.size)
-                    cropped_img = cropped_img.resize(original_size, Image.Resampling.LANCZOS)
-                
+                # If zoomed in, we need to ensure the quality of the cropped image isn't just the upscaled version
+                # However, for simplicity in this flow, using the upscaled crop is usually sufficient for visual verification
                 st.session_state.cropped_image = cropped_img
             
             with c2:
@@ -285,7 +288,11 @@ if uploaded_file:
                     if len(barcode) == 13 and barcode.isdigit():
                         with st.spinner("Analyzing..."):
                             save_path = os.path.join(SAVE_DIR, f"{barcode}.jpg")
+                            
+                            # Save the image. If it was zoomed, we might want to scale it back down 
+                            # if it's too massive, but generally sending the zoomed crop is fine for OCR.
                             st.session_state.cropped_image.save(save_path, format="JPEG")
+                            
                             try:
                                 ocr_output = run_ocr(save_path)
                                 input_text = json.dumps(ocr_output, separators=(",", ":"))
