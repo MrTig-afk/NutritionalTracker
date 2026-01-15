@@ -3,7 +3,7 @@ import io
 import json
 import torch
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFilter, ImageEnhance
 from streamlit_cropper import st_cropper
 from transformers import AutoTokenizer, LongT5ForConditionalGeneration
 from dotenv import load_dotenv
@@ -15,7 +15,7 @@ try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
 except ImportError:
-    pass # HEIC support optional on Android
+    pass
 
 load_dotenv()
 
@@ -42,19 +42,19 @@ tokenizer, model = load_model()
 # ------------------------------
 def process_uploaded_image(uploaded_file):
     try:
-        # CRITICAL: Reset file pointer for Android camera uploads
+        # Reset file pointer
         uploaded_file.seek(0)
         file_bytes = uploaded_file.read()
         image = Image.open(io.BytesIO(file_bytes))
         
-        # Auto-rotate (Critical for iPhone/Android)
+        # Auto-rotate
         image = ImageOps.exif_transpose(image)
         
         # Convert to RGB
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Resize if too huge (Prevents crash on mobile RAM)
+        # Resize if too huge
         max_dimension = 2000
         if max(image.size) > max_dimension:
             ratio = max_dimension / max(image.size)
@@ -65,6 +65,16 @@ def process_uploaded_image(uploaded_file):
     except Exception as e:
         st.error(f"Error processing image: {e}")
         return None
+
+# ------------------------------
+# Helper: Pan/Shift Image
+# ------------------------------
+def shift_image(image, x_offset, y_offset):
+    # Create a white background canvas of the same size
+    new_img = Image.new("RGB", image.size, (255, 255, 255))
+    # Paste the original image at the offset coordinates
+    new_img.paste(image, (x_offset, y_offset))
+    return new_img
 
 # ------------------------------
 # Display Helper
@@ -142,7 +152,7 @@ def display_nutrition_data(data, cropped_image):
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 st.title("🍎 Nutritional Information Extractor")
 
-# Crash Prevention
+# Cleanup
 if "last_processed_time" in st.session_state:
     del st.session_state["last_processed_time"]
 
@@ -152,12 +162,18 @@ if "last_processed_file" not in st.session_state:
 if "upload_counter" not in st.session_state:
     st.session_state.upload_counter = 0
 
-for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data", "zoom_level"]:
+# Panning State (X and Y offsets)
+if "pan_x" not in st.session_state:
+    st.session_state.pan_x = 0
+if "pan_y" not in st.session_state:
+    st.session_state.pan_y = 0
+
+for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data"]:
     if key not in st.session_state:
         st.session_state[key] = None if "image" in key else (False if "confirmed" in key else 1.0)
 
 # ------------------------------
-# FILE UPLOADER (Native)
+# FILE UPLOADER
 # ------------------------------
 uploaded_file = st.file_uploader(
     "📷 Upload or take a photo", 
@@ -170,23 +186,21 @@ uploaded_file = st.file_uploader(
 # LOGIC
 # ------------------------------
 if uploaded_file:
-    # Stable signature check
     file_signature = f"{uploaded_file.name}-{uploaded_file.size}-{uploaded_file.type}"
     
     if st.session_state.last_processed_file != file_signature:
-        with st.spinner("📸 Processing image..."):
+        with st.spinner("Processing..."):
             processed_img = process_uploaded_image(uploaded_file)
             
             if processed_img:
                 st.session_state.original_image = processed_img
-                # Reset downstream steps
                 st.session_state.crop_confirmed = False
                 st.session_state.cropped_image = None
                 st.session_state.results_data = None
                 st.session_state.rotation = 0
-                st.session_state.zoom_level = 1.0
+                st.session_state.pan_x = 0  # Reset pan
+                st.session_state.pan_y = 0  # Reset pan
                 
-                # Mark as processed
                 st.session_state.last_processed_file = file_signature
                 st.session_state.upload_counter += 1
                 
@@ -196,7 +210,7 @@ if uploaded_file:
                 st.error("Failed to process image.")
 
     # ------------------------------
-    # App runs if image is loaded
+    # App Runs
     # ------------------------------
     if st.session_state.original_image:
         img = st.session_state.original_image
@@ -205,66 +219,86 @@ if uploaded_file:
         if not st.session_state.crop_confirmed:
             st.subheader("1️⃣ Crop Label")
             
-            # --- REPLACED BUTTONS WITH SLIDER CONTROLS ---
-            control_col1, control_col2 = st.columns([2, 1])
+            # --- LAYOUT: 3 Columns for Controls ---
+            # Col 1: Rotation
+            # Col 2: D-Pad (Arrows)
+            # Col 3: Clear
             
-            with control_col1:
-                # Slider for Zoom
-                zoom_val = st.slider(
-                    "🔍 Zoom Level", 
-                    min_value=1.0, 
-                    max_value=3.0, 
-                    value=st.session_state.get("zoom_level", 1.0),
-                    step=0.1,
-                    key="zoom_slider"
-                )
-                # Update session state if slider moved
-                if zoom_val != st.session_state.get("zoom_level", 1.0):
-                    st.session_state.zoom_level = zoom_val
-                    st.rerun()
-
-            with control_col2:
-                # Rotation Controls (Compact)
-                rot_col1, rot_col2, rot_col3 = st.columns(3)
-                if rot_col1.button("↺", help="Rotate Left"):
+            col_rot, col_pan, col_clear = st.columns([1, 1, 1])
+            
+            with col_rot:
+                st.write("**Rotation**")
+                c_r1, c_r2 = st.columns(2)
+                if c_r1.button("↺", use_container_width=True):
                     st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
                     st.rerun()
-                if rot_col2.button("↻", help="Rotate Right"):
+                if c_r2.button("↻", use_container_width=True):
                     st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
                     st.rerun()
-                if rot_col3.button("🗑️", help="Clear Image"):
+
+            with col_pan:
+                st.write("**Move Image**")
+                # D-Pad Grid
+                p_r1_c1, p_r1_c2, p_r1_c3 = st.columns(3)
+                p_r2_c1, p_r2_c2, p_r2_c3 = st.columns(3)
+                p_r3_c1, p_r3_c2, p_r3_c3 = st.columns(3)
+                
+                # Pan Amount
+                step = 50 
+                
+                # Up
+                if p_r1_c2.button("⬆️", key="pan_up"):
+                    st.session_state.pan_y -= step
+                    st.rerun()
+                
+                # Left
+                if p_r2_c1.button("⬅️", key="pan_left"):
+                    st.session_state.pan_x -= step
+                    st.rerun()
+                
+                # Center / Reset
+                if p_r2_c2.button("🎯", key="pan_reset", help="Reset Position"):
+                    st.session_state.pan_x = 0
+                    st.session_state.pan_y = 0
+                    st.rerun()
+                
+                # Right
+                if p_r2_c3.button("➡️", key="pan_right"):
+                    st.session_state.pan_x += step
+                    st.rerun()
+
+                # Down
+                if p_r3_c2.button("⬇️", key="pan_down"):
+                    st.session_state.pan_y += step
+                    st.rerun()
+
+            with col_clear:
+                st.write("**Reset All**")
+                if st.button("🗑️ New Image", use_container_width=True):
                     st.session_state.last_processed_file = None
                     st.session_state.original_image = None
                     st.rerun()
             
-            # Apply Rotation
+            # 1. Rotate first
             rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
             
-            # Apply Zoom (Scaling)
-            zoom = st.session_state.get("zoom_level", 1.0)
-            if zoom != 1.0:
-                new_size = tuple(int(dim * zoom) for dim in rotated_img.size)
-                # Use Resampling.NEAREST for speed during crop preview, or LANCZOS for quality
-                display_img = rotated_img.resize(new_size, Image.Resampling.LANCZOS)
-            else:
-                display_img = rotated_img
+            # 2. Shift (Pan) second
+            # We create a new image canvas and paste the rotated image at the pan coordinates
+            shifted_img = shift_image(rotated_img, st.session_state.pan_x, st.session_state.pan_y)
 
             c1, c2 = st.columns([1, 1])
             with c1:
-                # Add a hint for mobile users about the slider
-                st.caption("📱 Use the slider above to zoom. Drag corners to crop.")
-                
-                # Unique key prevents crop box from jumping around
+                st.caption("📱 Use arrows to move the image under the box.")
+                # We feed the SHIFTED image to the cropper. 
+                # The cropper returns coordinates relative to this shifted image.
+                # So we don't need to do any complex math later.
                 cropped_img = st_cropper(
-                    display_img, 
+                    shifted_img, 
                     realtime_update=True, 
                     box_color='#FF0000', 
                     return_type="image",
-                    key=f"crop_{st.session_state.upload_counter}_{st.session_state.get('rotation',0)}_{zoom}"
+                    key=f"crop_{st.session_state.upload_counter}_{st.session_state.rotation}_{st.session_state.pan_x}_{st.session_state.pan_y}"
                 )
-                
-                # If zoomed in, we need to ensure the quality of the cropped image isn't just the upscaled version
-                # However, for simplicity in this flow, using the upscaled crop is usually sufficient for visual verification
                 st.session_state.cropped_image = cropped_img
             
             with c2:
@@ -288,9 +322,6 @@ if uploaded_file:
                     if len(barcode) == 13 and barcode.isdigit():
                         with st.spinner("Analyzing..."):
                             save_path = os.path.join(SAVE_DIR, f"{barcode}.jpg")
-                            
-                            # Save the image. If it was zoomed, we might want to scale it back down 
-                            # if it's too massive, but generally sending the zoomed crop is fine for OCR.
                             st.session_state.cropped_image.save(save_path, format="JPEG")
                             
                             try:
