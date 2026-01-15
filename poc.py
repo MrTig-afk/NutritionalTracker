@@ -261,8 +261,12 @@ if "file_id" not in st.session_state:
     st.session_state.file_id = None
 if "upload_counter" not in st.session_state:
     st.session_state.upload_counter = 0
+
+# --- FIX START ---
+# Changed from None to 0 to prevent TypeError during subtraction
 if "last_processed_time" not in st.session_state:
-    st.session_state.last_processed_time = None
+    st.session_state.last_processed_time = 0 
+# --- FIX END ---
 
 for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data", "zoom_level"]:
     if key not in st.session_state:
