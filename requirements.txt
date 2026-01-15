@@ -5,8 +5,9 @@ torch
 transformers
 huggingface-hub
 python-dotenv
-python-doctr
 opencv-python-headless
-python-doctr[torch]
 streamlit-image-coordinates
 streamlit-javascript
+boto3 
+python-doctr[torch]
+pillow-heif
