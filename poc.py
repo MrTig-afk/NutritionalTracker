@@ -166,12 +166,11 @@ def mobile_crop_helper(image):
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 st.title("🍎 Nutritional Information Extractor")
 
-# --- CLEAN UP OLD CRASH-PRONE STATE ---
-# This deletes the variable causing the crash if it exists from a previous session
+# Clean up any potential crash-causing state
 if "last_processed_time" in st.session_state:
     del st.session_state["last_processed_time"]
 
-# Initialize Safe State
+# Initialize State
 if "last_processed_file" not in st.session_state:
     st.session_state.last_processed_file = None
 if "upload_counter" not in st.session_state:
@@ -181,31 +180,41 @@ for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "re
     if key not in st.session_state:
         st.session_state[key] = None if "image" in key else (False if "confirmed" in key else 1.0)
 
-uploaded_file = st.file_uploader(
-    "📷 Upload or take a photo", 
-    type=["png", "jpg", "jpeg", "heic", "heif", "webp"],
-    accept_multiple_files=False,
-    key="file_uploader"
+# ------------------------------
+# INPUT METHOD SELECTION
+# ------------------------------
+# This toggle allows users to stay in the browser (Camera) or upload from gallery
+input_method = st.radio(
+    "Choose Input Method:", 
+    ["📤 Upload File (Gallery/Desktop)", "📸 Take Photo (In-App Camera)"],
+    horizontal=True,
+    help="Use 'Take Photo' on Android to prevent the app from reloading."
 )
 
+uploaded_file = None
+
+if input_method == "📤 Upload File (Gallery/Desktop)":
+    uploaded_file = st.file_uploader(
+        "Upload Image", 
+        type=["png", "jpg", "jpeg", "heic", "heif", "webp"],
+        key="file_uploader"
+    )
+else:
+    # Camera Input keeps the user IN the browser, preventing the 'reload' crash
+    uploaded_file = st.camera_input("Capture Nutrition Label", key="camera_input")
+
 # ------------------------------
-# LOGIC EXPLANATION (How this fixes the crash):
+# PROCESSING LOGIC
 # ------------------------------
 if uploaded_file:
-    # 1. We create a "signature" string. Strings are safe.
-    #    (Old code used time subtraction which failed when variables were None)
+    # Signature check to prevent reprocessing the same file on button clicks
     file_signature = f"{uploaded_file.name}-{uploaded_file.size}-{uploaded_file.type}"
     
-    # 2. We compare the string signature to the last one we saw.
-    #    If it's different, it's a new file. If it's the same, we do nothing.
-    #    This stops "Random Balloons" when clicking buttons because clicking buttons
-    #    doesn't change the file signature.
     if st.session_state.last_processed_file != file_signature:
         with st.spinner("📸 Processing image..."):
             processed_img = process_uploaded_image(uploaded_file)
             
             if processed_img:
-                # Save state
                 st.session_state.original_image = processed_img
                 st.session_state.crop_confirmed = False
                 st.session_state.cropped_image = None
@@ -213,21 +222,16 @@ if uploaded_file:
                 st.session_state.rotation = 0
                 st.session_state.zoom_level = 1.0
                 
-                # Update tracker so we don't re-process on next button click
                 st.session_state.last_processed_file = file_signature
                 st.session_state.upload_counter += 1
                 
-                # Show success only once
-                st.success("✅ Image uploaded!")
-                st.balloons()
-                
-                # Rerun to refresh the UI immediately
+                st.success("✅ Image loaded successfully!")
                 st.rerun()
             else:
                 st.error("Failed to process image.")
 
     # ------------------------------
-    # App Logic (Runs only if image is loaded)
+    # App Logic (Runs if image is loaded)
     # ------------------------------
     if st.session_state.original_image:
         img = st.session_state.original_image
@@ -256,7 +260,6 @@ if uploaded_file:
             c1, c2 = st.columns([1, 1])
             with c1:
                 zoomed_img = mobile_crop_helper(rotated_img)
-                # Unique key prevents crop box from jumping around
                 cropped_img = st_cropper(
                     zoomed_img, 
                     realtime_update=True, 
@@ -265,7 +268,6 @@ if uploaded_file:
                     key=f"crop_{st.session_state.upload_counter}_{st.session_state.get('rotation',0)}_{st.session_state.get('zoom_level',1)}"
                 )
                 
-                # Handle zoom scaling for the output crop
                 zoom = st.session_state.get("zoom_level", 1.0)
                 if zoom != 1.0:
                     original_size = tuple(int(dim / zoom) for dim in cropped_img.size)
@@ -315,4 +317,4 @@ if uploaded_file:
             display_nutrition_data(st.session_state.results_data, st.session_state.cropped_image)
 
 else:
-    st.info("👆 Upload an image to start.")
+    st.info("👆 Choose an input method to start.")
