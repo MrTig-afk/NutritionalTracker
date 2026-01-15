@@ -166,7 +166,12 @@ def mobile_crop_helper(image):
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 st.title("🍎 Nutritional Information Extractor")
 
-# Initialize State
+# --- CLEAN UP OLD CRASH-PRONE STATE ---
+# This deletes the variable causing the crash if it exists from a previous session
+if "last_processed_time" in st.session_state:
+    del st.session_state["last_processed_time"]
+
+# Initialize Safe State
 if "last_processed_file" not in st.session_state:
     st.session_state.last_processed_file = None
 if "upload_counter" not in st.session_state:
@@ -184,13 +189,17 @@ uploaded_file = st.file_uploader(
 )
 
 # ------------------------------
-# FIXED: Logic for Single-Upload & No Random Balloons
+# LOGIC EXPLANATION (How this fixes the crash):
 # ------------------------------
 if uploaded_file:
-    # Create a stable ID based on file content only (Fixes balloons on button click)
+    # 1. We create a "signature" string. Strings are safe.
+    #    (Old code used time subtraction which failed when variables were None)
     file_signature = f"{uploaded_file.name}-{uploaded_file.size}-{uploaded_file.type}"
     
-    # Process only if this specific file hasn't been processed yet (Fixes double upload)
+    # 2. We compare the string signature to the last one we saw.
+    #    If it's different, it's a new file. If it's the same, we do nothing.
+    #    This stops "Random Balloons" when clicking buttons because clicking buttons
+    #    doesn't change the file signature.
     if st.session_state.last_processed_file != file_signature:
         with st.spinner("📸 Processing image..."):
             processed_img = process_uploaded_image(uploaded_file)
