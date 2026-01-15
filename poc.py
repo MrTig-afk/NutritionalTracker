@@ -42,19 +42,14 @@ tokenizer, model = load_model()
 # ------------------------------
 def process_uploaded_image(uploaded_file):
     try:
-        # Reset file pointer
         uploaded_file.seek(0)
         file_bytes = uploaded_file.read()
         image = Image.open(io.BytesIO(file_bytes))
-        
-        # Auto-rotate
         image = ImageOps.exif_transpose(image)
-        
-        # Convert to RGB
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Resize if too huge
+        # Resize if huge
         max_dimension = 2000
         if max(image.size) > max_dimension:
             ratio = max_dimension / max(image.size)
@@ -70,9 +65,7 @@ def process_uploaded_image(uploaded_file):
 # Helper: Pan/Shift Image
 # ------------------------------
 def shift_image(image, x_offset, y_offset):
-    # Create a white background canvas of the same size
     new_img = Image.new("RGB", image.size, (255, 255, 255))
-    # Paste the original image at the offset coordinates
     new_img.paste(image, (x_offset, y_offset))
     return new_img
 
@@ -152,6 +145,33 @@ def display_nutrition_data(data, cropped_image):
 st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 st.title("🍎 Nutritional Information Extractor")
 
+# Custom CSS to fix Mobile D-Pad Layout and Scrolling
+st.markdown("""
+<style>
+    /* Force columns in the D-Pad to stay side-by-side on mobile */
+    div[data-testid="column"] {
+        width: auto !important;
+        flex: 1 1 auto !important;
+        min-width: 0px !important;
+    }
+    
+    /* Make buttons bigger and touch-friendly */
+    div.stButton > button {
+        width: 100%;
+        height: 50px;
+        font-size: 20px;
+        touch-action: manipulation;
+    }
+
+    /* Add padding to the cropper container to allow scrolling */
+    .cropper-container {
+        padding: 10px 0px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #eee;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Cleanup
 if "last_processed_time" in st.session_state:
     del st.session_state["last_processed_time"]
@@ -162,7 +182,7 @@ if "last_processed_file" not in st.session_state:
 if "upload_counter" not in st.session_state:
     st.session_state.upload_counter = 0
 
-# Panning State (X and Y offsets)
+# Pan State
 if "pan_x" not in st.session_state:
     st.session_state.pan_x = 0
 if "pan_y" not in st.session_state:
@@ -198,8 +218,8 @@ if uploaded_file:
                 st.session_state.cropped_image = None
                 st.session_state.results_data = None
                 st.session_state.rotation = 0
-                st.session_state.pan_x = 0  # Reset pan
-                st.session_state.pan_y = 0  # Reset pan
+                st.session_state.pan_x = 0
+                st.session_state.pan_y = 0
                 
                 st.session_state.last_processed_file = file_signature
                 st.session_state.upload_counter += 1
@@ -219,79 +239,20 @@ if uploaded_file:
         if not st.session_state.crop_confirmed:
             st.subheader("1️⃣ Crop Label")
             
-            # --- LAYOUT: 3 Columns for Controls ---
-            # Col 1: Rotation
-            # Col 2: D-Pad (Arrows)
-            # Col 3: Clear
-            
-            col_rot, col_pan, col_clear = st.columns([1, 1, 1])
-            
-            with col_rot:
-                st.write("**Rotation**")
-                c_r1, c_r2 = st.columns(2)
-                if c_r1.button("↺", use_container_width=True):
-                    st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
-                    st.rerun()
-                if c_r2.button("↻", use_container_width=True):
-                    st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
-                    st.rerun()
-
-            with col_pan:
-                st.write("**Move Image**")
-                # D-Pad Grid
-                p_r1_c1, p_r1_c2, p_r1_c3 = st.columns(3)
-                p_r2_c1, p_r2_c2, p_r2_c3 = st.columns(3)
-                p_r3_c1, p_r3_c2, p_r3_c3 = st.columns(3)
-                
-                # Pan Amount
-                step = 50 
-                
-                # Up
-                if p_r1_c2.button("⬆️", key="pan_up"):
-                    st.session_state.pan_y -= step
-                    st.rerun()
-                
-                # Left
-                if p_r2_c1.button("⬅️", key="pan_left"):
-                    st.session_state.pan_x -= step
-                    st.rerun()
-                
-                # Center / Reset
-                if p_r2_c2.button("🎯", key="pan_reset", help="Reset Position"):
-                    st.session_state.pan_x = 0
-                    st.session_state.pan_y = 0
-                    st.rerun()
-                
-                # Right
-                if p_r2_c3.button("➡️", key="pan_right"):
-                    st.session_state.pan_x += step
-                    st.rerun()
-
-                # Down
-                if p_r3_c2.button("⬇️", key="pan_down"):
-                    st.session_state.pan_y += step
-                    st.rerun()
-
-            with col_clear:
-                st.write("**Reset All**")
-                if st.button("🗑️ New Image", use_container_width=True):
-                    st.session_state.last_processed_file = None
-                    st.session_state.original_image = None
-                    st.rerun()
-            
-            # 1. Rotate first
+            # 1. Rotate
             rotated_img = img.rotate(st.session_state.get("rotation", 0), expand=True)
             
-            # 2. Shift (Pan) second
-            # We create a new image canvas and paste the rotated image at the pan coordinates
+            # 2. Pan (Shift)
             shifted_img = shift_image(rotated_img, st.session_state.pan_x, st.session_state.pan_y)
 
-            c1, c2 = st.columns([1, 1])
-            with c1:
-                st.caption("📱 Use arrows to move the image under the box.")
-                # We feed the SHIFTED image to the cropper. 
-                # The cropper returns coordinates relative to this shifted image.
-                # So we don't need to do any complex math later.
+            # --- DISPLAY CROPPER ---
+            st.markdown('<div class="cropper-container">', unsafe_allow_html=True)
+            # Center the cropper in a column
+            c_main = st.container()
+            with c_main:
+                # Hint for scrolling
+                st.caption("📱 **Tip:** Swipe on the white space to scroll. Use D-Pad below to move image.")
+                
                 cropped_img = st_cropper(
                     shifted_img, 
                     realtime_update=True, 
@@ -300,10 +261,73 @@ if uploaded_file:
                     key=f"crop_{st.session_state.upload_counter}_{st.session_state.rotation}_{st.session_state.pan_x}_{st.session_state.pan_y}"
                 )
                 st.session_state.cropped_image = cropped_img
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # --- CONTROLS (MOVED BELOW IMAGE) ---
+            st.markdown("### 🎮 Controls")
             
-            with c2:
-                st.image(cropped_img, caption="Preview")
-                if st.button("✅ Confirm Crop", type="primary", use_container_width=True):
+            # Create 3 main columns for controls
+            # Use columns([1,2,1]) to give the D-Pad (middle) more room
+            col_left, col_mid, col_right = st.columns([1, 2, 1])
+            
+            # --- LEFT: Rotation ---
+            with col_left:
+                st.markdown("**Rotate**")
+                if st.button("↺ Left", use_container_width=True):
+                    st.session_state.rotation = (st.session_state.get("rotation", 0) - 90) % 360
+                    st.rerun()
+                if st.button("↻ Right", use_container_width=True):
+                    st.session_state.rotation = (st.session_state.get("rotation", 0) + 90) % 360
+                    st.rerun()
+
+            # --- MIDDLE: D-Pad ---
+            with col_mid:
+                st.markdown("**Move Image**")
+                step = 50
+                
+                # Using 3 columns for D-Pad grid
+                d1, d2, d3 = st.columns(3)
+                
+                # Row 1
+                with d2:
+                    if st.button("⬆️", key="up", use_container_width=True):
+                        st.session_state.pan_y -= step
+                        st.rerun()
+                
+                # Row 2
+                d4, d5, d6 = st.columns(3)
+                with d4:
+                    if st.button("⬅️", key="left", use_container_width=True):
+                        st.session_state.pan_x -= step
+                        st.rerun()
+                with d5:
+                    if st.button("🎯", key="reset", help="Center Image", use_container_width=True):
+                        st.session_state.pan_x = 0
+                        st.session_state.pan_y = 0
+                        st.rerun()
+                with d6:
+                    if st.button("➡️", key="right", use_container_width=True):
+                        st.session_state.pan_x += step
+                        st.rerun()
+
+                # Row 3
+                d7, d8, d9 = st.columns(3)
+                with d8:
+                    if st.button("⬇️", key="down", use_container_width=True):
+                        st.session_state.pan_y += step
+                        st.rerun()
+
+            # --- RIGHT: Actions ---
+            with col_right:
+                st.markdown("**Action**")
+                if st.button("🗑️ Clear", use_container_width=True):
+                    st.session_state.last_processed_file = None
+                    st.session_state.original_image = None
+                    st.rerun()
+                
+                st.markdown("---")
+                # Confirm button is highlighted
+                if st.button("✅ Crop", type="primary", use_container_width=True):
                     st.session_state.crop_confirmed = True
                     st.rerun()
 
