@@ -256,9 +256,13 @@ st.set_page_config(layout="wide", page_title="Nutritional Tracker")
 
 st.title("🍎 Nutritional Information Extractor")
 
-# FIXED: Initialize session state with unique file ID tracking
+# FIXED: Initialize session state with unique file ID tracking and upload counter
 if "file_id" not in st.session_state:
     st.session_state.file_id = None
+if "upload_counter" not in st.session_state:
+    st.session_state.upload_counter = 0
+if "last_processed_time" not in st.session_state:
+    st.session_state.last_processed_time = None
 
 for key in ["rotation", "cropped_image", "original_image", "crop_confirmed", "results_data", "zoom_level"]:
     if key not in st.session_state:
@@ -274,18 +278,46 @@ uploaded_file = st.file_uploader(
     key="file_uploader"
 )
 
-# FIXED: Better file tracking that works with Android camera
+# FIXED: Better file tracking that works with Android camera disconnections
 if uploaded_file:
-    # Debug info (remove after testing)
-    st.write(f"🔍 Debug: File name: `{uploaded_file.name}`, Size: `{uploaded_file.size}` bytes, Type: `{uploaded_file.type}`")
+    import time
     
-    # Generate unique file ID - use both name, size, and type
-    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}_{uploaded_file.type}"
+    # Generate unique file ID with timestamp to handle reconnections
+    file_timestamp = int(time.time())
+    current_file_id = f"{uploaded_file.name}_{uploaded_file.size}_{uploaded_file.type}_{file_timestamp}"
     
-    # Only process if it's a NEW file
-    if st.session_state.file_id != current_file_id:
-        st.info(f"🆕 New file detected! Processing...")
+    # Get the last processed time
+    last_time = st.session_state.get("last_processed_time", 0)
+    time_since_last = file_timestamp - last_time
+    
+    # Debug info (can be removed after testing)
+    with st.expander("🔍 Debug Info (click to expand)", expanded=False):
+        st.write(f"**File name:** `{uploaded_file.name}`")
+        st.write(f"**Size:** `{uploaded_file.size}` bytes")
+        st.write(f"**Type:** `{uploaded_file.type}`")
+        st.write(f"**Time since last upload:** `{time_since_last}` seconds")
+        st.write(f"**Upload counter:** `{st.session_state.upload_counter}`")
+        st.write(f"**Current file_id:** `{st.session_state.file_id}`")
+    
+    # Force process if:
+    # 1. It's a completely new file (different name/size/type)
+    # 2. More than 3 seconds passed (handles Android camera reconnection)
+    # 3. file_id is None (first upload)
+    
+    is_new_file = (st.session_state.file_id is None or 
+                   not st.session_state.file_id.startswith(f"{uploaded_file.name}_{uploaded_file.size}_{uploaded_file.type}"))
+    
+    is_reconnection = time_since_last > 3  # More than 3 seconds = likely a camera upload
+    
+    should_process = is_new_file or is_reconnection
+    
+    if should_process:
+        st.info(f"🆕 Processing new upload... (Upload #{st.session_state.upload_counter + 1})")
+        
+        # Update tracking
         st.session_state.file_id = current_file_id
+        st.session_state.upload_counter += 1
+        st.session_state.last_processed_time = file_timestamp
         
         # Process the new image
         with st.spinner("📸 Processing uploaded image..."):
@@ -296,7 +328,7 @@ if uploaded_file:
                 processed_img = process_uploaded_image(uploaded_file)
                 
                 if processed_img is None:
-                    st.error("❌ Failed to process image. Please try again.")
+                    st.error("❌ Failed to process image. Please try uploading again.")
                     st.stop()
                 
                 # Reset all state for new image
@@ -307,8 +339,9 @@ if uploaded_file:
                 st.session_state.rotation = 0
                 st.session_state.zoom_level = 1.0
                 
-                st.success("✅ Image uploaded successfully!")
+                st.success(f"✅ Image #{st.session_state.upload_counter} uploaded successfully!")
                 st.balloons()
+                time.sleep(0.5)  # Brief pause to show success message
                 st.rerun()
                 
             except Exception as e:
@@ -316,7 +349,7 @@ if uploaded_file:
                 st.exception(e)
                 st.stop()
     else:
-        st.info("ℹ️ Using previously uploaded image")
+        st.success(f"✅ Using uploaded image #{st.session_state.upload_counter}")
 
     img = st.session_state.original_image
 
