@@ -47,7 +47,7 @@ export default function App() {
     formData.append("file", image.file);
 
     try {
-      const response = await fetch("http://localhost:8000/analyze-label", {
+      const response = await fetch("https://nutritionaltracker.onrender.com/analyze-label", {
         method: "POST",
         body: formData,
       });
