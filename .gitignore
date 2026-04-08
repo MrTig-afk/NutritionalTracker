@@ -1,0 +1,22 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Env files
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# DuckDB
+*.duckdb
+*.wal
+
+# Node (frontend)
+node_modules/
+dist/
