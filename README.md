@@ -5,8 +5,7 @@
 NutriScan is an end-to-end Data Engineering platform designed to automate the extraction, archival, and analysis of nutritional data from physical labels. This project implements a **Modern Data Stack** architecture, moving away from traditional row-based storage to a decoupled Data Lakehouse model.
 
 ### 🔗 Live Deployment
-* **Frontend (Vercel):** `[Insert Your Vercel Link]`
-* **Backend (Render):** `[Insert Your Render Link]`
+* **Frontend (Vercel):** `https://nutritional-tracker-delta.vercel.app/`
 
 ---
 
