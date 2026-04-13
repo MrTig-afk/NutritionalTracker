@@ -1,8 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   Upload, Zap, Loader2, RefreshCcw,
-  Database, Cloud, TableProperties, LayoutPanelLeft, Scale
+  Database, Cloud, TableProperties, LayoutPanelLeft, Scale, X, ChevronLeft, ChevronRight
 } from "lucide-react";
+
+// Use environment variable or localhost for development
+const API_URL = import.meta.env.DEV ? "http://localhost:8000" : (import.meta.env.VITE_API_URL || "https://nutritionaltracker.onrender.com");
+
+console.log("🔧 API_URL:", API_URL); // This helps debug
 
 const NUTRIENT_META = {
   calories:      { label: "Calories",       unit: "kcal", valueColor: "text-amber-400"   },
@@ -23,7 +28,6 @@ function getFallbackMeta(key) {
   };
 }
 
-// Parse a numeric value from either a number or a string like "12.5g", "4.2 g", "210mg"
 function parseNumeric(value) {
   if (typeof value === "number") return value;
   if (typeof value === "string") {
@@ -33,7 +37,6 @@ function parseNumeric(value) {
   return null;
 }
 
-// Extract grams from a serving size string — prefers "Ng" pattern, falls back to first number
 function extractServingGrams(size) {
   if (!size) return null;
   const gMatch = size.match(/(\d+(\.\d+)?)\s*g/i);
@@ -42,56 +45,91 @@ function extractServingGrams(size) {
   return numMatch ? parseFloat(numMatch[1]) : null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function App() {
-  const [image, setImage]         = useState(null);
-  const [loading, setLoading]     = useState(false);
-  const [results, setResults]     = useState(null);
+  const [images, setImages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(0);
   const [activeTab, setActiveTab] = useState("per_100g");
+  const fileInputRef = useRef(null);
 
   const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setImage({ file, preview: URL.createObjectURL(file) });
-      setResults(null);
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    const newImages = files.map(file => ({ file, preview: URL.createObjectURL(file) }));
+    setImages(prev => [...prev, ...newImages]);
+    setResults(null);
+    setActiveIndex(0);
+    e.target.value = "";
+  };
+
+  const removeImage = (index) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+    if (activeIndex >= images.length - 1) {
+      setActiveIndex(Math.max(0, images.length - 2));
+    }
+    setResults(null);
+  };
+
+  const handleClear = () => {
+    images.forEach(img => URL.revokeObjectURL(img.preview));
+    setImages([]);
+    setResults(null);
+    setActiveIndex(0);
+    setActiveTab("per_100g");
+  };
+
+  const switchToIndex = (i, resultArr) => {
+    setActiveIndex(i);
+    const r = (resultArr ?? results)?.[i];
+    if (r?.per_100g && Object.keys(r.per_100g).length > 0) {
+      setActiveTab("per_100g");
+    } else if (r?.per_serving && Object.keys(r.per_serving).length > 0) {
+      setActiveTab("per_serving");
     }
   };
 
   const handleAnalyze = async () => {
-    if (results) { setImage(null); setResults(null); return; }
-    if (!image) return;
+    if (results) {
+      handleClear();
+      return;
+    }
+    if (!images.length) return;
 
     setLoading(true);
     const formData = new FormData();
-    formData.append("file", image.file);
+    images.forEach(img => formData.append("files", img.file));
 
     try {
-      const response = await fetch("https://nutritionaltracker.onrender.com/analyze-label", {
+      console.log("📤 Sending request to:", `${API_URL}/analyze-labels`);
+      const response = await fetch(`${API_URL}/analyze-labels`, {
         method: "POST",
         body: formData,
       });
 
-      if (!response.ok) throw new Error("Pipeline Error");
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Pipeline Error: ${response.status} - ${errorText}`);
+      }
 
       const data = await response.json();
-
-      if (data.per_100g) setActiveTab("per_100g");
-      else if (data.per_serving) setActiveTab("per_serving");
-
-      setResults(data);
+      const arr = Array.isArray(data) ? data : [data];
+      setResults(arr);
+      switchToIndex(0, arr);
     } catch (err) {
-      alert("Pipeline Failure: Check Backend Terminal");
-      console.error(err);
+      console.error("❌ Pipeline Failure:", err);
+      alert(`Pipeline Failure: ${err.message}\n\nMake sure backend is running on http://localhost:8000`);
     } finally {
       setLoading(false);
     }
   };
 
+  const currentResult = results?.[activeIndex] ?? null;
+  const currentPreview = images[activeIndex]?.preview ?? null;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto">
-
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-12 gap-4">
           <div className="flex items-center gap-3">
             <div className="bg-cyan-500/20 p-2 rounded-lg border border-cyan-500/30">
@@ -107,64 +145,163 @@ export default function App() {
             </div>
           </div>
           <div className="flex gap-3">
-            <StatusBadge icon={<Cloud className="h-3 w-3" />}    label="S3_LAKE" status="ACTIVE"  color="text-cyan-500" />
-            <StatusBadge icon={<Database className="h-3 w-3" />} label="DUCKDB"  status="SYNCED"  color="text-purple-500" />
+            <StatusBadge icon={<Cloud className="h-3 w-3" />} label="API" status={API_URL} color="text-cyan-500" />
           </div>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-
-          {/* ── Left: upload ── */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className={`relative border-2 border-dashed rounded-3xl p-6 h-[400px] flex flex-col items-center justify-center transition-all
-              ${image ? "border-cyan-500/40 bg-slate-900/30" : "border-slate-800 bg-slate-900/10"}`}>
-              {!image ? (
-                <>
-                  <input
-                    type="file"
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    onChange={handleImageUpload}
-                    accept="image/*"
+          {/* Left Panel */}
+          <div className="lg:col-span-4 space-y-4">
+            {images.length === 0 ? (
+              <div
+                className="relative border-2 border-dashed border-slate-800 bg-slate-900/10 rounded-3xl p-6 h-[400px] flex flex-col items-center justify-center cursor-pointer hover:border-slate-700 transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple />
+                <Upload className="h-8 w-8 text-slate-600 mb-2" />
+                <p className="text-slate-500 text-sm">Click to ingest images</p>
+                <p className="text-slate-700 text-[10px] font-mono mt-1">SUPPORTS MULTIPLE FILES</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="relative border border-slate-800 bg-slate-900/30 rounded-3xl p-4 h-[280px] flex items-center justify-center overflow-hidden">
+                  <img
+                    src={currentPreview}
+                    alt={`Preview ${activeIndex + 1}`}
+                    className="max-h-full max-w-full rounded-2xl object-contain border border-slate-800"
                   />
-                  <Upload className="h-8 w-8 text-slate-600 mb-2" />
-                  <p className="text-slate-500 text-sm">Ingest Image</p>
-                </>
-              ) : (
-                <img
-                  src={image.preview}
-                  alt="Preview"
-                  className="max-h-full rounded-2xl shadow-2xl border border-slate-800"
-                />
-              )}
-            </div>
+                  {images.length > 1 && (
+                    <>
+                      <button 
+                        onClick={() => setActiveIndex(i => Math.max(0, i - 1))} 
+                        disabled={activeIndex === 0}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 bg-slate-900/80 border border-slate-700 rounded-full p-1 disabled:opacity-20 hover:border-slate-500 transition-colors"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button 
+                        onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))} 
+                        disabled={activeIndex === images.length - 1}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 bg-slate-900/80 border border-slate-700 rounded-full p-1 disabled:opacity-20 hover:border-slate-500 transition-colors"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex gap-2 flex-wrap">
+                  {images.map((img, i) => (
+                    <div 
+                      key={i} 
+                      onClick={() => setActiveIndex(i)}
+                      className={`relative w-14 h-14 rounded-xl overflow-hidden border cursor-pointer flex-shrink-0 transition-all
+                        ${i === activeIndex ? "border-cyan-500/70" : "border-slate-800 opacity-60 hover:opacity-100"}`}
+                    >
+                      <img src={img.preview} alt={`Thumb ${i + 1}`} className="w-full h-full object-cover" />
+                      {!results && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); removeImage(i); }}
+                          className="absolute top-0.5 right-0.5 bg-slate-900/90 rounded-full p-0.5 hover:text-rose-400 transition-colors"
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      )}
+                      <div className="absolute bottom-0.5 left-0.5 bg-slate-900/90 rounded text-[8px] font-mono text-slate-400 px-1">
+                        {i + 1}
+                      </div>
+                    </div>
+                  ))}
+                  {!results && (
+                    <div 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-14 h-14 rounded-xl border border-dashed border-slate-700 flex items-center justify-center cursor-pointer hover:border-slate-500 transition-colors flex-shrink-0"
+                    >
+                      <Upload className="h-4 w-4 text-slate-600" />
+                    </div>
+                  )}
+                </div>
+
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple />
+                <p className="text-[10px] font-mono text-slate-600 text-center">
+                  {images.length} IMAGE{images.length !== 1 ? "S" : ""} QUEUED
+                </p>
+              </div>
+            )}
 
             <button
               onClick={handleAnalyze}
-              disabled={loading}
+              disabled={loading || images.length === 0}
               className={`w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 shadow-xl
                 ${results
                   ? "bg-slate-900 text-rose-400 border border-rose-900/30"
-                  : "bg-cyan-500 text-slate-950"
+                  : images.length === 0
+                    ? "bg-slate-900 text-slate-700 border border-slate-800 cursor-not-allowed"
+                    : "bg-cyan-500 text-slate-950 hover:bg-cyan-400"
                 }`}
             >
+              {loading ? <Loader2 className="animate-spin h-5 w-5" /> : results ? <RefreshCcw className="h-5 w-5" /> : <Zap className="h-5 w-5" />}
               {loading
-                ? <Loader2 className="animate-spin h-5 w-5" />
-                : results ? <RefreshCcw className="h-5 w-5" /> : <Zap className="h-5 w-5" />}
-              {loading ? "PROCESSING..." : results ? "CLEAR_SESSION" : "RUN_EXTRACTION"}
+                ? `PROCESSING ${images.length} IMAGE${images.length !== 1 ? "S" : ""}...`
+                : results ? "CLEAR_SESSION"
+                : `RUN_EXTRACTION${images.length > 1 ? ` (${images.length})` : ""}`}
             </button>
           </div>
 
-          {/* ── Right: results ── */}
+          {/* Right Panel */}
           <div className="lg:col-span-8">
             {loading ? (
-              <PipelineLoader />
+              <div className="h-full flex flex-col items-center justify-center space-y-6">
+                <Loader2 className="animate-spin text-cyan-400 h-8 w-8" />
+                <p className="text-cyan-400 text-xs uppercase">
+                  Running Batch Ingestion{images.length > 1 ? ` — ${images.length} Images` : ""}...
+                </p>
+              </div>
             ) : results ? (
               <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 space-y-6">
+                {results.length > 1 && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-mono text-slate-600">SELECT RESULT — IN UPLOAD ORDER</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {results.map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => switchToIndex(i, results)}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-xl border transition-all
+                            ${activeIndex === i
+                              ? "border-cyan-500/50 bg-cyan-500/10"
+                              : "border-slate-800 hover:border-slate-600"}`}
+                        >
+                          <div className={`w-10 h-10 rounded-lg overflow-hidden border flex-shrink-0
+                            ${activeIndex === i ? "border-cyan-500/50" : "border-slate-700"}`}>
+                            <img src={images[i]?.preview} alt={`Label ${i + 1}`} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="text-left">
+                            <div className={`text-[10px] font-mono font-bold ${activeIndex === i ? "text-cyan-400" : "text-slate-500"}`}>
+                              IMG_{String(i + 1).padStart(2, "0")}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-                {/* Tab switcher */}
+                <div className="flex items-center gap-3 bg-slate-950/50 border border-slate-800 rounded-2xl p-3">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden border border-slate-700 flex-shrink-0">
+                    <img src={currentPreview} alt="Active label" className="w-full h-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-mono text-slate-600">ANALYZING LABEL</div>
+                    <div className="text-sm font-bold text-slate-300 mt-0.5">
+                      Image {activeIndex + 1} of {results.length}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl w-full max-w-sm">
                   {["per_100g", "per_serving"].map((tab) => {
-                    const hasData = !!results[tab];
+                    const hasData = currentResult?.[tab] && Object.keys(currentResult[tab]).length > 0;
                     return (
                       <button
                         key={tab}
@@ -186,7 +323,6 @@ export default function App() {
                   })}
                 </div>
 
-                {/* Schema header */}
                 <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                   <div className="flex items-center gap-2">
                     <TableProperties className="h-4 w-4 text-slate-500" />
@@ -194,32 +330,31 @@ export default function App() {
                       {activeTab === "per_100g" ? "Per 100g" : "Per Serving"} Schema
                     </h2>
                   </div>
-                  {activeTab === "per_serving" && results.per_serving?.size && (
+                  {activeTab === "per_serving" && currentResult?.per_serving?.size && (
                     <span className="text-[10px] bg-purple-500/10 text-purple-400 px-3 py-1 rounded-full border border-purple-500/20 font-mono">
-                      SIZE: {results.per_serving.size}
+                      SIZE: {currentResult.per_serving.size}
                     </span>
                   )}
                 </div>
 
                 <NutrientGrid
-                  data={results[activeTab]}
+                  key={activeIndex}
+                  data={currentResult?.[activeTab]}
                   activeTab={activeTab}
-                  per100gData={results.per_100g}
+                  per100gData={currentResult?.per_100g}
                 />
 
-                {/* Raw payload */}
                 <details className="group border border-slate-800 rounded-xl bg-slate-950/30">
                   <summary className="p-3 text-[9px] font-mono text-slate-600 cursor-pointer list-none flex justify-between items-center uppercase">
-                    <span>{">"} raw_data_payload</span>
+                    <span>{">"} raw_data_payload [{activeIndex + 1}/{results.length}]</span>
                     <span className="group-open:rotate-180 transition-transform">▼</span>
                   </summary>
                   <div className="p-4 pt-0">
                     <pre className="text-[10px] text-cyan-800 font-mono overflow-x-auto">
-                      {JSON.stringify(results, null, 2)}
+                      {JSON.stringify(currentResult, null, 2)}
                     </pre>
                   </div>
                 </details>
-
               </div>
             ) : (
               <div className="h-full border border-slate-900 bg-slate-900/5 rounded-3xl flex flex-col items-center justify-center p-12 text-center text-slate-700">
@@ -234,24 +369,10 @@ export default function App() {
   );
 }
 
-// ─── NutrientGrid ─────────────────────────────────────────────────────────────
-//
-// Scaling strategy:
-//   per_100g tab   → base is always 100g.  Scale = customG / 100
-//   per_serving tab
-//     → if data.size contains grams (e.g. "30g", "1 serving (45g)"):
-//         base = that gram value.  Scale = customG / servingG
-//     → if no size but per_100g data exists:
-//         fall back to per_100g values as the base (100g formula)
-//     → otherwise: cannot scale, show warning
-//
-// Gemini returns most nutrients as strings ("12.5g", "4.2g") and
-// calories as an integer. parseNumeric() handles both transparently.
-
 function NutrientGrid({ data, activeTab, per100gData }) {
   const [customGrams, setCustomGrams] = useState("");
 
-  if (!data) {
+  if (!data || Object.keys(data).length === 0) {
     return (
       <div className="py-12 text-center border border-dashed border-slate-800 rounded-2xl">
         <span className="text-xs text-slate-600 italic">No data extracted for this view</span>
@@ -262,11 +383,10 @@ function NutrientGrid({ data, activeTab, per100gData }) {
   const customG = parseFloat(customGrams);
   const isValid = !isNaN(customG) && customG > 0;
 
-  // Determine base grams and which dataset to scale from
   let baseGrams = null;
-  let scaleFrom = data;   // the dataset whose numbers we multiply
+  let scaleFrom = data;
   let baseLabel = null;
-  let warnMsg   = null;
+  let warnMsg = null;
 
   if (activeTab === "per_100g") {
     baseGrams = 100;
@@ -276,28 +396,24 @@ function NutrientGrid({ data, activeTab, per100gData }) {
     if (servingG) {
       baseGrams = servingG;
       baseLabel = `${data.size} (${servingG}g)`;
-    } else if (per100gData) {
+    } else if (per100gData && Object.keys(per100gData).length > 0) {
       baseGrams = 100;
       scaleFrom = per100gData;
       baseLabel = "100g (fallback — no serving size on label)";
-      warnMsg   = "NO SERVING SIZE DETECTED — SCALING FROM PER_100G BASE";
+      warnMsg = "NO SERVING SIZE DETECTED — SCALING FROM PER_100G BASE";
     } else {
       warnMsg = "CANNOT SCALE — NO SIZE OR PER_100G DATA AVAILABLE";
     }
   }
 
   const scalingActive = isValid && baseGrams !== null;
-  const factor        = scalingActive ? customG / baseGrams : null;
+  const factor = scalingActive ? customG / baseGrams : null;
 
-  // Returns display info for a given nutrient key + its raw value
   const getDisplay = (key, rawValue) => {
     if (!scalingActive) return { display: rawValue, adjusted: false };
-
-    // Use scaleFrom dataset (may be per_100g fallback) for the numeric base
     const sourceVal = scaleFrom[key] ?? rawValue;
-    const base      = parseNumeric(sourceVal);
+    const base = parseNumeric(sourceVal);
     if (base === null) return { display: rawValue, adjusted: false };
-
     const scaled = parseFloat((base * factor).toFixed(2));
     return { display: scaled, adjusted: true, baseDisplay: rawValue };
   };
@@ -306,8 +422,6 @@ function NutrientGrid({ data, activeTab, per100gData }) {
 
   return (
     <div className="space-y-5">
-
-      {/* ── Custom serving input panel ── */}
       <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3">
         <div className="flex items-center gap-2">
           <Scale className="h-4 w-4 text-cyan-400" />
@@ -315,7 +429,6 @@ function NutrientGrid({ data, activeTab, per100gData }) {
             Custom Serving Calculator
           </span>
         </div>
-
         <div className="flex gap-3 items-center">
           <input
             type="number"
@@ -329,16 +442,12 @@ function NutrientGrid({ data, activeTab, per100gData }) {
           />
           <span className="text-slate-400 text-sm font-mono font-bold">g</span>
           {customGrams && (
-            <button
-              onClick={() => setCustomGrams("")}
-              className="text-[10px] text-slate-600 hover:text-rose-400 transition-colors font-mono px-2"
-            >
+            <button onClick={() => setCustomGrams("")}
+              className="text-[10px] text-slate-600 hover:text-rose-400 transition-colors font-mono px-2">
               CLEAR
             </button>
           )}
         </div>
-
-        {/* Status line */}
         <div className="text-[10px] font-mono leading-relaxed">
           {warnMsg ? (
             <span className="text-amber-700">{warnMsg}</span>
@@ -347,7 +456,7 @@ function NutrientGrid({ data, activeTab, per100gData }) {
               BASE: {baseLabel}
               {scalingActive && (
                 <span className="text-cyan-700 ml-2">
-                  → {customG}g &nbsp;|&nbsp; FACTOR: ×{factor.toFixed(4)}
+                  → {customG}g | FACTOR: ×{factor.toFixed(4)}
                 </span>
               )}
             </span>
@@ -355,42 +464,27 @@ function NutrientGrid({ data, activeTab, per100gData }) {
         </div>
       </div>
 
-      {/* ── Macro cards ── */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {entries.map(([key, value]) => {
           const meta = NUTRIENT_META[key] ?? getFallbackMeta(key);
           const { display, adjusted, baseDisplay } = getDisplay(key, value);
-
           return (
-            <div
-              key={key}
+            <div key={key}
               className={`bg-slate-950/50 border rounded-2xl p-5 flex justify-between items-center transition-all duration-200
-                ${adjusted ? "border-cyan-500/30" : "border-slate-800"}`}
-            >
-              {/* Left: label + original base value when scaled */}
+                ${adjusted ? "border-cyan-500/30" : "border-slate-800"}`}>
               <div>
                 <p className="text-[10px] font-bold text-slate-500 uppercase">{meta.label}</p>
                 {adjusted && (
-                  <p className="text-[10px] font-mono text-slate-700 mt-0.5">
-                    base: {baseDisplay}
-                  </p>
+                  <p className="text-[10px] font-mono text-slate-700 mt-0.5">base: {baseDisplay}</p>
                 )}
               </div>
-
-              {/* Right: scaled value + unit + badge */}
               <div className="text-right">
                 <div className="flex items-baseline gap-1 justify-end">
-                  <span className={`text-xl font-bold ${meta.valueColor}`}>
-                    {display}
-                  </span>
-                  {meta.unit && (
-                    <span className="text-[10px] text-slate-600 font-mono">{meta.unit}</span>
-                  )}
+                  <span className={`text-xl font-bold ${meta.valueColor}`}>{display}</span>
+                  {meta.unit && <span className="text-[10px] text-slate-600 font-mono">{meta.unit}</span>}
                 </div>
                 {adjusted && (
-                  <div className="text-[9px] text-cyan-700 font-mono mt-0.5 tracking-wider">
-                    ADJUSTED
-                  </div>
+                  <div className="text-[9px] text-cyan-700 font-mono mt-0.5 tracking-wider">ADJUSTED</div>
                 )}
               </div>
             </div>
@@ -401,7 +495,6 @@ function NutrientGrid({ data, activeTab, per100gData }) {
   );
 }
 
-// ─── StatusBadge ──────────────────────────────────────────────────────────────
 function StatusBadge({ icon, label, status, color }) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 border border-slate-800 rounded-lg bg-slate-900/50">
@@ -410,16 +503,6 @@ function StatusBadge({ icon, label, status, color }) {
         <span className="text-[8px] text-slate-600 font-bold">{label}</span>
         <span className={`text-[10px] font-mono ${color}`}>{status}</span>
       </div>
-    </div>
-  );
-}
-
-// ─── PipelineLoader ────────────────────────────────────────────────────────────
-function PipelineLoader() {
-  return (
-    <div className="h-full flex flex-col items-center justify-center space-y-6">
-      <Loader2 className="animate-spin text-cyan-400" />
-      <p className="text-cyan-400 text-xs uppercase">Running Ingestion...</p>
     </div>
   );
 }
