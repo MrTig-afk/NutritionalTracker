@@ -21,15 +21,15 @@ Upload one or multiple nutrition label images. The system uploads the raw assets
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        USER INTERFACE                        │
-│              React + Tailwind CSS  (Vercel)                  │
+│                        USER INTERFACE                       │
+│              React + Tailwind CSS  (Vercel)                 │
 └──────────────────────────┬──────────────────────────────────┘
                            │  POST /analyze-labels
                            │  (multipart/form-data, 1–10 images)
 ┌──────────────────────────▼──────────────────────────────────┐
-│                      FASTAPI BACKEND                         │
-│                    Python  (Render)                          │
-│                                                              │
+│                      FASTAPI BACKEND                        │
+│                    Python  (Render)                         │
+│                                                             │
 │   ┌─────────────┐    ┌──────────────┐    ┌──────────────┐   │
 │   │  AWS S3     │    │  Gemini 2.5  │    │   DuckDB     │   │
 │   │  Data Lake  │    │  Flash (LLM) │    │  Warehouse   │   │
