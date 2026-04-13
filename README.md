@@ -1,10 +1,5 @@
 # 🥗 NutriScan Pipeline
 ### Cloud-Native Nutritional Data Extraction & Analytical Warehousing
-
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Vercel-black?style=flat-square&logo=vercel)](https://nutritional-tracker-delta.vercel.app/)
-[![Backend](https://img.shields.io/badge/Backend-Render-46E3B7?style=flat-square&logo=render)](https://nutritionaltracker.onrender.com/docs)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
-
 ---
 
 ## 🔍 Overview
@@ -12,8 +7,6 @@
 NutriScan is an end-to-end **Data Engineering pipeline** that transforms physical nutrition label images into structured, queryable analytical data — in a single request.
 
 Upload one or multiple nutrition label images. The system uploads the raw assets to **AWS S3**, passes them to **Google Gemini 2.5 Flash** for multimodal inference in a single batch API call, stores the structured output in a **DuckDB analytical warehouse**, and renders the results in a clean, interactive UI — complete with a custom serving size macro calculator.
-
-**Live:** [nutritional-tracker-delta.vercel.app](https://nutritional-tracker-delta.vercel.app/)
 
 ---
 
