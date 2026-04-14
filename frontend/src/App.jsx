@@ -1,14 +1,23 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   Upload, Zap, Loader2, RefreshCcw,
   Database, Cloud, TableProperties, LayoutPanelLeft, Scale, X, ChevronLeft, ChevronRight
 } from "lucide-react";
 
-// Use environment variable or localhost for development
-const API_URL = import.meta.env.DEV ? "http://localhost:8000" : (import.meta.env.VITE_API_URL || "https://nutritionaltracker.onrender.com");
+const API_URL = import.meta.env.DEV
+  ? "http://localhost:8000"
+  : (import.meta.env.VITE_API_URL || "https://nutritionaltracker.onrender.com");
 
-console.log("🔧 API_URL:", API_URL); // This helps debug
+console.log("🔧 API_URL:", API_URL);
 
+// ---------- CONSTANTS ----------
+const MAX_IMAGE_PX = 1200;
+const JPEG_QUALITY = 0.72;
+const REQUEST_TIMEOUT_MS = 25000;
+const MAX_FRONTEND_RETRIES = 2;
+const RETRY_DELAY_MS = [1500, 3000];
+
+// ---------- NUTRIENT META ----------
 const NUTRIENT_META = {
   calories:      { label: "Calories",       unit: "kcal", valueColor: "text-amber-400"   },
   fat:           { label: "Total Fat",       unit: "g",    valueColor: "text-orange-400"  },
@@ -45,41 +54,182 @@ function extractServingGrams(size) {
   return numMatch ? parseFloat(numMatch[1]) : null;
 }
 
+// ---------- IMAGE OPTIMIZATION ----------
+async function optimizeImage(file) {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+
+      if (width <= MAX_IMAGE_PX && height <= MAX_IMAGE_PX) {
+        // No resize needed — still recompress
+      }
+
+      const scale = Math.min(1, MAX_IMAGE_PX / Math.max(width, height));
+      const targetW = Math.round(width * scale);
+      const targetH = Math.round(height * scale);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(file); // fallback to original
+            return;
+          }
+          const optimized = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+            type: "image/jpeg",
+            lastModified: Date.now(),
+          });
+          console.log(`📉 Optimized: ${file.size} → ${optimized.size} bytes (${targetW}x${targetH})`);
+          resolve(optimized);
+        },
+        "image/jpeg",
+        JPEG_QUALITY
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file); // fallback to original
+    };
+
+    img.src = url;
+  });
+}
+
+// ---------- FETCH WITH TIMEOUT + RETRY ----------
+async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+
+      if (response.ok) return response;
+
+      const status = response.status;
+      const isRetryable = status === 500 || status === 503 || status === 504;
+      const errorText = await response.text().catch(() => `HTTP ${status}`);
+
+      if (!isRetryable || attempt === maxRetries) {
+        throw new Error(`Pipeline Error: ${status} — ${errorText}`);
+      }
+
+      lastError = new Error(`Retryable error: ${status}`);
+      console.warn(`⚠️ Attempt ${attempt + 1} failed (${status}), retrying in ${RETRY_DELAY_MS[attempt] || 3000}ms...`);
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000));
+
+    } catch (err) {
+      clearTimeout(timer);
+
+      if (err.name === "AbortError") {
+        lastError = new Error("Request timed out. Please try again.");
+        console.warn(`⏱️ Attempt ${attempt + 1} timed out`);
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000));
+          continue;
+        }
+      } else if (err.message.startsWith("Pipeline Error:")) {
+        throw err; // Non-retryable, propagate immediately
+      } else {
+        lastError = err;
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000));
+          continue;
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error("Request failed after retries");
+}
+
+// ---------- APP ----------
 export default function App() {
   const [images, setImages] = useState([]);
+  const [optimizedFiles, setOptimizedFiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("");
   const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [activeTab, setActiveTab] = useState("per_100g");
   const fileInputRef = useRef(null);
 
-  const handleImageUpload = (e) => {
+  // Visibility state preservation — keep state when device locks/tabs background
+  const stateRef = useRef({ images, optimizedFiles, results, activeIndex, activeTab });
+  useEffect(() => {
+    stateRef.current = { images, optimizedFiles, results, activeIndex, activeTab };
+  }, [images, optimizedFiles, results, activeIndex, activeTab]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        // Restore state from ref — no reset on re-focus
+        const s = stateRef.current;
+        setImages(s.images);
+        setOptimizedFiles(s.optimizedFiles);
+        setResults(s.results);
+        setActiveIndex(s.activeIndex);
+        setActiveTab(s.activeTab);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  const handleImageUpload = useCallback(async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
+
     const newImages = files.map(file => ({ file, preview: URL.createObjectURL(file) }));
     setImages(prev => [...prev, ...newImages]);
     setResults(null);
+    setError(null);
     setActiveIndex(0);
     e.target.value = "";
-  };
 
-  const removeImage = (index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
-    if (activeIndex >= images.length - 1) {
-      setActiveIndex(Math.max(0, images.length - 2));
-    }
+    // Optimize in background
+    setLoadingMsg("Optimizing images...");
+    const optimized = await Promise.all(files.map(optimizeImage));
+    setOptimizedFiles(prev => [...prev, ...optimized]);
+    setLoadingMsg("");
+  }, []);
+
+  const removeImage = useCallback((index) => {
+    setImages(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      return updated;
+    });
+    setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
+    setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev));
     setResults(null);
-  };
+    setError(null);
+  }, []);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     images.forEach(img => URL.revokeObjectURL(img.preview));
     setImages([]);
+    setOptimizedFiles([]);
     setResults(null);
+    setError(null);
     setActiveIndex(0);
     setActiveTab("per_100g");
-  };
+  }, [images]);
 
-  const switchToIndex = (i, resultArr) => {
+  const switchToIndex = useCallback((i, resultArr) => {
     setActiveIndex(i);
     const r = (resultArr ?? results)?.[i];
     if (r?.per_100g && Object.keys(r.per_100g).length > 0) {
@@ -87,9 +237,9 @@ export default function App() {
     } else if (r?.per_serving && Object.keys(r.per_serving).length > 0) {
       setActiveTab("per_serving");
     }
-  };
+  }, [results]);
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = useCallback(async () => {
     if (results) {
       handleClear();
       return;
@@ -97,32 +247,54 @@ export default function App() {
     if (!images.length) return;
 
     setLoading(true);
-    const formData = new FormData();
-    images.forEach(img => formData.append("files", img.file));
+    setError(null);
 
     try {
-      console.log("📤 Sending request to:", `${API_URL}/analyze-labels`);
-      const response = await fetch(`${API_URL}/analyze-labels`, {
-        method: "POST",
-        body: formData,
-      });
+      // Use optimized files if available, fall back to originals
+      const filesToSend = optimizedFiles.length === images.length
+        ? optimizedFiles
+        : images.map(i => i.file);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Pipeline Error: ${response.status} - ${errorText}`);
+      const formData = new FormData();
+
+      // Smart routing: single image → /analyze-label, multi → /analyze-labels
+      if (filesToSend.length === 1) {
+        formData.append("file", filesToSend[0]);
+        setLoadingMsg("Analyzing label...");
+        console.log("📤 Routing to /analyze-label (single)");
+
+        const response = await fetchWithRetry(`${API_URL}/analyze-label`, {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await response.json();
+        const arr = Array.isArray(data) ? data : [data];
+        setResults(arr);
+        switchToIndex(0, arr);
+      } else {
+        filesToSend.forEach(f => formData.append("files", f));
+        setLoadingMsg(`Analyzing ${filesToSend.length} labels...`);
+        console.log(`📤 Routing to /analyze-labels (batch: ${filesToSend.length})`);
+
+        const response = await fetchWithRetry(`${API_URL}/analyze-labels`, {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await response.json();
+        const arr = Array.isArray(data) ? data : [data];
+        setResults(arr);
+        switchToIndex(0, arr);
       }
-
-      const data = await response.json();
-      const arr = Array.isArray(data) ? data : [data];
-      setResults(arr);
-      switchToIndex(0, arr);
     } catch (err) {
       console.error("❌ Pipeline Failure:", err);
-      alert(`Pipeline Failure: ${err.message}\n\nMake sure backend is running on http://localhost:8000`);
+      setError(err.message);
     } finally {
       setLoading(false);
+      setLoadingMsg("");
     }
-  };
+  }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult = results?.[activeIndex] ?? null;
   const currentPreview = images[activeIndex]?.preview ?? null;
@@ -149,6 +321,24 @@ export default function App() {
           </div>
         </header>
 
+        {error && (
+          <div className="mb-6 bg-rose-950/40 border border-rose-800/50 rounded-2xl px-5 py-4 flex items-start gap-3">
+            <span className="text-rose-400 text-sm font-mono font-bold mt-0.5">ERR</span>
+            <div className="flex-1">
+              <p className="text-rose-300 text-sm">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="text-[10px] font-mono text-rose-600 hover:text-rose-400 mt-1 transition-colors"
+              >
+                DISMISS
+              </button>
+            </div>
+            <button onClick={() => setError(null)} className="text-rose-700 hover:text-rose-400 transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* Left Panel */}
           <div className="lg:col-span-4 space-y-4">
@@ -157,7 +347,7 @@ export default function App() {
                 className="relative border-2 border-dashed border-slate-800 bg-slate-900/10 rounded-3xl p-6 h-[400px] flex flex-col items-center justify-center cursor-pointer hover:border-slate-700 transition-colors"
                 onClick={() => fileInputRef.current?.click()}
               >
-                <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple />
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
                 <Upload className="h-8 w-8 text-slate-600 mb-2" />
                 <p className="text-slate-500 text-sm">Click to ingest images</p>
                 <p className="text-slate-700 text-[10px] font-mono mt-1">SUPPORTS MULTIPLE FILES</p>
@@ -172,15 +362,15 @@ export default function App() {
                   />
                   {images.length > 1 && (
                     <>
-                      <button 
-                        onClick={() => setActiveIndex(i => Math.max(0, i - 1))} 
+                      <button
+                        onClick={() => setActiveIndex(i => Math.max(0, i - 1))}
                         disabled={activeIndex === 0}
                         className="absolute left-3 top-1/2 -translate-y-1/2 bg-slate-900/80 border border-slate-700 rounded-full p-1 disabled:opacity-20 hover:border-slate-500 transition-colors"
                       >
                         <ChevronLeft className="h-4 w-4" />
                       </button>
-                      <button 
-                        onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))} 
+                      <button
+                        onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))}
                         disabled={activeIndex === images.length - 1}
                         className="absolute right-3 top-1/2 -translate-y-1/2 bg-slate-900/80 border border-slate-700 rounded-full p-1 disabled:opacity-20 hover:border-slate-500 transition-colors"
                       >
@@ -192,15 +382,15 @@ export default function App() {
 
                 <div className="flex gap-2 flex-wrap">
                   {images.map((img, i) => (
-                    <div 
-                      key={i} 
+                    <div
+                      key={i}
                       onClick={() => setActiveIndex(i)}
                       className={`relative w-14 h-14 rounded-xl overflow-hidden border cursor-pointer flex-shrink-0 transition-all
                         ${i === activeIndex ? "border-cyan-500/70" : "border-slate-800 opacity-60 hover:opacity-100"}`}
                     >
                       <img src={img.preview} alt={`Thumb ${i + 1}`} className="w-full h-full object-cover" />
                       {!results && (
-                        <button 
+                        <button
                           onClick={(e) => { e.stopPropagation(); removeImage(i); }}
                           className="absolute top-0.5 right-0.5 bg-slate-900/90 rounded-full p-0.5 hover:text-rose-400 transition-colors"
                         >
@@ -213,7 +403,7 @@ export default function App() {
                     </div>
                   ))}
                   {!results && (
-                    <div 
+                    <div
                       onClick={() => fileInputRef.current?.click()}
                       className="w-14 h-14 rounded-xl border border-dashed border-slate-700 flex items-center justify-center cursor-pointer hover:border-slate-500 transition-colors flex-shrink-0"
                     >
@@ -222,9 +412,12 @@ export default function App() {
                   )}
                 </div>
 
-                <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple />
+                <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
                 <p className="text-[10px] font-mono text-slate-600 text-center">
                   {images.length} IMAGE{images.length !== 1 ? "S" : ""} QUEUED
+                  {optimizedFiles.length === images.length && images.length > 0 && (
+                    <span className="text-cyan-900 ml-2">· OPTIMIZED ✓</span>
+                  )}
                 </p>
               </div>
             )}
@@ -240,12 +433,27 @@ export default function App() {
                     : "bg-cyan-500 text-slate-950 hover:bg-cyan-400"
                 }`}
             >
-              {loading ? <Loader2 className="animate-spin h-5 w-5" /> : results ? <RefreshCcw className="h-5 w-5" /> : <Zap className="h-5 w-5" />}
               {loading
-                ? `PROCESSING ${images.length} IMAGE${images.length !== 1 ? "S" : ""}...`
-                : results ? "CLEAR_SESSION"
-                : `RUN_EXTRACTION${images.length > 1 ? ` (${images.length})` : ""}`}
+                ? <Loader2 className="animate-spin h-5 w-5" />
+                : results
+                  ? <RefreshCcw className="h-5 w-5" />
+                  : <Zap className="h-5 w-5" />}
+              {loading
+                ? (loadingMsg || `PROCESSING ${images.length} IMAGE${images.length !== 1 ? "S" : ""}...`)
+                : results
+                  ? "CLEAR_SESSION"
+                  : `RUN_EXTRACTION${images.length > 1 ? ` (${images.length})` : ""}`}
             </button>
+
+            {error && !loading && images.length > 0 && !results && (
+              <button
+                onClick={handleAnalyze}
+                className="w-full py-3 rounded-2xl font-bold text-sm bg-slate-900 text-amber-400 border border-amber-900/40 hover:border-amber-700/50 transition-all flex items-center justify-center gap-2"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                RETRY (IMAGES PRESERVED)
+              </button>
+            )}
           </div>
 
           {/* Right Panel */}
@@ -254,8 +462,9 @@ export default function App() {
               <div className="h-full flex flex-col items-center justify-center space-y-6">
                 <Loader2 className="animate-spin text-cyan-400 h-8 w-8" />
                 <p className="text-cyan-400 text-xs uppercase">
-                  Running Batch Ingestion{images.length > 1 ? ` — ${images.length} Images` : ""}...
+                  {loadingMsg || `Running Batch Ingestion${images.length > 1 ? ` — ${images.length} Images` : ""}...`}
                 </p>
+                <p className="text-slate-700 text-[10px] font-mono">Auto-retry enabled · Timeout: {REQUEST_TIMEOUT_MS / 1000}s</p>
               </div>
             ) : results ? (
               <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 space-y-6">
@@ -369,6 +578,7 @@ export default function App() {
   );
 }
 
+// ---------- NUTRIENT GRID ----------
 function NutrientGrid({ data, activeTab, per100gData }) {
   const [customGrams, setCustomGrams] = useState("");
 
@@ -495,6 +705,7 @@ function NutrientGrid({ data, activeTab, per100gData }) {
   );
 }
 
+// ---------- STATUS BADGE ----------
 function StatusBadge({ icon, label, status, color }) {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 border border-slate-800 rounded-lg bg-slate-900/50">
