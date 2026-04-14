@@ -25,7 +25,7 @@ load_dotenv()
 # ---------- CONFIG ----------
 DB_NAME = os.getenv("DATABASE_NAME", "nutriscan.duckdb")
 PRIMARY_MODEL = "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-1.5-flash"
+FALLBACK_MODEL = "gemini-2.5-pro"
 MAX_IMAGE_PX = 1024
 JPEG_QUALITY = 60
 GEMINI_TIMEOUT = 45  # seconds
