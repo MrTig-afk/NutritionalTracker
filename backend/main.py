@@ -25,11 +25,11 @@ load_dotenv()
 # ---------- CONFIG ----------
 DB_NAME = os.getenv("DATABASE_NAME", "nutriscan.duckdb")
 PRIMARY_MODEL = "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-2.5-pro"
+FALLBACK_MODEL = "gemini-1.5-flash"
 MAX_IMAGE_PX = 1024
 JPEG_QUALITY = 60
 GEMINI_TIMEOUT = 45  # seconds
-MAX_RETRIES = 3
+MAX_RETRIES = 2      # reduced from 3
 
 logger.info(f"📦 USING DB: {os.path.abspath(DB_NAME)}")
 
@@ -54,7 +54,7 @@ else:
     logger.warning("⚠️ Gemini API key missing")
 
 # ---------- FASTAPI ----------
-app = FastAPI(title="NutriScan API", version="2.0")
+app = FastAPI(title="NutriScan API", version="2.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -146,13 +146,11 @@ RESPOND WITH JSON ONLY:"""
 
 # ---------- IMAGE OPTIMIZATION ----------
 def optimize_image(image_bytes: bytes, content_type: str = "image/jpeg") -> bytes:
-    """Resize to max 1024px and compress JPEG to quality 60."""
+    """Resize to max 1024px and compress JPEG to quality 60. Kept as defensive backend layer."""
     try:
         img = Image.open(io.BytesIO(image_bytes))
-        # Convert RGBA/P to RGB for JPEG compatibility
         if img.mode in ("RGBA", "P", "LA"):
             img = img.convert("RGB")
-        # Resize if needed
         w, h = img.size
         if w > MAX_IMAGE_PX or h > MAX_IMAGE_PX:
             img.thumbnail((MAX_IMAGE_PX, MAX_IMAGE_PX), Image.LANCZOS)
@@ -171,10 +169,11 @@ def optimize_image(image_bytes: bytes, content_type: str = "image/jpeg") -> byte
 async def call_gemini_with_retry(contents: list, label: str = "") -> str:
     """
     Call Gemini with exponential backoff retry on 503 errors.
-    Falls back to gemini-1.5-flash after primary model exhausts retries.
+    Does NOT retry on 429 (quota exceeded) — raises immediately.
+    Falls back to FALLBACK_MODEL after primary exhausts retries.
     Enforces GEMINI_TIMEOUT per attempt.
     """
-    delays = [1, 2, 4]
+    delays = [1, 2]  # matches MAX_RETRIES=2
 
     async def _attempt(model: str, attempt: int) -> str:
         logger.info(f"   🤖 [{label}] {model} attempt {attempt + 1}/{MAX_RETRIES}")
@@ -202,10 +201,25 @@ async def call_gemini_with_retry(contents: list, label: str = "") -> str:
         except Exception as e:
             last_error = e
             err_str = str(e)
+
+            # Do NOT retry on 429 — raise immediately
+            is_429 = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+            if is_429:
+                logger.warning(f"   🚫 [{label}] Quota exceeded (429), not retrying")
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error_type": "quota_exceeded",
+                        "retryable": False,
+                        "message": "API quota exceeded. Try again later."
+                    }
+                )
+
             is_503 = "503" in err_str or "UNAVAILABLE" in err_str or "unavailable" in err_str.lower()
             logger.warning(f"   ⚠️ [{label}] Primary model error on attempt {attempt + 1}: {err_str[:120]}")
             if not is_503:
-                break  # Non-retriable error on primary, go straight to fallback
+                break  # Non-retriable error, go straight to fallback
+
         if attempt < MAX_RETRIES - 1:
             wait = delays[attempt]
             logger.info(f"   ⏳ [{label}] Retrying in {wait}s...")
@@ -237,6 +251,17 @@ async def call_gemini_with_retry(contents: list, label: str = "") -> str:
             }
         )
     except Exception as e:
+        err_str = str(e)
+        # Also guard 429 on fallback
+        if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error_type": "quota_exceeded",
+                    "retryable": False,
+                    "message": "API quota exceeded. Try again later."
+                }
+            )
         raise HTTPException(
             status_code=503,
             detail={
@@ -324,17 +349,17 @@ async def analyze_label(file: UploadFile = File(...)):
     image_bytes = await file.read()
     logger.info(f"📥 Single image: {file.filename} ({len(image_bytes)} bytes)")
 
-    # Optimize image before inference
+    # Backend optimization layer (defensive — frontend already optimized)
     optimized_bytes = optimize_image(image_bytes, file.content_type or "image/jpeg")
 
-    # Run inference and S3 upload concurrently
     contents = [
         PROMPT_SINGLE,
         types.Part.from_bytes(data=optimized_bytes, mime_type="image/jpeg")
     ]
 
+    # Run inference and S3 upload concurrently
     gemini_task = asyncio.create_task(call_gemini_with_retry(contents, label="single"))
-    s3_task = asyncio.create_task(upload_to_s3_async(image_bytes, file_id, file.content_type or "image/jpeg"))
+    s3_task     = asyncio.create_task(upload_to_s3_async(image_bytes, file_id, file.content_type or "image/jpeg"))
 
     try:
         raw_text = await gemini_task
@@ -423,10 +448,10 @@ async def analyze_labels(files: List[UploadFile] = File(...)):
             types.Part.from_bytes(data=optimized, mime_type="image/jpeg")
         ]
         gemini_task = asyncio.create_task(call_gemini_with_retry(contents, label="routed-single"))
-        s3_task = asyncio.create_task(upload_to_s3_async(img["bytes"], img["file_id"], img["content_type"]))
+        s3_task     = asyncio.create_task(upload_to_s3_async(img["bytes"], img["file_id"], img["content_type"]))
 
         raw_text = await gemini_task
-        s3_url = await s3_task
+        s3_url   = await s3_task
 
         try:
             raw_json_str = raw_text.replace("```json", "").replace("```", "").strip()
@@ -454,12 +479,10 @@ async def analyze_labels(files: List[UploadFile] = File(...)):
         logger.info("✅ Smart-routed single image processed")
         return parsed
 
-    # Multi-image batch path
-    # Optimize all images
+    # Multi-image batch path — optimize all images (defensive backend layer)
     for img in images_data:
         img["optimized_bytes"] = optimize_image(img["bytes"], img["content_type"])
 
-    # Build Gemini request (inference first, S3 after)
     n = len(images_data)
     contents = [build_batch_prompt(n)]
     for img in images_data:
@@ -474,7 +497,6 @@ async def analyze_labels(files: List[UploadFile] = File(...)):
     except HTTPException:
         raise
 
-    # Parse response
     try:
         raw_json_str = raw_text.replace("```json", "").replace("```", "").strip()
         parsed = json.loads(raw_json_str)
@@ -496,14 +518,13 @@ async def analyze_labels(files: List[UploadFile] = File(...)):
             parsed.append({"error": "Missing data", "per_100g": {}, "per_serving": {}})
         parsed = parsed[:n]
 
-    # S3 uploads after inference (concurrent, non-blocking on DB save)
+    # S3 uploads after inference (concurrent)
     s3_tasks = [
         upload_to_s3_async(img["bytes"], img["file_id"], img["content_type"])
         for img in images_data
     ]
     s3_urls = await asyncio.gather(*s3_tasks)
 
-    # Save to database
     try:
         db = duckdb.connect(DB_NAME)
         for img, s3_url, result in zip(images_data, s3_urls, parsed):
