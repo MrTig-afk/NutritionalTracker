@@ -655,7 +655,7 @@ export default function App() {
                 <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
                 <Upload className="h-8 w-8 text-slate-600 mb-2" />
                 <p className="text-slate-500 text-sm">Click to ingest images</p>
-                <p className="text-slate-700 text-[10px] font-mono mt-1">CROP → GRAYSCALE → OPTIMIZE → ANALYZE</p>
+                <p className="text-slate-700 text-[10px] font-mono mt-1">CROP → OPTIMIZE → ANALYZE</p>
               </div>
             ) : (
               <div className="space-y-3">
