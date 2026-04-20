@@ -1023,6 +1023,7 @@ function ScanTab({ onAddToLog }) {
   const [cropperFile, setCropperFile]   = useState(null);
   const [saveModal, setSaveModal]       = useState(null);
   const [logName, setLogName]           = useState("");
+  const [fileInputKey, setFileInputKey] = useState(0);
   const fileInputRef = useRef(null);
 
   const accumulatedOptimizedRef = useRef([]);
@@ -1054,7 +1055,9 @@ function ScanTab({ onAddToLog }) {
   const handleImageUpload = useCallback((e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    e.target.value = "";
+    // NOTE: do NOT clear e.target.value here — iOS WebKit invalidates File
+    // references when the input is cleared, breaking blob URL creation.
+    // The input is reset via a key prop on re-upload instead.
     accumulatedOptimizedRef.current = [];
     accumulatedImagesRef.current    = [];
     setCropperQueue(files);
@@ -1129,6 +1132,7 @@ function ScanTab({ onAddToLog }) {
     });
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab('per_100g');
+    setFileInputKey(k => k + 1); // resets the file input so same file can be re-uploaded
   }, [images]);
 
   const handleAnalyze = useCallback(async () => {
@@ -1159,7 +1163,7 @@ function ScanTab({ onAddToLog }) {
           {images.length === 0 ? (
             <div className="relative border-2 border-dashed border-slate-800 bg-slate-900/10 rounded-3xl p-6 h-[400px] flex flex-col items-center justify-center cursor-pointer hover:border-slate-700 transition-colors"
               onClick={() => fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
+              <input key={fileInputKey} ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
               <Upload className="h-8 w-8 text-slate-600 mb-2" />
               <p className="text-slate-500 text-sm">Click to upload — auto-analyzes after crop</p>
               <p className="text-slate-700 text-[10px] font-mono mt-1">CROP → OPTIMIZE → AUTO-ANALYZE</p>
@@ -1208,7 +1212,7 @@ function ScanTab({ onAddToLog }) {
                   </div>
                 )}
               </div>
-              <input ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
+              <input key={fileInputKey} ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
               <p className="text-[10px] font-mono text-slate-600 text-center">
                 {images.length} IMAGE{images.length !== 1 ? "S" : ""} QUEUED
                 {allOptimized && !loading && !results && <span className="text-cyan-900 ml-2">· OPTIMIZED ✓</span>}
