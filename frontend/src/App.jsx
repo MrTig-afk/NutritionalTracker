@@ -652,7 +652,7 @@ function MacroBar({ label, current, goal, color }) {
 // =============================================================================
 // TRACKER TAB
 // =============================================================================
-function TrackerTab({ refreshKey }) {
+function TrackerTab({ refreshKey, onEditEntry }) {
   const [goals, setGoals] = useState({ calories: 2000, protein: 150, carbs: 250, fat: 65 });
   const [logData, setLogData] = useState(null);
   const [editingGoals, setEditingGoals] = useState(false);
@@ -764,6 +764,11 @@ function TrackerTab({ refreshKey }) {
                     F {entry.contribution.fat.toFixed(1)}g
                   </p>
                 </div>
+                <button
+                  onClick={() => onEditEntry && onEditEntry(entry)}
+                  className="text-slate-500 hover:text-cyan-400 transition-colors flex-shrink-0 mr-1">
+                  <PenLine className="h-4 w-4" />
+                </button>
                 <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
                   className="text-slate-700 hover:text-rose-400 transition-colors flex-shrink-0">
                   {deletingId === entry.log_id ? <Loader2 className="animate-spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
@@ -1363,7 +1368,18 @@ export default function App() {
   const [libraryMountKey, setLibraryMountKey]     = useState(0);
 
   const handleAddToLog = useCallback((item) => { setAddToLogItem(item); }, []);
-  const handleLogAdded = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
+  const handleLogAdded  = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
+
+  const handleEditEntry = useCallback(async (entry) => {
+    // Delete old log entry then reopen modal pre-filled so user can adjust and re-log
+    try { await apiFetch(`/log/${entry.log_id}`, { method: "DELETE" }); }
+    catch (e) { console.error("Edit delete failed:", e); }
+    setLogRefreshKey(k => k + 1);
+    setAddToLogItem({
+      name:      entry.name,
+      nutrition: entry.nutrition ? { per_serving: entry.nutrition } : {},
+    });
+  }, []);
 
   const handleTabChange = useCallback((tabId) => {
     setActiveMainTab(tabId);
@@ -1412,7 +1428,7 @@ export default function App() {
         )}
         {/* TrackerTab: display:none + refreshKey for instant macro updates */}
         <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
-          <TrackerTab refreshKey={logRefreshKey} />
+          <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
         </div>
       </div>
     </div>
