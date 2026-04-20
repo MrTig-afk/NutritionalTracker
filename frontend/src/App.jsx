@@ -201,7 +201,21 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      setImages(prev => prev.map((img, idx) => { const url = arr[idx]?.processed_url || arr[idx]?.raw_url || null; return url ? { ...img, persistentUrl: url } : img; }));
+      // FIXED: Update images with the processed_url from API response
+      setImages(prev => prev.map((img, idx) => {
+        const resultItem = arr[idx];
+        const processedUrl = resultItem?.processed_url || resultItem?.raw_url || null;
+        // Revoke old preview URL if it was a blob URL and we have a new persistent URL
+        if (processedUrl && img.preview && img.preview.startsWith("blob:")) {
+          URL.revokeObjectURL(img.preview);
+        }
+        return {
+          ...img,
+          persistentUrl: processedUrl,
+          // Keep preview as fallback, but prioritize persistentUrl
+          preview: processedUrl || img.preview
+        };
+      }));
       switchToIndex(0, arr);
     } else {
       optimizedFiles.forEach(f => formData.append("files", f));
@@ -210,7 +224,21 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      setImages(prev => prev.map((img, idx) => { const url = arr[idx]?.processed_url || arr[idx]?.raw_url || null; return url ? { ...img, persistentUrl: url } : img; }));
+      // FIXED: Update images with the processed_url from API response
+      setImages(prev => prev.map((img, idx) => {
+        const resultItem = arr[idx];
+        const processedUrl = resultItem?.processed_url || resultItem?.raw_url || null;
+        // Revoke old preview URL if it was a blob URL and we have a new persistent URL
+        if (processedUrl && img.preview && img.preview.startsWith("blob:")) {
+          URL.revokeObjectURL(img.preview);
+        }
+        return {
+          ...img,
+          persistentUrl: processedUrl,
+          // Keep preview as fallback, but prioritize persistentUrl
+          preview: processedUrl || img.preview
+        };
+      }));
       switchToIndex(0, arr);
     }
   } catch (err) { console.error("❌ Pipeline Failure:", err); setError(err.message); }
@@ -1090,12 +1118,13 @@ function ScanTab({ onAddToLog }) {
   const handleAnalyze = useCallback(async () => {
     if (results) { handleClear(); return; } if (!images.length) return;
     const filesToSend = accumulatedOptimizedRef.current.length === images.length ? accumulatedOptimizedRef.current : optimizedFiles.length === images.length ? optimizedFiles : images.map(i => i.file);
-    runAnalysis({ optimizedFiles: filesToSend, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
+    await runAnalysis({ optimizedFiles: filesToSend, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  // Use accumulatedImagesRef as fallback — immune to React batching delays after runAnalysis
-  const currentPreview = images[activeIndex]?.persistentUrl || images[activeIndex]?.preview || accumulatedImagesRef.current[activeIndex]?.preview || null;
+  // FIXED: Get the preview URL - prioritize persistentUrl from the image state
+  const currentImage = images[activeIndex];
+  const currentPreview = currentImage?.persistentUrl || currentImage?.preview || accumulatedImagesRef.current[activeIndex]?.preview || null;
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
 
   return (
