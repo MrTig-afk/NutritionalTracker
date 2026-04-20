@@ -1082,7 +1082,7 @@ function ScanTab({ onAddToLog }) {
     const remaining = cropperQueue.slice(1);
 
     setLoadingMsg("Processing...");
-    // Run both in parallel: grayscale optimized for API, full-color for preview
+    // Run both in parallel: grayscale optimized for API, full-color data URL for preview
     const [optimized, previewDataUrl] = await Promise.all([
       applyPipelineToFile(file, cropData),
       generatePreview(file, cropData),
@@ -1090,6 +1090,7 @@ function ScanTab({ onAddToLog }) {
 
     const imageEntry = { file, preview: previewDataUrl, cropData, persistentUrl: null };
 
+    // FIX: append to both state AND refs in the same order so indices always match
     setImages(prev => [...prev, imageEntry]);
     setOptimizedFiles(prev => [...prev, optimized]);
     setResults(null); setError(null); setActiveIndex(0);
@@ -1101,13 +1102,11 @@ function ScanTab({ onAddToLog }) {
     if (remaining.length > 0) {
       setCropperQueue(remaining); setCropperFile(remaining[0]);
     } else {
+      // FIX: just close the cropper — do NOT auto-trigger analysis
+      // User presses the Analyze button manually when ready
       setCropperQueue([]); setCropperFile(null);
-      const finalOptimized = accumulatedOptimizedRef.current;
-      if (finalOptimized.length > 0) {
-        runAnalysis({ optimizedFiles: finalOptimized, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
-      }
     }
-  }, [cropperFile, cropperQueue, switchToIndex]);
+  }, [cropperFile, cropperQueue]);
 
   const handleCropCancel = useCallback(() => {
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
@@ -1139,7 +1138,14 @@ function ScanTab({ onAddToLog }) {
   const handleAnalyze = useCallback(async () => {
     if (results) { handleClear(); return; }
     if (!images.length) return;
-    const filesToSend = optimizedFiles.length === images.length ? optimizedFiles : images.map(i => i.file);
+    // FIX: always use accumulatedOptimizedRef — these are guaranteed to be in the
+    // same order as images state since both are appended together in handleCropConfirm.
+    // Fallback to optimizedFiles state if ref is somehow empty (e.g. after page refresh).
+    const filesToSend = accumulatedOptimizedRef.current.length === images.length
+      ? accumulatedOptimizedRef.current
+      : optimizedFiles.length === images.length
+        ? optimizedFiles
+        : images.map(i => i.file);
     runAnalysis({ optimizedFiles: filesToSend, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
@@ -1344,10 +1350,18 @@ function ScanTab({ onAddToLog }) {
 export default function App() {
   const [activeMainTab, setActiveMainTab] = useState("scan");
   const [addToLogItem, setAddToLogItem]   = useState(null);
-  const [logRefreshKey, setLogRefreshKey] = useState(0);
+  const [logRefreshKey, setLogRefreshKey]         = useState(0);
+  // FIX: increment every time user navigates to Library so it remounts and reloads
+  const [libraryMountKey, setLibraryMountKey]     = useState(0);
 
   const handleAddToLog = useCallback((item) => { setAddToLogItem(item); }, []);
   const handleLogAdded = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
+
+  const handleTabChange = useCallback((tabId) => {
+    setActiveMainTab(tabId);
+    // FIX: remount LibraryTab every time user clicks Library so folders/items reload fresh
+    if (tabId === "library") setLibraryMountKey(k => k + 1);
+  }, []);
 
   const TABS = [
     { id: "scan",    label: "Scan",    icon: <Zap      className="h-4 w-4" /> },
@@ -1373,16 +1387,25 @@ export default function App() {
 
         <div className="flex gap-1 p-1 bg-slate-900/60 border border-slate-800 rounded-2xl mb-8 w-fit">
           {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveMainTab(tab.id)}
+            <button key={tab.id} onClick={() => handleTabChange(tab.id)}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${activeMainTab === tab.id ? "bg-slate-800 text-slate-100 shadow" : "text-slate-500 hover:text-slate-300"}`}>
               {tab.icon} {tab.label}
             </button>
           ))}
         </div>
 
-        <div style={{ display: activeMainTab === "scan"    ? "block" : "none" }}><ScanTab onAddToLog={handleAddToLog} /></div>
-        <div style={{ display: activeMainTab === "library" ? "block" : "none" }}><LibraryTab onAddToLog={handleAddToLog} /></div>
-        <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}><TrackerTab refreshKey={logRefreshKey} /></div>
+        {/* ScanTab: display:none preserves upload/crop state across tab switches */}
+        <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
+          <ScanTab onAddToLog={handleAddToLog} />
+        </div>
+        {/* LibraryTab: remounts on every visit via key so folders always reload fresh */}
+        {activeMainTab === "library" && (
+          <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} />
+        )}
+        {/* TrackerTab: display:none + refreshKey for instant macro updates */}
+        <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
+          <TrackerTab refreshKey={logRefreshKey} />
+        </div>
       </div>
     </div>
   );
