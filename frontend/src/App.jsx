@@ -129,9 +129,8 @@ async function applyPipelineToFile(file, cropData) {
   });
 }
 
-// Preview: store the File object itself. Blob URLs are created fresh at render time
-// and never revoked prematurely. This is the most reliable approach for iOS Safari.
-function getPreviewUrl(file) {
+// Create a blob URL once — store it, never recreate it on each render.
+function createPreviewUrl(file) {
   return URL.createObjectURL(file);
 }
 // =============================================================================
@@ -1067,11 +1066,13 @@ function ScanTab({ onAddToLog }) {
     const remaining = cropperQueue.slice(1);
 
     setLoadingMsg("Processing...");
+    // Create preview blob URL ONCE right here — before any async work that might
+    // cause iOS to drop the File reference. Store it permanently in imageEntry.
+    const previewUrl = createPreviewUrl(file);
     // Optimize for API submission (grayscale + resize)
     const optimized = await applyPipelineToFile(file, cropData);
 
-    // Store the original File object — blob URL created fresh at render time
-    const imageEntry = { file, preview: null, cropData, persistentUrl: null };
+    const imageEntry = { file, preview: previewUrl, cropData, persistentUrl: null };
 
     // FIX: append to both state AND refs in the same order so indices always match
     setImages(prev => [...prev, imageEntry]);
@@ -1107,16 +1108,28 @@ function ScanTab({ onAddToLog }) {
   }, [images]);
 
   const removeImage = useCallback((index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
+    setImages(prev => {
+      const img = prev[index];
+      if (img?.preview && img.preview.startsWith('blob:') && !img.persistentUrl) {
+        URL.revokeObjectURL(img.preview);
+      }
+      return prev.filter((_, i) => i !== index);
+    });
     setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev));
     setResults(null); setError(null);
   }, []);
 
   const handleClear = useCallback(() => {
+    // Revoke stored preview blob URLs (not persistentUrls which are S3)
+    images.forEach(img => {
+      if (img?.preview && img.preview.startsWith('blob:') && !img.persistentUrl) {
+        URL.revokeObjectURL(img.preview);
+      }
+    });
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
-    setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab("per_100g");
-  }, []);
+    setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab('per_100g');
+  }, [images]);
 
   const handleAnalyze = useCallback(async () => {
     if (results) { handleClear(); return; }
@@ -1133,7 +1146,7 @@ function ScanTab({ onAddToLog }) {
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  const currentPreview = images[activeIndex]?.persistentUrl || (images[activeIndex]?.file ? getPreviewUrl(images[activeIndex].file) : null);
+  const currentPreview = images[activeIndex]?.persistentUrl || images[activeIndex]?.preview || null;
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
 
   return (
@@ -1172,7 +1185,7 @@ function ScanTab({ onAddToLog }) {
               </div>
               <div className="flex gap-2 flex-wrap">
                 {images.map((img, i) => {
-                  const thumbSrc = img.persistentUrl || (img.file ? getPreviewUrl(img.file) : null);
+                  const thumbSrc = img.persistentUrl || img.preview || null;
                   return (
                     <div key={i} onClick={() => setActiveIndex(i)}
                       className={`relative w-14 h-14 rounded-xl overflow-hidden border cursor-pointer flex-shrink-0 transition-all ${i === activeIndex ? "border-cyan-500/70" : "border-slate-800 opacity-60 hover:opacity-100"}`}>
@@ -1260,7 +1273,7 @@ function ScanTab({ onAddToLog }) {
                   <p className="text-[10px] font-mono text-slate-600">SELECT RESULT</p>
                   <div className="flex gap-2 flex-wrap">
                     {results.map((_, i) => {
-                      const thumbSrc = images[i]?.persistentUrl || (images[i]?.file ? getPreviewUrl(images[i].file) : null);
+                      const thumbSrc = images[i]?.persistentUrl || images[i]?.preview || null;
                       return (
                         <button key={i} onClick={() => switchToIndex(i, results)}
                           className={`flex items-center gap-2 px-2 py-1.5 rounded-xl border transition-all ${activeIndex === i ? "border-cyan-500/50 bg-cyan-500/10" : "border-slate-800 hover:border-slate-600"}`}>
