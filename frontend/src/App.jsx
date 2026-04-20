@@ -147,9 +147,9 @@ async function generatePreview(file, cropData) {
       canvas.width = targetW; canvas.height = targetH;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, srcX, srcY, srcWidth, srcHeight, 0, 0, targetW, targetH);
-      resolve(canvas.toDataURL("image/jpeg", 0.92));
+      canvas.toBlob((blob) => { if (blob) { resolve(URL.createObjectURL(blob)); } else { resolve(URL.createObjectURL(file)); } }, "image/jpeg", 0.92);
     };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(URL.createObjectURL(file)); };
     img.src = url;
   });
 }
@@ -1131,9 +1131,13 @@ function ScanTab({ onAddToLog }) {
   }, []);
 
   const handleClear = useCallback(() => {
+    // Revoke all preview blob URLs to free memory
+    images.forEach(img => {
+      if (img?.preview && img.preview.startsWith("blob:")) URL.revokeObjectURL(img.preview);
+    });
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab("per_100g");
-  }, []);
+  }, [images]);
 
   const handleAnalyze = useCallback(async () => {
     if (results) { handleClear(); return; }
