@@ -129,31 +129,12 @@ async function applyPipelineToFile(file, cropData) {
   });
 }
 
-// FIX: Full-color high-quality preview as data URL — persists across renders, no blur
-async function generatePreview(file, cropData) {
-  return new Promise((resolve) => {
-    const img = new window.Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const srcX      = cropData ? cropData.x      : 0;
-      const srcY      = cropData ? cropData.y      : 0;
-      const srcWidth  = cropData ? cropData.width  : img.naturalWidth;
-      const srcHeight = cropData ? cropData.height : img.naturalHeight;
-      const scale     = Math.min(1, 1200 / Math.max(srcWidth, srcHeight));
-      const targetW   = Math.max(1, Math.round(srcWidth  * scale));
-      const targetH   = Math.max(1, Math.round(srcHeight * scale));
-      const canvas    = document.createElement("canvas");
-      canvas.width = targetW; canvas.height = targetH;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, srcX, srcY, srcWidth, srcHeight, 0, 0, targetW, targetH);
-      canvas.toBlob((blob) => { if (blob) { resolve(URL.createObjectURL(blob)); } else { resolve(URL.createObjectURL(file)); } }, "image/jpeg", 0.92);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(URL.createObjectURL(file)); };
-    img.src = url;
-  });
+// Preview: just create a blob URL from the original file.
+// Skipping canvas entirely — iOS Safari reliably renders blob URLs from File objects.
+// The full pipeline (grayscale + resize) still runs separately for the API submission.
+function generatePreview(file) {
+  return URL.createObjectURL(file);
 }
-
 // =============================================================================
 // FETCH WITH TIMEOUT + RETRY
 // =============================================================================
@@ -1082,13 +1063,12 @@ function ScanTab({ onAddToLog }) {
     const remaining = cropperQueue.slice(1);
 
     setLoadingMsg("Processing...");
-    // Run both in parallel: grayscale optimized for API, full-color data URL for preview
-    const [optimized, previewDataUrl] = await Promise.all([
-      applyPipelineToFile(file, cropData),
-      generatePreview(file, cropData),
-    ]);
+    // Generate preview immediately (sync blob URL from original file — works on iOS)
+    // Run API-optimized version in background
+    const previewUrl = generatePreview(file);
+    const optimized  = await applyPipelineToFile(file, cropData);
 
-    const imageEntry = { file, preview: previewDataUrl, cropData, persistentUrl: null };
+    const imageEntry = { file, preview: previewUrl, cropData, persistentUrl: null };
 
     // FIX: append to both state AND refs in the same order so indices always match
     setImages(prev => [...prev, imageEntry]);
@@ -1124,7 +1104,14 @@ function ScanTab({ onAddToLog }) {
   }, [images]);
 
   const removeImage = useCallback((index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
+    setImages(prev => {
+      const img = prev[index];
+      // Only revoke local blob previews, not persistent S3 URLs
+      if (img?.preview && img.preview.startsWith("blob:") && !img.persistentUrl) {
+        URL.revokeObjectURL(img.preview);
+      }
+      return prev.filter((_, i) => i !== index);
+    });
     setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev));
     setResults(null); setError(null);
