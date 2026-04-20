@@ -962,6 +962,34 @@ async def get_daily_log(
     }
 
 
+@app.put("/log/{log_id}")
+async def update_log_entry(
+    log_id: str,
+    body: LogEntry,
+    x_user_id: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id(x_user_id)
+    try:
+        db  = get_db()
+        row = db.execute(
+            "SELECT log_id FROM daily_log WHERE log_id = ? AND user_id = ?",
+            [log_id, user_id],
+        ).fetchone()
+        if not row:
+            db.close()
+            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Log entry not found"})
+        db.execute(
+            "UPDATE daily_log SET name=?, servings=?, nutrition=? WHERE log_id=? AND user_id=?",
+            [body.name, body.servings, json.dumps(body.nutrition), log_id, user_id],
+        )
+        db.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
+    return {"log_id": log_id, "name": body.name, "servings": body.servings}
+
+
 @app.delete("/log/{log_id}")
 async def delete_log_entry(
     log_id: str,
