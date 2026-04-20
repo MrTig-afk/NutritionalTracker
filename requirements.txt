@@ -6,3 +6,5 @@ python-dotenv
 google-genai
 python-multipart
 Pillow
+opencv-python
+python-doctr[torch]
