@@ -13,30 +13,61 @@ const API_URL = import.meta.env.DEV
   ? "http://localhost:8000"
   : (import.meta.env.VITE_API_URL || "https://nutritionaltracker.onrender.com");
 
-console.log("🔧 API_URL:", API_URL);
-
-const MAX_IMAGE_PX         = 1024; // FIX: increased for sharper API submission
-const JPEG_QUALITY         = 0.85; // FIX: increased quality
+const MAX_IMAGE_PX         = 1024;
+const JPEG_QUALITY         = 0.85;
 const REQUEST_TIMEOUT_MS   = 25000;
 const MAX_FRONTEND_RETRIES = 2;
 const RETRY_DELAY_MS       = [1500, 3000];
 
 // =============================================================================
+// PALETTE — injected as CSS vars, used everywhere via style={}
+// =============================================================================
+const PALETTE_CSS = `
+  :root {
+    --teal:      #006D77;
+    --teal-lt:   #E0F2F3;
+    --teal-md:   #004E56;
+    --teal-dk:   #003940;
+    --purple:    #8C86AA;
+    --purp-lt:   #EEEDF6;
+    --mint:      #AEF6C7;
+    --mint-dk:   #1A6B3C;
+    --brown:     #583E23;
+    --brown-lt:  #F5EDE0;
+    --brown-md:  #3D2B17;
+    --orange:    #B66D0D;
+    --orange-lt: #FDF0DC;
+    --white:     #FDFCF9;
+    --off:       #F2EEE7;
+    --off2:      #EAE3D8;
+    --border:    #D9D0C4;
+    --border2:   #C4B9A8;
+    --text:      #2C2017;
+    --muted:     #7A6A55;
+    --danger:    #C0392B;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Georgia', serif; background: var(--off); color: var(--text); }
+  input, select, textarea, button { font-family: inherit; }
+  input:focus, select:focus { outline: none; }
+`;
+
+// =============================================================================
 // NUTRIENT META
 // =============================================================================
 const NUTRIENT_META = {
-  calories:      { label: "Calories",       unit: "kcal", valueColor: "text-amber-400"   },
-  fat:           { label: "Total Fat",       unit: "g",    valueColor: "text-orange-400"  },
-  saturated_fat: { label: "Saturated Fat",   unit: "g",    valueColor: "text-red-400"     },
-  carbohydrates: { label: "Carbohydrates",   unit: "g",    valueColor: "text-blue-400"    },
-  sugars:        { label: "of which Sugars", unit: "g",    valueColor: "text-violet-400"  },
-  fibre:         { label: "Dietary Fibre",   unit: "g",    valueColor: "text-emerald-400" },
-  protein:       { label: "Protein",         unit: "g",    valueColor: "text-cyan-400"    },
-  sodium:        { label: "Sodium",          unit: "g",    valueColor: "text-slate-400"   },
+  calories:      { label: "Calories",       unit: "kcal", color: "var(--orange)"  },
+  fat:           { label: "Total Fat",       unit: "g",    color: "var(--brown)"   },
+  saturated_fat: { label: "Saturated Fat",   unit: "g",    color: "var(--danger)"  },
+  carbohydrates: { label: "Carbohydrates",   unit: "g",    color: "var(--purple)"  },
+  sugars:        { label: "of which Sugars", unit: "g",    color: "var(--purple)"  },
+  fibre:         { label: "Dietary Fibre",   unit: "g",    color: "var(--mint-dk)" },
+  protein:       { label: "Protein",         unit: "g",    color: "var(--teal)"    },
+  sodium:        { label: "Sodium",          unit: "g",    color: "var(--muted)"   },
 };
 
 function getFallbackMeta(key) {
-  return { label: key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()), unit: "", valueColor: "text-slate-300" };
+  return { label: key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()), unit: "", color: "var(--muted)" };
 }
 
 function parseNumeric(value) {
@@ -56,15 +87,10 @@ function extractServingGrams(size) {
   return numMatch ? parseFloat(numMatch[1]) : null;
 }
 
-// =============================================================================
-// kJ → kcal CONVERSION
-// =============================================================================
 function normalizeCalories(value) {
   const num = parseNumeric(value);
   if (num === null) return value;
-  if (typeof value === "string" && /kj|kilojoule/i.test(value)) {
-    return Math.round(num / 4.184);
-  }
+  if (typeof value === "string" && /kj|kilojoule/i.test(value)) return Math.round(num / 4.184);
   return value;
 }
 
@@ -93,7 +119,7 @@ function resolveNutrition(nutrition) {
 }
 
 // =============================================================================
-// IMAGE PIPELINE: crop → resize → grayscale → compress (for API submission)
+// IMAGE PIPELINE
 // =============================================================================
 async function applyPipelineToFile(file, cropData) {
   return new Promise((resolve) => {
@@ -101,24 +127,17 @@ async function applyPipelineToFile(file, cropData) {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       URL.revokeObjectURL(url);
-      const srcX      = cropData ? cropData.x      : 0;
-      const srcY      = cropData ? cropData.y      : 0;
-      const srcWidth  = cropData ? cropData.width  : img.naturalWidth;
-      const srcHeight = cropData ? cropData.height : img.naturalHeight;
-      const scale     = Math.min(1, MAX_IMAGE_PX / Math.max(srcWidth, srcHeight));
-      const targetW   = Math.max(1, Math.round(srcWidth  * scale));
-      const targetH   = Math.max(1, Math.round(srcHeight * scale));
-      const canvas    = document.createElement("canvas");
-      canvas.width = targetW; canvas.height = targetH;
+      const srcX = cropData ? cropData.x : 0; const srcY = cropData ? cropData.y : 0;
+      const srcW = cropData ? cropData.width : img.naturalWidth;
+      const srcH = cropData ? cropData.height : img.naturalHeight;
+      const scale = Math.min(1, MAX_IMAGE_PX / Math.max(srcW, srcH));
+      const tW = Math.max(1, Math.round(srcW * scale)); const tH = Math.max(1, Math.round(srcH * scale));
+      const canvas = document.createElement("canvas"); canvas.width = tW; canvas.height = tH;
       const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, srcX, srcY, srcWidth, srcHeight, 0, 0, targetW, targetH);
-      const imageData = ctx.getImageData(0, 0, targetW, targetH);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        data[i] = data[i + 1] = data[i + 2] = gray;
-      }
-      ctx.putImageData(imageData, 0, 0);
+      ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, tW, tH);
+      const id = ctx.getImageData(0, 0, tW, tH); const d = id.data;
+      for (let i = 0; i < d.length; i += 4) { const g = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2]; d[i]=d[i+1]=d[i+2]=g; }
+      ctx.putImageData(id, 0, 0);
       canvas.toBlob((blob) => {
         if (!blob) { resolve(file); return; }
         resolve(new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg", lastModified: Date.now() }));
@@ -129,12 +148,10 @@ async function applyPipelineToFile(file, cropData) {
   });
 }
 
-// Create a blob URL once — store it, never recreate it on each render.
-function createPreviewUrl(file) {
-  return URL.createObjectURL(file);
-}
+function createPreviewUrl(file) { return URL.createObjectURL(file); }
+
 // =============================================================================
-// FETCH WITH TIMEOUT + RETRY
+// FETCH HELPERS
 // =============================================================================
 async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
   let lastError;
@@ -156,31 +173,21 @@ async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
       if (err.name === "AbortError") {
         lastError = new Error("Request timed out. Please try again.");
         if (attempt < maxRetries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000)); continue; }
-      } else if (err.message.startsWith("Pipeline Error:")) {
-        throw err;
-      } else {
-        lastError = err;
-        if (attempt < maxRetries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000)); continue; }
-      }
+      } else if (err.message.startsWith("Pipeline Error:")) { throw err; }
+      else { lastError = err; if (attempt < maxRetries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000)); continue; } }
     }
   }
   throw lastError || new Error("Request failed after retries");
 }
 
 async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
-    ...options,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-    throw new Error(err.message || `HTTP ${res.status}`);
-  }
+  const res = await fetch(`${API_URL}${path}`, { headers: { "Content-Type": "application/json", ...options.headers }, ...options });
+  if (!res.ok) { const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` })); throw new Error(err.message || `HTTP ${res.status}`); }
   return res.json();
 }
 
 // =============================================================================
-// CORE ANALYSIS — standalone function, no stale closure issues
+// CORE ANALYSIS
 // =============================================================================
 async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex }) {
   if (!optimizedFiles.length) return;
@@ -194,10 +201,7 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      setImages(prev => prev.map((img, idx) => ({
-        ...img,
-        persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null,
-      })));
+      setImages(prev => prev.map((img, idx) => ({ ...img, persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null })));
       switchToIndex(0, arr);
     } else {
       optimizedFiles.forEach(f => formData.append("files", f));
@@ -206,22 +210,38 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      setImages(prev => prev.map((img, idx) => ({
-        ...img,
-        persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null,
-      })));
+      setImages(prev => prev.map((img, idx) => ({ ...img, persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null })));
       switchToIndex(0, arr);
     }
-  } catch (err) {
-    console.error("❌ Pipeline Failure:", err);
-    setError(err.message);
-  } finally {
-    setLoading(false); setLoadingMsg("");
-  }
+  } catch (err) { console.error("❌ Pipeline Failure:", err); setError(err.message); }
+  finally { setLoading(false); setLoadingMsg(""); }
 }
 
 // =============================================================================
-// IMAGE CROPPER COMPONENT
+// SHARED STYLE HELPERS
+// =============================================================================
+const card = { background: "var(--white)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" };
+const cardHeader = { background: "var(--brown-lt)", padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" };
+const inputStyle = { width: "100%", padding: "9px 12px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 14, color: "var(--text)" };
+const labelStyle = { fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 };
+const primaryBtn = { width: "100%", padding: "13px", background: "var(--teal)", color: "white", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
+const mintBtn = { width: "100%", padding: "13px", background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
+const ghostBtn = { padding: "9px 14px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12, fontWeight: 600, color: "var(--brown)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
+const overlayBg = { position: "fixed", inset: 0, zIndex: 50, background: "rgba(44,32,23,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
+const modalBox = { width: "100%", maxWidth: 400, background: "var(--white)", border: "1px solid var(--border2)", borderRadius: 20, padding: 24, display: "flex", flexDirection: "column", gap: 16 };
+const modalHeader = { display: "flex", alignItems: "center", justifyContent: "space-between" };
+const modalTitle = { fontSize: 15, fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center", gap: 8 };
+const pillRow = { display: "flex", padding: 4, background: "var(--off2)", border: "1px solid var(--border)", borderRadius: 10, gap: 4 };
+const macroCells = (vals) => vals.map(({ label, value, unit, color }) => (
+  <div key={label} style={{ flex: 1, background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
+    <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase" }}>{label}</div>
+    <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 2 }}>{value.toFixed(1)}</div>
+    <div style={{ fontSize: 10, color: "var(--muted)" }}>{unit}</div>
+  </div>
+));
+
+// =============================================================================
+// IMAGE CROPPER
 // =============================================================================
 function ImageCropper({ file, onConfirm, onCancel }) {
   const canvasRef = useRef(null); const containerRef = useRef(null);
@@ -256,20 +276,18 @@ function ImageCropper({ file, onConfirm, onCancel }) {
     const canvas = canvasRef.current; const ctx = canvas.getContext("2d");
     const { w: cw, h: ch } = canvasSize;
     ctx.clearRect(0, 0, cw, ch); ctx.drawImage(imgRef.current, 0, 0, cw, ch);
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(0, 0, cw, cropRect.y);
-    ctx.fillRect(0, cropRect.y + cropRect.h, cw, ch - cropRect.y - cropRect.h);
-    ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h);
-    ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, cw - cropRect.x - cropRect.w, cropRect.h);
-    ctx.strokeStyle = "#22d3ee"; ctx.lineWidth = 2; ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(44,32,23,0.55)";
+    ctx.fillRect(0, 0, cw, cropRect.y); ctx.fillRect(0, cropRect.y + cropRect.h, cw, ch - cropRect.y - cropRect.h);
+    ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h); ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, cw - cropRect.x - cropRect.w, cropRect.h);
+    ctx.strokeStyle = "#006D77"; ctx.lineWidth = 2; ctx.setLineDash([]);
     ctx.strokeRect(cropRect.x, cropRect.y, cropRect.w, cropRect.h);
-    ctx.strokeStyle = "rgba(34,211,238,0.22)"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(0,109,119,0.3)"; ctx.lineWidth = 1;
     for (let i = 1; i <= 2; i++) {
       const gx = cropRect.x + (cropRect.w / 3) * i; const gy = cropRect.y + (cropRect.h / 3) * i;
       ctx.beginPath(); ctx.moveTo(gx, cropRect.y); ctx.lineTo(gx, cropRect.y + cropRect.h); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(cropRect.x, gy); ctx.lineTo(cropRect.x + cropRect.w, gy); ctx.stroke();
     }
-    ctx.fillStyle = "#22d3ee";
+    ctx.fillStyle = "#006D77";
     [[cropRect.x, cropRect.y], [cropRect.x + cropRect.w, cropRect.y],
      [cropRect.x, cropRect.y + cropRect.h], [cropRect.x + cropRect.w, cropRect.y + cropRect.h]]
       .forEach(([cx, cy]) => ctx.fillRect(cx - 5, cy - 5, 10, 10));
@@ -284,9 +302,7 @@ function ImageCropper({ file, onConfirm, onCancel }) {
   const getZone = (pos, r) => {
     const hs = 18;
     const corners = { nw: [r.x, r.y], ne: [r.x + r.w, r.y], sw: [r.x, r.y + r.h], se: [r.x + r.w, r.y + r.h] };
-    for (const [k, [cx, cy]] of Object.entries(corners)) {
-      if (Math.abs(pos.x - cx) <= hs && Math.abs(pos.y - cy) <= hs) return k;
-    }
+    for (const [k, [cx, cy]] of Object.entries(corners)) if (Math.abs(pos.x - cx) <= hs && Math.abs(pos.y - cy) <= hs) return k;
     if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) return "move";
     return null;
   };
@@ -299,10 +315,8 @@ function ImageCropper({ file, onConfirm, onCancel }) {
   }, [cropRect]);
   const onMove = useCallback((e) => {
     if (!isDragging.current || !cropAtStart.current) return; e.preventDefault();
-    const pos = getPos(e, canvasRef.current);
-    const dx = pos.x - dragStart.current.x, dy = pos.y - dragStart.current.y;
-    const { w: cw, h: ch } = canvasSize;
-    const b = cropAtStart.current, MIN = 40, m = dragMode.current;
+    const pos = getPos(e, canvasRef.current); const dx = pos.x - dragStart.current.x, dy = pos.y - dragStart.current.y;
+    const { w: cw, h: ch } = canvasSize; const b = cropAtStart.current, MIN = 40, m = dragMode.current;
     setCropRect(() => {
       let { x, y, w, h } = b;
       if (m === "move") { x = clamp(b.x + dx, 0, cw - b.w); y = clamp(b.y + dy, 0, ch - b.h); }
@@ -320,33 +334,31 @@ function ImageCropper({ file, onConfirm, onCancel }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/96 flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-lg">
-        <div className="flex items-center justify-between mb-3">
+    <div style={overlayBg}>
+      <div style={{ width: "100%", maxWidth: 520 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
-            <p className="text-xs font-bold text-slate-300 uppercase tracking-widest flex items-center gap-2">
-              <Crop className="h-4 w-4 text-cyan-400" /> Crop Nutrition Label
+            <p style={{ fontSize: 13, fontWeight: 700, color: "var(--white)", display: "flex", alignItems: "center", gap: 8 }}>
+              <Crop size={14} color="var(--mint)" /> Crop Nutrition Label
             </p>
-            <p className="text-[10px] text-slate-600 font-mono mt-0.5">Drag corners to resize · Drag inside to move</p>
+            <p style={{ fontSize: 11, color: "rgba(253,252,249,0.5)", marginTop: 2 }}>Drag corners to resize · Drag inside to move</p>
           </div>
-          <button onClick={onCancel} className="text-slate-600 hover:text-rose-400 transition-colors"><X className="h-5 w-5" /></button>
+          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(253,252,249,0.5)" }}><X size={18} /></button>
         </div>
-        <div ref={containerRef} className="w-full rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 touch-none select-none">
-          {imageLoaded ? (
-            <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h}
-              style={{ display: "block", width: "100%", touchAction: "none", cursor: "crosshair" }}
-              onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
-              onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp} />
-          ) : (
-            <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-cyan-400 h-6 w-6" /></div>
-          )}
+        <div ref={containerRef} style={{ width: "100%", borderRadius: 14, overflow: "hidden", border: "1px solid var(--border2)", touchAction: "none", userSelect: "none" }}>
+          {imageLoaded
+            ? <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h} style={{ display: "block", width: "100%", touchAction: "none", cursor: "crosshair" }}
+                onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+                onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp} />
+            : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240 }}><Loader2 size={24} color="var(--teal)" className="animate-spin" /></div>
+          }
         </div>
-        {cropRect && <p className="text-[9px] font-mono text-slate-700 mt-2 text-center">REGION: {Math.round(cropRect.w / imgScale)}×{Math.round(cropRect.h / imgScale)}px</p>}
-        <div className="flex gap-3 mt-4">
-          <button onClick={onCancel} className="flex-1 py-3 rounded-xl border border-slate-800 text-slate-500 text-xs font-bold hover:border-slate-600 transition-colors">CANCEL</button>
-          <button onClick={() => onConfirm(null)} className="flex-1 py-3 rounded-xl border border-slate-700 text-slate-400 text-xs font-bold hover:border-slate-500 transition-colors">FULL IMAGE</button>
-          <button onClick={handleConfirm} className="flex-1 py-3 rounded-xl bg-cyan-500 text-slate-950 text-xs font-bold hover:bg-cyan-400 transition-colors flex items-center justify-center gap-2">
-            <Check className="h-4 w-4" /> CONFIRM
+        {cropRect && <p style={{ fontSize: 10, color: "rgba(253,252,249,0.4)", textAlign: "center", marginTop: 8 }}>REGION: {Math.round(cropRect.w / imgScale)}×{Math.round(cropRect.h / imgScale)}px</p>}
+        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: "11px", background: "rgba(253,252,249,0.08)", border: "1px solid rgba(253,252,249,0.2)", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "rgba(253,252,249,0.7)", cursor: "pointer" }}>Cancel</button>
+          <button onClick={() => onConfirm(null)} style={{ flex: 1, padding: "11px", background: "rgba(253,252,249,0.08)", border: "1px solid rgba(253,252,249,0.2)", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "rgba(253,252,249,0.7)", cursor: "pointer" }}>Full image</button>
+          <button onClick={handleConfirm} style={{ flex: 1, padding: "11px", background: "var(--teal)", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <Check size={14} /> Confirm
           </button>
         </div>
       </div>
@@ -374,13 +386,11 @@ function SaveToFolderModal({ result, imageId, onClose }) {
       setFolders(prev => [f, ...prev]); setSelectedFolder(f.folder_id); setNewFolder("");
     } catch (e) { setStatus({ type: "error", msg: e.message }); }
   };
-
   const handleFolderKeyDown = (e) => {
     if (e.key === "Enter") { e.preventDefault(); createFolder(); return; }
     if (e.ctrlKey && e.key === "Backspace") { e.preventDefault(); setNewFolder(prev => prev.replace(/\s*\S+\s*$/, "")); return; }
     if (e.ctrlKey && e.key === "Delete") { e.preventDefault(); const pos = e.target.selectionStart; setNewFolder(newFolder.slice(0, pos) + newFolder.slice(pos).replace(/^\s*\S+/, "")); }
   };
-
   const save = async () => {
     if (!selectedFolder || !itemName.trim()) return;
     setSaving(true);
@@ -394,37 +404,30 @@ function SaveToFolderModal({ result, imageId, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><BookmarkPlus className="h-4 w-4 text-cyan-400" /> Save to Folder</h3>
-          <button onClick={onClose} className="text-slate-600 hover:text-rose-400"><X className="h-4 w-4" /></button>
+    <div style={overlayBg}>
+      <div style={modalBox}>
+        <div style={modalHeader}>
+          <div style={modalTitle}><BookmarkPlus size={15} color="var(--teal)" /> Save to Folder</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
         </div>
         <div>
-          <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Item Name</label>
-          <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Greek Yogurt"
-            className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60" />
+          <label style={labelStyle}>Item Name</label>
+          <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Greek Yogurt" style={inputStyle} />
         </div>
         <div>
-          <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Folder</label>
-          <select value={selectedFolder} onChange={e => setSelectedFolder(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60">
+          <label style={labelStyle}>Folder</label>
+          <select value={selectedFolder} onChange={e => setSelectedFolder(e.target.value)} style={inputStyle}>
             <option value="">— select folder —</option>
             {folders.map(f => <option key={f.folder_id} value={f.folder_id}>{f.name}</option>)}
           </select>
         </div>
-        <div className="flex gap-2">
-          <input value={newFolder} onChange={e => setNewFolder(e.target.value)} placeholder="New folder name..."
-            onKeyDown={handleFolderKeyDown}
-            className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60" />
-          <button onClick={createFolder} className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-400 hover:text-cyan-400 transition-colors">
-            <FolderPlus className="h-4 w-4" />
-          </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input value={newFolder} onChange={e => setNewFolder(e.target.value)} placeholder="New folder name..." onKeyDown={handleFolderKeyDown} style={{ ...inputStyle, flex: 1 }} />
+          <button onClick={createFolder} style={{ ...ghostBtn, padding: "9px 12px" }}><FolderPlus size={14} /></button>
         </div>
-        {status && <p className={`text-xs font-mono ${status.type === "ok" ? "text-emerald-500" : "text-rose-400"}`}>{status.msg}</p>}
-        <button onClick={save} disabled={saving || !selectedFolder || !itemName.trim()}
-          className="w-full py-3 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm hover:bg-cyan-400 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-          {saving ? <Loader2 className="animate-spin h-4 w-4" /> : <Save className="h-4 w-4" />}
+        {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
+        <button onClick={save} disabled={saving || !selectedFolder || !itemName.trim()} style={{ ...primaryBtn, opacity: (saving || !selectedFolder || !itemName.trim()) ? 0.45 : 1 }}>
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           {saving ? "Saving..." : "Save"}
         </button>
       </div>
@@ -434,49 +437,38 @@ function SaveToFolderModal({ result, imageId, onClose }) {
 
 // =============================================================================
 // ADD TO LOG MODAL
-// FIX: Added "Manual" mode — user can type custom macro values directly
 // =============================================================================
 function AddToLogModal({ item, onClose, onAdded }) {
-  const [mode, setMode]       = useState("serving");
+  const [mode, setMode] = useState("serving");
   const [servings, setServings] = useState("1");
-  const [grams, setGrams]     = useState("");
-  const [saving, setSaving]   = useState(false);
-  const [status, setStatus]   = useState(null);
-
-  // Manual mode
-  const [manualName,  setManualName]  = useState(item.name || "");
-  const [manualCal,   setManualCal]   = useState("");
-  const [manualProt,  setManualProt]  = useState("");
-  const [manualCarb,  setManualCarb]  = useState("");
-  const [manualFat,   setManualFat]   = useState("");
+  const [grams, setGrams] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [manualName, setManualName] = useState(item.name || "");
+  const [manualCal, setManualCal] = useState("");
+  const [manualProt, setManualProt] = useState("");
+  const [manualCarb, setManualCarb] = useState("");
+  const [manualFat, setManualFat] = useState("");
   const [manualFibre, setManualFibre] = useState("");
 
-  const rawNutrition  = item.nutrition || {};
-  const per100g       = rawNutrition.per_100g    && Object.keys(rawNutrition.per_100g).length > 0    ? rawNutrition.per_100g    : null;
-  const perServing    = rawNutrition.per_serving && Object.keys(rawNutrition.per_serving).length > 0 ? rawNutrition.per_serving : null;
+  const rawNutrition = item.nutrition || {};
+  const per100g    = rawNutrition.per_100g    && Object.keys(rawNutrition.per_100g).length    > 0 ? rawNutrition.per_100g    : null;
+  const perServing = rawNutrition.per_serving && Object.keys(rawNutrition.per_serving).length > 0 ? rawNutrition.per_serving : null;
   const baseNutrition = perServing ?? per100g ?? resolveNutrition(rawNutrition);
-  const servingGrams  = perServing ? extractServingGrams(perServing.size) : null;
-  const servingsNum   = parseFloat(servings) || 1;
-  const gramsNum      = parseFloat(grams)    || 0;
+  const servingGrams = perServing ? extractServingGrams(perServing.size) : null;
+  const servingsNum = parseFloat(servings) || 1; const gramsNum = parseFloat(grams) || 0;
 
-  let scaledNutrition = { ...baseNutrition };
-  let scalingInfo     = null;
-
+  let scaledNutrition = { ...baseNutrition }; let scalingInfo = null;
   if (mode === "serving") {
     scalingInfo = { factor: servingsNum, baseLabel: perServing ? `per serving${perServing.size ? ` (${perServing.size})` : ""}` : "per 100g" };
   } else if (mode === "grams") {
-    if (per100g && gramsNum > 0) {
-      scalingInfo = { factor: gramsNum / 100, baseLabel: "per 100g", targetLabel: `${gramsNum}g` }; scaledNutrition = per100g;
-    } else if (perServing && servingGrams && gramsNum > 0) {
-      scalingInfo = { factor: gramsNum / servingGrams, baseLabel: `per serving (${servingGrams}g)`, targetLabel: `${gramsNum}g` }; scaledNutrition = perServing;
-    } else {
-      scalingInfo = { factor: 1, baseLabel: "no size data", targetLabel: `${gramsNum}g`, warn: true };
-    }
+    if (per100g && gramsNum > 0) { scalingInfo = { factor: gramsNum / 100, baseLabel: "per 100g", targetLabel: `${gramsNum}g` }; scaledNutrition = per100g; }
+    else if (perServing && servingGrams && gramsNum > 0) { scalingInfo = { factor: gramsNum / servingGrams, baseLabel: `per serving (${servingGrams}g)`, targetLabel: `${gramsNum}g` }; scaledNutrition = perServing; }
+    else { scalingInfo = { factor: 1, baseLabel: "no size data", targetLabel: `${gramsNum}g`, warn: true }; }
   }
 
   const factor = scalingInfo?.factor ?? 1;
   const getVal = (key) => (parseNumeric(scaledNutrition[key]) || 0) * factor;
-
   const cal  = mode === "manual" ? (parseFloat(manualCal)   || 0) : getVal("calories");
   const prot = mode === "manual" ? (parseFloat(manualProt)  || 0) : getVal("protein");
   const carb = mode === "manual" ? (parseFloat(manualCarb)  || 0) : getVal("carbohydrates");
@@ -484,145 +476,89 @@ function AddToLogModal({ item, onClose, onAdded }) {
   const fib  = mode === "manual" ? (parseFloat(manualFibre) || 0) : getVal("fibre");
 
   const buildSubmitNutrition = () => {
-    if (mode === "manual") {
-      return { per_serving: { size: "1 serving", calories: Math.round(cal), protein: `${prot.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, fat: `${fat.toFixed(1)}g`, fibre: `${fib.toFixed(1)}g` } };
-    }
+    if (mode === "manual") return { per_serving: { size: "1 serving", calories: Math.round(cal), protein: `${prot.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, fat: `${fat.toFixed(1)}g`, fibre: `${fib.toFixed(1)}g` } };
     if (mode === "serving") return rawNutrition;
-    return {
-      per_serving: {
-        size: `${gramsNum}g`, calories: Math.round(cal),
-        fat: `${fat.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, protein: `${prot.toFixed(1)}g`, fibre: `${fib.toFixed(1)}g`,
-        ...(scaledNutrition.saturated_fat ? { saturated_fat: `${(parseNumeric(scaledNutrition.saturated_fat) || 0) * factor}g` } : {}),
-        ...(scaledNutrition.sugars        ? { sugars:        `${(parseNumeric(scaledNutrition.sugars)        || 0) * factor}g` } : {}),
-        ...(scaledNutrition.sodium        ? { sodium:        `${(parseNumeric(scaledNutrition.sodium)        || 0) * factor}g` } : {}),
-      },
-    };
+    return { per_serving: { size: `${gramsNum}g`, calories: Math.round(cal), fat: `${fat.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, protein: `${prot.toFixed(1)}g`, fibre: `${fib.toFixed(1)}g`, ...(scaledNutrition.saturated_fat ? { saturated_fat: `${(parseNumeric(scaledNutrition.saturated_fat)||0)*factor}g` } : {}), ...(scaledNutrition.sugars ? { sugars: `${(parseNumeric(scaledNutrition.sugars)||0)*factor}g` } : {}), ...(scaledNutrition.sodium ? { sodium: `${(parseNumeric(scaledNutrition.sodium)||0)*factor}g` } : {}) } };
   };
 
   const canSave = mode === "serving" ? servingsNum > 0 : mode === "grams" ? gramsNum > 0 : manualCal !== "" || manualProt !== "" || manualCarb !== "" || manualFat !== "";
 
   const save = async () => {
-    if (!canSave) return;
-    setSaving(true);
+    if (!canSave) return; setSaving(true);
     try {
       const submitServings = mode === "serving" ? servingsNum : 1;
-      const submitName     = manualName.trim() || item.name;
+      const submitName = manualName.trim() || item.name;
       await apiFetch("/log", { method: "POST", body: JSON.stringify({ name: submitName, servings: submitServings, nutrition: buildSubmitNutrition() }) });
-      setStatus({ type: "ok", msg: "Added to today's log!" });
-      onAdded();
-      setTimeout(() => { onClose(); }, 900);
+      setStatus({ type: "ok", msg: "Added to today's log!" }); onAdded(); setTimeout(() => { onClose(); }, 900);
     } catch (e) { setStatus({ type: "error", msg: e.message }); }
     finally { setSaving(false); }
   };
 
+  const activePill = { flex: 1, padding: "7px", background: "var(--teal)", color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" };
+  const inactivePill = { flex: 1, padding: "7px", background: "transparent", color: "var(--muted)", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" };
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><CalendarDays className="h-4 w-4 text-emerald-400" /> Add to Today's Log</h3>
-          <button onClick={onClose} className="text-slate-600 hover:text-rose-400"><X className="h-4 w-4" /></button>
+    <div style={overlayBg}>
+      <div style={modalBox}>
+        <div style={modalHeader}>
+          <div style={modalTitle}><CalendarDays size={15} color="var(--mint-dk)" /> Add to Today's Log</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
         </div>
-
-        <input
-          value={manualName}
-          onChange={e => setManualName(e.target.value)}
-          placeholder="Item name..."
-          className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm font-bold text-slate-200 focus:outline-none focus:border-emerald-500/60"
-        />
-
-        <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl">
+        <input value={manualName} onChange={e => setManualName(e.target.value)} placeholder="Item name..." style={{ ...inputStyle, fontWeight: 700 }} />
+        <div style={pillRow}>
           {[["serving", "Per Serving"], ["grams", "By Weight"], ["manual", "Manual"]].map(([m, label]) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`flex-1 py-2 text-[10px] font-bold rounded-lg transition-all ${mode === m ? "bg-emerald-500 text-slate-950 shadow" : "text-slate-500 hover:text-slate-300"}`}>
-              {label}
-            </button>
+            <button key={m} onClick={() => setMode(m)} style={mode === m ? activePill : inactivePill}>{label}</button>
           ))}
         </div>
-
         {mode === "serving" && (
           <div>
-            <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Servings</label>
-            <div className="flex items-center gap-3">
-              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))}
-                className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-slate-400 hover:border-slate-500"><Minus className="h-3 w-3" /></button>
-              <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)}
-                className="w-20 text-center px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
-              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))}
-                className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-slate-400 hover:border-slate-500"><Plus className="h-3 w-3" /></button>
+            <label style={labelStyle}>Servings</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={12} /></button>
+              <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)} style={{ ...inputStyle, width: 80, textAlign: "center" }} />
+              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={12} /></button>
             </div>
-            {baseNutrition.size && <p className="text-[10px] font-mono text-slate-600 mt-1">Base: {baseNutrition.size}</p>}
+            {baseNutrition.size && <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Base: {baseNutrition.size}</p>}
           </div>
         )}
-
         {mode === "grams" && (
           <div>
-            <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Amount (grams)</label>
-            <div className="flex items-center gap-3">
-              <input type="number" min="1" step="1" value={grams} onChange={e => setGrams(e.target.value)} placeholder="e.g. 150"
-                className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60" />
-              <span className="text-sm font-mono text-slate-400 font-bold">g</span>
+            <label style={labelStyle}>Amount (grams)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="number" min="1" step="1" value={grams} onChange={e => setGrams(e.target.value)} placeholder="e.g. 150" style={{ ...inputStyle, flex: 1 }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--muted)" }}>g</span>
             </div>
           </div>
         )}
-
         {mode === "manual" && (
-          <div className="space-y-2">
-            <div>
-              <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Food Name</label>
-              <input value={manualName} onChange={e => setManualName(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: "Calories (kcal)", val: manualCal,   set: setManualCal   },
-                { label: "Protein (g)",     val: manualProt,  set: setManualProt  },
-                { label: "Carbs (g)",       val: manualCarb,  set: setManualCarb  },
-                { label: "Fat (g)",         val: manualFat,   set: setManualFat   },
-                { label: "Fibre (g)",       val: manualFibre, set: setManualFibre },
-              ].map(({ label, val, set }) => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {[["Calories (kcal)", manualCal, setManualCal], ["Protein (g)", manualProt, setManualProt], ["Carbs (g)", manualCarb, setManualCarb], ["Fat (g)", manualFat, setManualFat], ["Fibre (g)", manualFibre, setManualFibre]].map(([label, val, set]) => (
                 <div key={label}>
-                  <label className="text-[9px] font-mono text-slate-600 uppercase mb-1 block">{label}</label>
-                  <input type="number" min="0" step="any" value={val} onChange={e => set(e.target.value)} placeholder="0"
-                    className="w-full px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
+                  <label style={{ ...labelStyle, fontSize: 10 }}>{label}</label>
+                  <input type="number" min="0" step="any" value={val} onChange={e => set(e.target.value)} placeholder="0" style={inputStyle} />
                 </div>
               ))}
             </div>
           </div>
         )}
-
         {scalingInfo && mode !== "manual" && (
-          <div className="text-[10px] font-mono leading-relaxed">
-            {scalingInfo.warn
-              ? <span className="text-amber-600">⚠ No size data — using base values as-is</span>
-              : <span className="text-slate-600">
-                  BASE: {scalingInfo.baseLabel}
-                  {mode === "grams" && gramsNum > 0 && scalingInfo.factor !== 1 && <span className="text-emerald-700 ml-2">→ {scalingInfo.targetLabel} | ×{scalingInfo.factor.toFixed(4)}</span>}
-                  {mode === "serving" && servingsNum !== 1 && <span className="text-emerald-700 ml-2">× {servingsNum} servings</span>}
-                </span>
-            }
-          </div>
+          <p style={{ fontSize: 11, color: scalingInfo.warn ? "var(--orange)" : "var(--muted)" }}>
+            {scalingInfo.warn ? `⚠ No size data — using base values as-is`
+              : `Base: ${scalingInfo.baseLabel}${scalingInfo.targetLabel ? ` → ${scalingInfo.targetLabel} ×${scalingInfo.factor.toFixed(3)}` : ""}${mode === "serving" && servingsNum !== 1 ? ` × ${servingsNum} servings` : ""}`}
+          </p>
         )}
-
-        <div className="grid grid-cols-4 gap-2">
-          {[
-            { label: "Cal",   value: cal,  unit: "kcal", color: "text-amber-400"  },
-            { label: "Prot",  value: prot, unit: "g",    color: "text-cyan-400"   },
-            { label: "Carbs", value: carb, unit: "g",    color: "text-blue-400"   },
-            { label: "Fat",   value: fat,  unit: "g",    color: "text-orange-400" },
-          ].map(({ label, value, unit, color }) => (
-            <div key={label} className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 text-center">
-              <p className="text-[9px] font-mono text-slate-600">{label}</p>
-              <p className={`text-sm font-bold ${color}`}>{value.toFixed(1)}</p>
-              <p className="text-[8px] font-mono text-slate-700">{unit}</p>
-            </div>
-          ))}
+        <div style={{ display: "flex", gap: 8 }}>
+          {macroCells([
+            { label: "Cal",   value: cal,  unit: "kcal", color: "var(--orange)"  },
+            { label: "Prot",  value: prot, unit: "g",    color: "var(--teal)"    },
+            { label: "Carbs", value: carb, unit: "g",    color: "var(--purple)"  },
+            { label: "Fat",   value: fat,  unit: "g",    color: "var(--brown)"   },
+          ])}
         </div>
-
-        {status && <p className={`text-xs font-mono ${status.type === "ok" ? "text-emerald-500" : "text-rose-400"}`}>{status.msg}</p>}
-
-        <button onClick={save} disabled={saving || !canSave}
-          className="w-full py-3 rounded-xl bg-emerald-500 text-slate-950 font-bold text-sm hover:bg-emerald-400 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-          {saving ? <Loader2 className="animate-spin h-4 w-4" /> : <Plus className="h-4 w-4" />}
+        {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
+        <button onClick={save} disabled={saving || !canSave} style={{ ...mintBtn, opacity: (saving || !canSave) ? 0.45 : 1 }}>
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
           {saving ? "Adding..." : "Add to Log"}
         </button>
       </div>
@@ -631,163 +567,101 @@ function AddToLogModal({ item, onClose, onAdded }) {
 }
 
 // =============================================================================
-// EDIT LOG MODAL — updates existing entry in place via PUT /log/{log_id}
+// EDIT LOG MODAL
 // =============================================================================
 function EditLogModal({ entry, onClose, onSaved }) {
-  const [mode, setMode]         = useState("serving");
+  const [mode, setMode] = useState("serving");
   const [servings, setServings] = useState(String(entry.servings || 1));
-  const [grams, setGrams]       = useState("");
-  const [name, setName]         = useState(entry.name || "");
-  const [saving, setSaving]     = useState(false);
-  const [status, setStatus]     = useState(null);
+  const [grams, setGrams] = useState("");
+  const [name, setName] = useState(entry.name || "");
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null);
 
-  const nutrition   = entry.nutrition || {};
-  const per100g     = nutrition.per_100g    && Object.keys(nutrition.per_100g).length    > 0 ? nutrition.per_100g    : null;
-  const perServing  = nutrition.per_serving && Object.keys(nutrition.per_serving).length > 0 ? nutrition.per_serving : null;
+  const nutrition = entry.nutrition || {};
+  const per100g    = nutrition.per_100g    && Object.keys(nutrition.per_100g).length    > 0 ? nutrition.per_100g    : null;
+  const perServing = nutrition.per_serving && Object.keys(nutrition.per_serving).length > 0 ? nutrition.per_serving : null;
   const baseNutrition = perServing ?? per100g ?? nutrition;
-  const servingGrams  = perServing ? extractServingGrams(perServing.size) : null;
+  const servingGrams = perServing ? extractServingGrams(perServing.size) : null;
+  const servingsNum = parseFloat(servings) || 1; const gramsNum = parseFloat(grams) || 0;
 
-  const servingsNum = parseFloat(servings) || 1;
-  const gramsNum    = parseFloat(grams)    || 0;
-
-  let scaledNutrition = { ...baseNutrition };
-  let scalingInfo     = null;
-
-  if (mode === "serving") {
-    scalingInfo = { factor: servingsNum, baseLabel: perServing?.size ? `per serving (${perServing.size})` : "per serving" };
-  } else {
-    if (per100g && gramsNum > 0) {
-      scalingInfo = { factor: gramsNum / 100, baseLabel: "per 100g", targetLabel: `${gramsNum}g` };
-      scaledNutrition = per100g;
-    } else if (perServing && servingGrams && gramsNum > 0) {
-      scalingInfo = { factor: gramsNum / servingGrams, baseLabel: `per serving (${servingGrams}g)`, targetLabel: `${gramsNum}g` };
-      scaledNutrition = perServing;
-    } else {
-      scalingInfo = { factor: 1, baseLabel: "no size data", warn: true };
-    }
+  let scaledNutrition = { ...baseNutrition }; let scalingInfo = null;
+  if (mode === "serving") { scalingInfo = { factor: servingsNum, baseLabel: perServing?.size ? `per serving (${perServing.size})` : "per serving" }; }
+  else {
+    if (per100g && gramsNum > 0) { scalingInfo = { factor: gramsNum / 100, baseLabel: "per 100g", targetLabel: `${gramsNum}g` }; scaledNutrition = per100g; }
+    else if (perServing && servingGrams && gramsNum > 0) { scalingInfo = { factor: gramsNum / servingGrams, baseLabel: `per serving (${servingGrams}g)`, targetLabel: `${gramsNum}g` }; scaledNutrition = perServing; }
+    else { scalingInfo = { factor: 1, baseLabel: "no size data", warn: true }; }
   }
 
   const factor = scalingInfo?.factor ?? 1;
   const getVal = (key) => (parseNumeric(scaledNutrition[key]) || 0) * factor;
-
-  const cal  = getVal("calories");
-  const prot = getVal("protein");
-  const carb = getVal("carbohydrates");
-  const fat  = getVal("fat");
-  const fib  = getVal("fibre");
+  const cal = getVal("calories"); const prot = getVal("protein"); const carb = getVal("carbohydrates"); const fat = getVal("fat");
 
   const buildNutrition = () => {
     if (mode === "serving") return entry.nutrition;
-    return {
-      per_serving: {
-        size:          `${gramsNum}g`,
-        calories:      Math.round(cal),
-        fat:           `${fat.toFixed(1)}g`,
-        carbohydrates: `${carb.toFixed(1)}g`,
-        protein:       `${prot.toFixed(1)}g`,
-        fibre:         `${fib.toFixed(1)}g`,
-      },
-    };
+    return { per_serving: { size: `${gramsNum}g`, calories: Math.round(cal), fat: `${fat.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, protein: `${prot.toFixed(1)}g`, fibre: `${getVal("fibre").toFixed(1)}g` } };
   };
 
   const save = async () => {
-    if (mode === "serving" && servingsNum <= 0) return;
-    if (mode === "grams"   && gramsNum   <= 0) return;
+    if (mode === "serving" && servingsNum <= 0) return; if (mode === "grams" && gramsNum <= 0) return;
     setSaving(true);
     try {
       const submitServings = mode === "serving" ? servingsNum : 1;
-      await apiFetch(`/log/${entry.log_id}`, {
-        method: "PUT",
-        body: JSON.stringify({ name: name.trim() || entry.name, servings: submitServings, nutrition: buildNutrition() }),
-      });
-      setStatus({ type: "ok", msg: "Updated!" });
-      onSaved();
-      setTimeout(onClose, 700);
-    } catch (e) {
-      setStatus({ type: "error", msg: e.message });
-    } finally { setSaving(false); }
+      await apiFetch(`/log/${entry.log_id}`, { method: "PUT", body: JSON.stringify({ name: name.trim() || entry.name, servings: submitServings, nutrition: buildNutrition() }) });
+      setStatus({ type: "ok", msg: "Updated!" }); onSaved(); setTimeout(onClose, 700);
+    } catch (e) { setStatus({ type: "error", msg: e.message }); }
+    finally { setSaving(false); }
   };
 
+  const activePill = { flex: 1, padding: "7px", background: "var(--teal)", color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" };
+  const inactivePill = { flex: 1, padding: "7px", background: "transparent", color: "var(--muted)", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" };
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><PenLine className="h-4 w-4 text-cyan-400" /> Edit Log Entry</h3>
-          <button onClick={onClose} className="text-slate-600 hover:text-rose-400"><X className="h-4 w-4" /></button>
+    <div style={overlayBg}>
+      <div style={modalBox}>
+        <div style={modalHeader}>
+          <div style={modalTitle}><PenLine size={15} color="var(--teal)" /> Edit Log Entry</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
         </div>
-
         <div>
-          <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Name</label>
-          <input value={name} onChange={e => setName(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
+          <label style={labelStyle}>Name</label>
+          <input value={name} onChange={e => setName(e.target.value)} style={{ ...inputStyle, fontWeight: 700 }} />
         </div>
-
-        <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl">
+        <div style={pillRow}>
           {[["serving", "Per Serving"], ["grams", "By Weight"]].map(([m, label]) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${mode === m ? "bg-cyan-500 text-slate-950 shadow" : "text-slate-500 hover:text-slate-300"}`}>
-              {label}
-            </button>
+            <button key={m} onClick={() => setMode(m)} style={mode === m ? activePill : inactivePill}>{label}</button>
           ))}
         </div>
-
         {mode === "serving" ? (
           <div>
-            <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Servings</label>
-            <div className="flex items-center gap-3">
-              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))}
-                className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-slate-400 hover:border-slate-500">
-                <Minus className="h-3 w-3" />
-              </button>
-              <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)}
-                className="w-20 text-center px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
-              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))}
-                className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-slate-400 hover:border-slate-500">
-                <Plus className="h-3 w-3" />
-              </button>
+            <label style={labelStyle}>Servings</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={12} /></button>
+              <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)} style={{ ...inputStyle, width: 80, textAlign: "center" }} />
+              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={12} /></button>
             </div>
-            {baseNutrition?.size && <p className="text-[10px] font-mono text-slate-600 mt-1">Base: {baseNutrition.size}</p>}
+            {baseNutrition?.size && <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Base: {baseNutrition.size}</p>}
           </div>
         ) : (
           <div>
-            <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Amount (grams)</label>
-            <div className="flex items-center gap-3">
-              <input type="number" min="1" step="1" value={grams} onChange={e => setGrams(e.target.value)} placeholder="e.g. 150"
-                className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60" />
-              <span className="text-sm font-mono text-slate-400 font-bold">g</span>
+            <label style={labelStyle}>Amount (grams)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="number" min="1" step="1" value={grams} onChange={e => setGrams(e.target.value)} placeholder="e.g. 150" style={{ ...inputStyle, flex: 1 }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--muted)" }}>g</span>
             </div>
           </div>
         )}
-
-        {scalingInfo && (
-          <div className="text-[10px] font-mono text-slate-600">
-            {scalingInfo.warn
-              ? <span className="text-amber-600">⚠ No size data</span>
-              : <span>BASE: {scalingInfo.baseLabel}{scalingInfo.targetLabel && <span className="text-cyan-700 ml-2">→ {scalingInfo.targetLabel} | ×{scalingInfo.factor.toFixed(4)}</span>}{mode === "serving" && servingsNum !== 1 && <span className="text-cyan-700 ml-2">× {servingsNum} servings</span>}</span>
-            }
-          </div>
-        )}
-
-        <div className="grid grid-cols-4 gap-2">
-          {[
-            { label: "Cal",   value: cal,  unit: "kcal", color: "text-amber-400"  },
-            { label: "Prot",  value: prot, unit: "g",    color: "text-cyan-400"   },
-            { label: "Carbs", value: carb, unit: "g",    color: "text-blue-400"   },
-            { label: "Fat",   value: fat,  unit: "g",    color: "text-orange-400" },
-          ].map(({ label, value, unit, color }) => (
-            <div key={label} className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 text-center">
-              <p className="text-[9px] font-mono text-slate-600">{label}</p>
-              <p className={`text-sm font-bold ${color}`}>{value.toFixed(1)}</p>
-              <p className="text-[8px] font-mono text-slate-700">{unit}</p>
-            </div>
-          ))}
+        {scalingInfo && <p style={{ fontSize: 11, color: scalingInfo.warn ? "var(--orange)" : "var(--muted)" }}>{scalingInfo.warn ? "⚠ No size data" : `Base: ${scalingInfo.baseLabel}${scalingInfo.targetLabel ? ` → ${scalingInfo.targetLabel}` : ""}${mode === "serving" && servingsNum !== 1 ? ` × ${servingsNum}` : ""}`}</p>}
+        <div style={{ display: "flex", gap: 8 }}>
+          {macroCells([
+            { label: "Cal",   value: cal,  unit: "kcal", color: "var(--orange)" },
+            { label: "Prot",  value: prot, unit: "g",    color: "var(--teal)"   },
+            { label: "Carbs", value: carb, unit: "g",    color: "var(--purple)" },
+            { label: "Fat",   value: fat,  unit: "g",    color: "var(--brown)"  },
+          ])}
         </div>
-
-        {status && <p className={`text-xs font-mono ${status.type === "ok" ? "text-emerald-500" : "text-rose-400"}`}>{status.msg}</p>}
-
-        <button onClick={save} disabled={saving || (mode === "serving" ? servingsNum <= 0 : gramsNum <= 0)}
-          className="w-full py-3 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm hover:bg-cyan-400 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
-          {saving ? <Loader2 className="animate-spin h-4 w-4" /> : <Check className="h-4 w-4" />}
+        {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
+        <button onClick={save} disabled={saving || (mode === "serving" ? servingsNum <= 0 : gramsNum <= 0)} style={{ ...primaryBtn, opacity: saving ? 0.45 : 1 }}>
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           {saving ? "Saving..." : "Save Changes"}
         </button>
       </div>
@@ -796,19 +670,19 @@ function EditLogModal({ entry, onClose, onSaved }) {
 }
 
 // =============================================================================
-// MACRO PROGRESS BAR
+// MACRO BAR
 // =============================================================================
 function MacroBar({ label, current, goal, color }) {
   const pct = goal > 0 ? Math.min(100, (current / goal) * 100) : 0;
   const over = current > goal;
   return (
-    <div className="space-y-1">
-      <div className="flex justify-between text-[10px] font-mono">
-        <span className="text-slate-500">{label}</span>
-        <span className={over ? "text-rose-400" : "text-slate-400"}>{current.toFixed(1)} / {goal}{over && " ⚠"}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <span style={{ color: "var(--muted)", fontWeight: 600 }}>{label}</span>
+        <span style={{ color: over ? "var(--danger)" : "var(--text)", fontWeight: 600 }}>{current.toFixed(1)} / {goal}{over && " ⚠"}</span>
       </div>
-      <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-500 ${over ? "bg-rose-500" : color}`} style={{ width: `${pct}%` }} />
+      <div style={{ height: 7, background: "var(--off2)", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ height: "100%", borderRadius: 4, background: over ? "var(--danger)" : color, width: `${pct}%`, transition: "width 0.5s ease" }} />
       </div>
     </div>
   );
@@ -829,10 +703,8 @@ function TrackerTab({ refreshKey, onEditEntry }) {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    try {
-      const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${today}`)]);
-      setGoals(g); setLogData(l);
-    } catch (e) { console.error("Tracker load failed:", e); }
+    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${today}`)]); setGoals(g); setLogData(l); }
+    catch (e) { console.error("Tracker load failed:", e); }
     finally { setLoading(false); }
   }, [today]);
 
@@ -852,95 +724,95 @@ function TrackerTab({ refreshKey, onEditEntry }) {
     finally { setDeletingId(null); }
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-cyan-400 h-6 w-6" /></div>;
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Loader2 size={24} color="var(--teal)" className="animate-spin" /></div>;
 
   const totals = logData?.totals || { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2"><Target className="h-4 w-4 text-cyan-400" /> Daily Goals</h3>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Goals card */}
+      <div style={card}>
+        <div style={cardHeader}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
+            <Target size={14} color="var(--teal)" /> Daily Goals
+          </div>
           <button onClick={() => { setGoalDraft({ ...goals }); setEditingGoals(v => !v); }}
-            className="text-[10px] font-mono text-slate-600 hover:text-cyan-400 transition-colors">{editingGoals ? "CANCEL" : "EDIT"}</button>
+            style={{ fontSize: 12, fontWeight: 600, color: "var(--teal)", background: "none", border: "none", cursor: "pointer" }}>
+            {editingGoals ? "Cancel" : "Edit"}
+          </button>
         </div>
-        {editingGoals ? (
-          <div className="space-y-3">
-            {["calories", "protein", "carbs", "fat", "fibre"].map(key => (
-              <div key={key} className="flex items-center gap-3">
-                <label className="text-[10px] font-mono text-slate-500 w-16 uppercase">{key}</label>
-                <input type="number" min="0" value={goalDraft[key] || ""}
-                  onChange={e => setGoalDraft(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))}
-                  className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
-                <span className="text-[10px] text-slate-600 font-mono w-8">{key === "calories" ? "kcal" : "g"}</span>
-              </div>
-            ))}
-            <button onClick={saveGoals} disabled={savingGoals}
-              className="w-full py-2.5 rounded-xl bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 transition-colors disabled:opacity-40">
-              {savingGoals ? "Saving..." : "SAVE GOALS"}
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <MacroBar label="Calories" current={totals.calories}    goal={goals.calories} color="bg-amber-400"  />
-            <MacroBar label="Protein"  current={totals.protein}     goal={goals.protein}  color="bg-cyan-400"   />
-            <MacroBar label="Carbs"    current={totals.carbs}       goal={goals.carbs}    color="bg-blue-400"   />
-            <MacroBar label="Fat"      current={totals.fat}         goal={goals.fat}      color="bg-orange-400" />
-            {goals.fibre > 0 && <MacroBar label="Fibre" current={totals.fibre || 0} goal={goals.fibre} color="bg-emerald-400" />}
-          </div>
-        )}
+        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {editingGoals ? (
+            <>
+              {["calories", "protein", "carbs", "fat", "fibre"].map(key => (
+                <div key={key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <label style={{ ...labelStyle, width: 60, marginBottom: 0 }}>{key}</label>
+                  <input type="number" min="0" value={goalDraft[key] || ""} onChange={e => setGoalDraft(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))} style={{ ...inputStyle, flex: 1 }} />
+                  <span style={{ fontSize: 11, color: "var(--muted)", width: 32 }}>{key === "calories" ? "kcal" : "g"}</span>
+                </div>
+              ))}
+              <button onClick={saveGoals} disabled={savingGoals} style={{ ...primaryBtn, opacity: savingGoals ? 0.45 : 1 }}>
+                {savingGoals ? "Saving..." : "Save Goals"}
+              </button>
+            </>
+          ) : (
+            <>
+              <MacroBar label="Calories" current={totals.calories}    goal={goals.calories} color="var(--orange)" />
+              <MacroBar label="Protein"  current={totals.protein}     goal={goals.protein}  color="var(--teal)"   />
+              <MacroBar label="Carbs"    current={totals.carbs}       goal={goals.carbs}    color="var(--purple)" />
+              <MacroBar label="Fat"      current={totals.fat}         goal={goals.fat}      color="var(--brown)"  />
+              {goals.fibre > 0 && <MacroBar label="Fibre" current={totals.fibre || 0} goal={goals.fibre} color="var(--mint-dk)" />}
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Summary grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
         {[
-          { label: "Calories", val: totals.calories, unit: "kcal", color: "text-amber-400"  },
-          { label: "Protein",  val: totals.protein,  unit: "g",    color: "text-cyan-400"   },
-          { label: "Carbs",    val: totals.carbs,    unit: "g",    color: "text-blue-400"   },
-          { label: "Fat",      val: totals.fat,      unit: "g",    color: "text-orange-400" },
+          { label: "Calories", val: totals.calories, unit: "kcal", color: "var(--orange)" },
+          { label: "Protein",  val: totals.protein,  unit: "g",    color: "var(--teal)"   },
+          { label: "Carbs",    val: totals.carbs,    unit: "g",    color: "var(--purple)"  },
+          { label: "Fat",      val: totals.fat,      unit: "g",    color: "var(--brown)"  },
         ].map(({ label, val, unit, color }) => (
-          <div key={label} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 text-center">
-            <p className="text-[9px] font-mono text-slate-600 uppercase">{label}</p>
-            <p className={`text-xl font-bold ${color} mt-1`}>{(val || 0).toFixed(1)}</p>
-            <p className="text-[9px] font-mono text-slate-700">{unit}</p>
+          <div key={label} style={{ background: "var(--white)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 8px", textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>{label}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color, marginTop: 4 }}>{(val || 0).toFixed(0)}</div>
+            <div style={{ fontSize: 10, color: "var(--muted)" }}>{unit}</div>
           </div>
         ))}
       </div>
 
-      <div className="bg-slate-900/40 border border-slate-800 rounded-2xl overflow-hidden">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <CalendarDays className="h-4 w-4 text-emerald-400" /> Today's Log — {today}
-          </h3>
-          <span className="text-[10px] font-mono text-slate-600">{logData?.items?.length || 0} entries</span>
+      {/* Log entries */}
+      <div style={card}>
+        <div style={{ ...cardHeader, background: "var(--off)" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
+            <CalendarDays size={14} color="var(--teal)" /> Today's Log — {today}
+          </div>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{logData?.items?.length || 0} entries</span>
         </div>
         {!logData?.items?.length ? (
-          <div className="p-8 text-center text-slate-700 text-sm italic">No entries yet. Add food from Library.</div>
+          <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--muted)", fontSize: 14, fontStyle: "italic" }}>No entries yet. Add food from Library.</div>
         ) : (
-          <div className="divide-y divide-slate-800/50">
-            {logData.items.map(entry => (
-              <div key={entry.log_id} className="flex items-center gap-3 p-4 hover:bg-slate-800/20 transition-colors">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-slate-300 truncate">{entry.name}</p>
-                  <p className="text-[10px] font-mono text-slate-600 mt-0.5">
-                    ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} ·
-                    {entry.contribution.calories.toFixed(0)} kcal ·
-                    P {entry.contribution.protein.toFixed(1)}g ·
-                    C {entry.contribution.carbs.toFixed(1)}g ·
-                    F {entry.contribution.fat.toFixed(1)}g
-                  </p>
+          logData.items.map((entry, idx) => (
+            <div key={entry.log_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: idx % 2 === 0 ? "var(--teal)" : "var(--orange)", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                  ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {entry.contribution.calories.toFixed(0)} kcal · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
                 </div>
-                <button
-                  onClick={() => onEditEntry && onEditEntry(entry)}
-                  className="text-slate-500 hover:text-cyan-400 transition-colors flex-shrink-0 mr-1">
-                  <PenLine className="h-4 w-4" />
-                </button>
-                <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
-                  className="text-slate-700 hover:text-rose-400 transition-colors flex-shrink-0">
-                  {deletingId === entry.log_id ? <Loader2 className="animate-spin h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-                </button>
               </div>
-            ))}
-          </div>
+              <button onClick={() => onEditEntry && onEditEntry(entry)}
+                style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <PenLine size={13} color="var(--teal)" />
+              </button>
+              <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
+                style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {deletingId === entry.log_id ? <Loader2 size={13} color="var(--muted)" className="animate-spin" /> : <Trash2 size={13} color="var(--danger)" />}
+              </button>
+            </div>
+          ))
         )}
       </div>
     </div>
@@ -949,7 +821,6 @@ function TrackerTab({ refreshKey, onEditEntry }) {
 
 // =============================================================================
 // LIBRARY TAB
-// FIX: always re-fetch folder items on open (no stale cache)
 // =============================================================================
 function LibraryTab({ onAddToLog }) {
   const [folders, setFolders] = useState([]);
@@ -961,8 +832,7 @@ function LibraryTab({ onAddToLog }) {
   const [deletingItem, setDeletingItem] = useState(null);
 
   const loadFolders = useCallback(async () => {
-    setLoading(true);
-    setFolderData({}); // FIX: clear cache on every mount
+    setLoading(true); setFolderData({});
     try { setFolders(await apiFetch("/folders")); }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -973,20 +843,14 @@ function LibraryTab({ onAddToLog }) {
   const openFolderById = async (id) => {
     if (openFolder === id) { setOpenFolder(null); return; }
     setOpenFolder(id);
-    // FIX: always re-fetch — don't use stale cache
-    try {
-      const data = await apiFetch(`/folders/${id}`);
-      setFolderData(prev => ({ ...prev, [id]: data }));
-    } catch (e) { console.error(e); }
+    try { const data = await apiFetch(`/folders/${id}`); setFolderData(prev => ({ ...prev, [id]: data })); }
+    catch (e) { console.error(e); }
   };
 
   const createFolder = async () => {
-    if (!newFolderName.trim()) return;
-    setCreating(true);
-    try {
-      const f = await apiFetch("/folders", { method: "POST", body: JSON.stringify({ name: newFolderName.trim() }) });
-      setFolders(prev => [f, ...prev]); setNewFolderName("");
-    } catch (e) { console.error(e); }
+    if (!newFolderName.trim()) return; setCreating(true);
+    try { const f = await apiFetch("/folders", { method: "POST", body: JSON.stringify({ name: newFolderName.trim() }) }); setFolders(prev => [f, ...prev]); setNewFolderName(""); }
+    catch (e) { console.error(e); }
     finally { setCreating(false); }
   };
 
@@ -998,58 +862,53 @@ function LibraryTab({ onAddToLog }) {
 
   const deleteItem = async (folderId, itemId) => {
     setDeletingItem(itemId);
-    try {
-      await apiFetch(`/folders/${folderId}/items/${itemId}`, { method: "DELETE" });
-      setFolderData(prev => ({ ...prev, [folderId]: { ...prev[folderId], items: prev[folderId].items.filter(i => i.item_id !== itemId) } }));
-    } catch (e) { console.error(e); }
+    try { await apiFetch(`/folders/${folderId}/items/${itemId}`, { method: "DELETE" }); setFolderData(prev => ({ ...prev, [folderId]: { ...prev[folderId], items: prev[folderId].items.filter(i => i.item_id !== itemId) } })); }
+    catch (e) { console.error(e); }
     finally { setDeletingItem(null); }
   };
 
   const deleteFolder = async (folderId) => {
-    try {
-      await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
-      setFolders(prev => prev.filter(f => f.folder_id !== folderId));
-      if (openFolder === folderId) setOpenFolder(null);
-    } catch (e) { console.error(e); }
+    try { await apiFetch(`/folders/${folderId}`, { method: "DELETE" }); setFolders(prev => prev.filter(f => f.folder_id !== folderId)); if (openFolder === folderId) setOpenFolder(null); }
+    catch (e) { console.error(e); }
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="animate-spin text-cyan-400 h-6 w-6" /></div>;
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Loader2 size={24} color="var(--teal)" className="animate-spin" /></div>;
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
-          placeholder="New folder name..." onKeyDown={handleFolderKeyDown}
-          className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-800 rounded-2xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60" />
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="New folder name..." onKeyDown={handleFolderKeyDown}
+          style={{ ...inputStyle, flex: 1 }} />
         <button onClick={createFolder} disabled={creating || !newFolderName.trim()}
-          className="px-4 py-2.5 bg-cyan-500 text-slate-950 rounded-2xl font-bold text-xs hover:bg-cyan-400 transition-colors disabled:opacity-40 flex items-center gap-2">
-          {creating ? <Loader2 className="animate-spin h-4 w-4" /> : <FolderPlus className="h-4 w-4" />} CREATE
+          style={{ ...primaryBtn, width: "auto", padding: "9px 16px", fontSize: 13, opacity: (creating || !newFolderName.trim()) ? 0.45 : 1 }}>
+          {creating ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />} Create
         </button>
       </div>
 
       {folders.length === 0 ? (
-        <div className="text-center py-12 text-slate-700 text-sm italic border border-dashed border-slate-800 rounded-2xl">No folders yet. Create one above.</div>
+        <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--muted)", fontSize: 14, fontStyle: "italic", border: "2px dashed var(--border)", borderRadius: 16 }}>No folders yet. Create one above.</div>
       ) : (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {folders.map(folder => (
-            <div key={folder.folder_id} className="border border-slate-800 rounded-2xl overflow-hidden">
-              <div className="flex items-center gap-3 p-4 cursor-pointer hover:bg-slate-800/30 transition-colors"
-                onClick={() => openFolderById(folder.folder_id)}>
-                {openFolder === folder.folder_id ? <FolderOpen className="h-5 w-5 text-cyan-400 flex-shrink-0" /> : <Folder className="h-5 w-5 text-slate-500 flex-shrink-0" />}
-                <span className="flex-1 text-sm font-bold text-slate-300">{folder.name}</span>
-                <span className="text-[10px] font-mono text-slate-600">{folderData[folder.folder_id]?.items?.length ?? ""} items</span>
-                <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} className="text-slate-700 hover:text-rose-400 transition-colors ml-2">
-                  <Trash2 className="h-3.5 w-3.5" />
+            <div key={folder.folder_id} style={card}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer" }} onClick={() => openFolderById(folder.folder_id)}>
+                {openFolder === folder.folder_id
+                  ? <FolderOpen size={18} color="var(--teal)" />
+                  : <Folder size={18} color="var(--muted)" />}
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{folder.name}</span>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>{folderData[folder.folder_id]?.items?.length ?? ""} items</span>
+                <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
+                  <Trash2 size={13} color="var(--muted)" />
                 </button>
-                {openFolder === folder.folder_id ? <ChevronUp className="h-4 w-4 text-slate-600" /> : <ChevronDown className="h-4 w-4 text-slate-600" />}
+                {openFolder === folder.folder_id ? <ChevronUp size={14} color="var(--muted)" /> : <ChevronDown size={14} color="var(--muted)" />}
               </div>
 
               {openFolder === folder.folder_id && folderData[folder.folder_id] && (
-                <div className="border-t border-slate-800 divide-y divide-slate-800/50">
+                <div style={{ borderTop: "1px solid var(--off2)" }}>
                   {folderData[folder.folder_id].items.length === 0 ? (
-                    <p className="p-4 text-center text-slate-700 text-xs italic">No items in this folder.</p>
+                    <p style={{ padding: "16px", textAlign: "center", color: "var(--muted)", fontSize: 13, fontStyle: "italic" }}>No items in this folder.</p>
                   ) : (
-                    folderData[folder.folder_id].items.map(item => {
+                    folderData[folder.folder_id].items.map((item, idx) => {
                       const nutrition = item.nutrition?.per_serving ?? item.nutrition ?? {};
                       const cal  = parseNumeric(nutrition.calories)      || 0;
                       const prot = parseNumeric(nutrition.protein)       || 0;
@@ -1057,27 +916,20 @@ function LibraryTab({ onAddToLog }) {
                       const fat  = parseNumeric(nutrition.fat)           || 0;
                       const imageUrl = item.nutrition?.processed_url || item.nutrition?.raw_url || item.processed_url || item.raw_url || null;
                       return (
-                        <div key={item.item_id} className="flex items-center gap-3 p-3 pl-4 hover:bg-slate-800/20 transition-colors">
-                          {imageUrl ? (
-                            <div className="w-12 h-12 rounded-xl overflow-hidden border border-slate-700 flex-shrink-0 bg-slate-800">
-                              <img src={imageUrl} alt={item.name} className="w-full h-full object-cover" onError={e => { e.target.style.display = "none"; }} />
-                            </div>
-                          ) : (
-                            <div className="w-12 h-12 rounded-xl border border-slate-800 flex-shrink-0 bg-slate-900 flex items-center justify-center">
-                              <Database className="h-4 w-4 text-slate-700" />
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-slate-300 truncate">{item.name}</p>
-                            <p className="text-[10px] font-mono text-slate-600 mt-0.5">{cal}kcal · P {prot}g · C {carb}g · F {fat}g</p>
+                        <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 10px 20px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
+                          {imageUrl
+                            ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0 }}><img src={imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} /></div>
+                            : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Database size={14} color="var(--teal)" /></div>
+                          }
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{cal}kcal · P {prot}g · C {carb}g · F {fat}g</div>
                           </div>
-                          <button onClick={() => onAddToLog({ ...item })}
-                            className="text-[10px] font-mono text-emerald-600 hover:text-emerald-400 transition-colors px-2 py-1 border border-emerald-900/40 rounded-lg flex items-center gap-1 flex-shrink-0">
-                            <Plus className="h-3 w-3" /> LOG
+                          <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                            <Plus size={11} /> Log
                           </button>
-                          <button onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id}
-                            className="text-slate-700 hover:text-rose-400 transition-colors flex-shrink-0">
-                            {deletingItem === item.item_id ? <Loader2 className="animate-spin h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+                          <button onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                            {deletingItem === item.item_id ? <Loader2 size={13} color="var(--muted)" className="animate-spin" /> : <Trash2 size={13} color="var(--muted)" />}
                           </button>
                         </div>
                       );
@@ -1099,7 +951,7 @@ function LibraryTab({ onAddToLog }) {
 function NutrientGrid({ data, activeTab, per100gData }) {
   const [customGrams, setCustomGrams] = useState("");
   if (!data || Object.keys(data).length === 0) {
-    return <div className="py-12 text-center border border-dashed border-slate-800 rounded-2xl"><span className="text-xs text-slate-600 italic">No data extracted for this view</span></div>;
+    return <div style={{ padding: "48px 16px", textAlign: "center", border: "2px dashed var(--border)", borderRadius: 16, color: "var(--muted)", fontSize: 13, fontStyle: "italic" }}>No data extracted for this view</div>;
   }
   const customG = parseFloat(customGrams); const isValid = !isNaN(customG) && customG > 0;
   let baseGrams = null, scaleFrom = data, baseLabel = null, warnMsg = null;
@@ -1107,8 +959,8 @@ function NutrientGrid({ data, activeTab, per100gData }) {
   else {
     const sg = extractServingGrams(data.size);
     if (sg) { baseGrams = sg; baseLabel = `${data.size} (${sg}g)`; }
-    else if (per100gData && Object.keys(per100gData).length > 0) { baseGrams = 100; scaleFrom = per100gData; baseLabel = "100g (fallback)"; warnMsg = "NO SERVING SIZE DETECTED — SCALING FROM PER_100G BASE"; }
-    else { warnMsg = "CANNOT SCALE — NO SIZE OR PER_100G DATA AVAILABLE"; }
+    else if (per100gData && Object.keys(per100gData).length > 0) { baseGrams = 100; scaleFrom = per100gData; baseLabel = "100g (fallback)"; warnMsg = "No serving size — scaling from per 100g"; }
+    else { warnMsg = "Cannot scale — no size or per 100g data"; }
   }
   const scalingActive = isValid && baseGrams !== null;
   const factor = scalingActive ? customG / baseGrams : null;
@@ -1120,37 +972,33 @@ function NutrientGrid({ data, activeTab, per100gData }) {
   };
   const entries = Object.entries(data).filter(([k]) => k !== "size");
   return (
-    <div className="space-y-5">
-      <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3">
-        <div className="flex items-center gap-2"><Scale className="h-4 w-4 text-cyan-400" /><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Custom Serving Calculator</span></div>
-        <div className="flex gap-3 items-center">
-          <input type="number" min="1" step="any" placeholder="Enter serving size, e.g. 58" value={customGrams}
-            onChange={e => setCustomGrams(e.target.value)}
-            className="flex-1 p-2.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 transition-colors" />
-          <span className="text-slate-400 text-sm font-mono font-bold">g</span>
-          {customGrams && <button onClick={() => setCustomGrams("")} className="text-[10px] text-slate-600 hover:text-rose-400 transition-colors font-mono px-2">CLEAR</button>}
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ background: "var(--off)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--brown)", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+          <Scale size={13} color="var(--teal)" /> Custom Serving Calculator
         </div>
-        <div className="text-[10px] font-mono leading-relaxed">
-          {warnMsg ? <span className="text-amber-700">{warnMsg}</span>
-            : <span className="text-slate-600">BASE: {baseLabel}{scalingActive && <span className="text-cyan-700 ml-2">→ {customG}g | FACTOR: ×{factor.toFixed(4)}</span>}</span>}
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input type="number" min="1" step="any" placeholder="e.g. 58" value={customGrams} onChange={e => setCustomGrams(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)" }}>g</span>
+          {customGrams && <button onClick={() => setCustomGrams("")} style={{ fontSize: 11, color: "var(--muted)", background: "none", border: "none", cursor: "pointer" }}>Clear</button>}
         </div>
+        <p style={{ fontSize: 11, color: warnMsg ? "var(--orange)" : "var(--muted)", marginTop: 8 }}>
+          {warnMsg || `Base: ${baseLabel}${scalingActive ? ` → ${customG}g · ×${factor.toFixed(4)}` : ""}`}
+        </p>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 1, background: "var(--border)", borderRadius: 12, overflow: "hidden" }}>
         {entries.map(([key, value]) => {
           const meta = NUTRIENT_META[key] ?? getFallbackMeta(key);
           const { display, adjusted, baseDisplay } = getDisplay(key, value);
           return (
-            <div key={key} className={`bg-slate-950/50 border rounded-2xl p-5 flex justify-between items-center transition-all ${adjusted ? "border-cyan-500/30" : "border-slate-800"}`}>
+            <div key={key} style={{ background: adjusted ? "var(--teal-lt)" : "var(--white)", padding: "13px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <p className="text-[10px] font-bold text-slate-500 uppercase">{meta.label}</p>
-                {adjusted && <p className="text-[10px] font-mono text-slate-700 mt-0.5">base: {baseDisplay}</p>}
+                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>{meta.label}</div>
+                {adjusted && <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>base: {baseDisplay}</div>}
               </div>
-              <div className="text-right">
-                <div className="flex items-baseline gap-1 justify-end">
-                  <span className={`text-xl font-bold ${meta.valueColor}`}>{display}</span>
-                  {meta.unit && <span className="text-[10px] text-slate-600 font-mono">{meta.unit}</span>}
-                </div>
-                {adjusted && <div className="text-[9px] text-cyan-700 font-mono mt-0.5 tracking-wider">ADJUSTED</div>}
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: meta.color }}>{display}</div>
+                {meta.unit && <div style={{ fontSize: 10, color: "var(--muted)" }}>{meta.unit}{adjusted && <span style={{ color: "var(--teal)", marginLeft: 4 }}>adj.</span>}</div>}
               </div>
             </div>
           );
@@ -1161,62 +1009,36 @@ function NutrientGrid({ data, activeTab, per100gData }) {
 }
 
 // =============================================================================
-// STATUS BADGE
-// =============================================================================
-function StatusBadge({ icon, label, status, color }) {
-  return (
-    <div className="flex items-center gap-2 px-3 py-1.5 border border-slate-800 rounded-lg bg-slate-900/50">
-      <div className={color}>{icon}</div>
-      <div className="flex flex-col">
-        <span className="text-[8px] text-slate-600 font-bold">{label}</span>
-        <span className={`text-[10px] font-mono ${color}`}>{status}</span>
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
 // SCAN TAB
-// FIX 1: accumulatedOptimizedRef + accumulatedImagesRef → auto-analysis
-// FIX 2: generatePreview() → full-color data URL, no blur, persists
 // =============================================================================
 function ScanTab({ onAddToLog }) {
-  const [images, setImages]             = useState([]);
+  const [images, setImages] = useState([]);
   const [optimizedFiles, setOptimizedFiles] = useState([]);
-  const [loading, setLoading]           = useState(false);
-  const [loadingMsg, setLoadingMsg]     = useState("");
-  const [results, setResults]           = useState(null);
-  const [error, setError]               = useState(null);
-  const [activeIndex, setActiveIndex]   = useState(0);
-  const [activeTab, setActiveTab]       = useState("per_100g");
+  const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("");
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeTab, setActiveTab] = useState("per_100g");
   const [cropperQueue, setCropperQueue] = useState([]);
-  const [cropperFile, setCropperFile]   = useState(null);
-  const [saveModal, setSaveModal]       = useState(null);
-  const [logName, setLogName]           = useState("");
+  const [cropperFile, setCropperFile] = useState(null);
+  const [saveModal, setSaveModal] = useState(null);
+  const [logName, setLogName] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
   const fileInputRef = useRef(null);
-
   const accumulatedOptimizedRef = useRef([]);
   const accumulatedImagesRef    = useRef([]);
 
   const stateRef = useRef({ images, optimizedFiles, results, activeIndex, activeTab });
-  useEffect(() => { stateRef.current = { images, optimizedFiles, results, activeIndex, activeTab }; },
-    [images, optimizedFiles, results, activeIndex, activeTab]);
+  useEffect(() => { stateRef.current = { images, optimizedFiles, results, activeIndex, activeTab }; }, [images, optimizedFiles, results, activeIndex, activeTab]);
   useEffect(() => {
-    const handler = () => {
-      if (document.visibilityState === "visible") {
-        const s = stateRef.current;
-        setImages(s.images); setOptimizedFiles(s.optimizedFiles); setResults(s.results);
-        setActiveIndex(s.activeIndex); setActiveTab(s.activeTab);
-      }
-    };
+    const handler = () => { if (document.visibilityState === "visible") { const s = stateRef.current; setImages(s.images); setOptimizedFiles(s.optimizedFiles); setResults(s.results); setActiveIndex(s.activeIndex); setActiveTab(s.activeTab); } };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
   }, []);
 
   const switchToIndex = useCallback((i, resultArr) => {
-    setActiveIndex(i);
-    setLogName(""); // reset name when switching images
+    setActiveIndex(i); setLogName("");
     const r = (resultArr ?? results)?.[i];
     if (r?.per_100g && Object.keys(r.per_100g).length > 0) setActiveTab("per_100g");
     else if (r?.per_serving && Object.keys(r.per_serving).length > 0) setActiveTab("per_serving");
@@ -1225,97 +1047,49 @@ function ScanTab({ onAddToLog }) {
   const handleImageUpload = useCallback((e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    // NOTE: do NOT clear e.target.value here — iOS WebKit invalidates File
-    // references when the input is cleared, breaking blob URL creation.
-    // The input is reset via a key prop on re-upload instead.
-    accumulatedOptimizedRef.current = [];
-    accumulatedImagesRef.current    = [];
-    setCropperQueue(files);
-    setCropperFile(files[0]);
+    accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
+    setCropperQueue(files); setCropperFile(files[0]);
   }, []);
 
   const handleCropConfirm = useCallback(async (cropData) => {
-    const file      = cropperFile;
-    const remaining = cropperQueue.slice(1);
-
+    const file = cropperFile; const remaining = cropperQueue.slice(1);
     setLoadingMsg("Processing...");
-    // Create preview blob URL ONCE right here — before any async work that might
-    // cause iOS to drop the File reference. Store it permanently in imageEntry.
     const previewUrl = createPreviewUrl(file);
-    // Optimize for API submission (grayscale + resize)
-    const optimized = await applyPipelineToFile(file, cropData);
-
+    const optimized  = await applyPipelineToFile(file, cropData);
     const imageEntry = { file, preview: previewUrl, cropData, persistentUrl: null };
-
-    // FIX: append to both state AND refs in the same order so indices always match
-    setImages(prev => [...prev, imageEntry]);
-    setOptimizedFiles(prev => [...prev, optimized]);
-    setResults(null); setError(null); setActiveIndex(0);
-    setLoadingMsg("");
-
+    setImages(prev => [...prev, imageEntry]); setOptimizedFiles(prev => [...prev, optimized]);
+    setResults(null); setError(null); setActiveIndex(0); setLoadingMsg("");
     accumulatedOptimizedRef.current = [...accumulatedOptimizedRef.current, optimized];
     accumulatedImagesRef.current    = [...accumulatedImagesRef.current, imageEntry];
-
-    if (remaining.length > 0) {
-      setCropperQueue(remaining); setCropperFile(remaining[0]);
-    } else {
-      // FIX: just close the cropper — do NOT auto-trigger analysis
-      // User presses the Analyze button manually when ready
-      setCropperQueue([]); setCropperFile(null);
-    }
+    if (remaining.length > 0) { setCropperQueue(remaining); setCropperFile(remaining[0]); }
+    else { setCropperQueue([]); setCropperFile(null); }
   }, [cropperFile, cropperQueue]);
 
-  const handleCropCancel = useCallback(() => {
-    accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
-    setCropperQueue([]); setCropperFile(null);
-  }, []);
+  const handleCropCancel = useCallback(() => { accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = []; setCropperQueue([]); setCropperFile(null); }, []);
 
   const handleReCrop = useCallback((index) => {
-    const img = images[index];
-    if (!img) return;
-    setImages(prev => prev.filter((_, i) => i !== index));
-    setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
-    setResults(null); setError(null);
-    accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
+    const img = images[index]; if (!img) return;
+    setImages(prev => prev.filter((_, i) => i !== index)); setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
+    setResults(null); setError(null); accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setCropperQueue([img.file]); setCropperFile(img.file);
   }, [images]);
 
   const removeImage = useCallback((index) => {
-    setImages(prev => {
-      const img = prev[index];
-      if (img?.preview && img.preview.startsWith('blob:') && !img.persistentUrl) {
-        URL.revokeObjectURL(img.preview);
-      }
-      return prev.filter((_, i) => i !== index);
-    });
+    setImages(prev => { const img = prev[index]; if (img?.preview && img.preview.startsWith("blob:") && !img.persistentUrl) URL.revokeObjectURL(img.preview); return prev.filter((_, i) => i !== index); });
     setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
-    setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev));
-    setResults(null); setError(null);
+    setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev)); setResults(null); setError(null);
   }, []);
 
   const handleClear = useCallback(() => {
-    // Revoke stored preview blob URLs (not persistentUrls which are S3)
-    images.forEach(img => {
-      if (img?.preview && img.preview.startsWith('blob:') && !img.persistentUrl) {
-        URL.revokeObjectURL(img.preview);
-      }
-    });
+    images.forEach(img => { if (img?.preview && img.preview.startsWith("blob:") && !img.persistentUrl) URL.revokeObjectURL(img.preview); });
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
-    setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab('per_100g');
-    setFileInputKey(k => k + 1); // resets the file input so same file can be re-uploaded
+    setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab("per_100g");
+    setFileInputKey(k => k + 1);
   }, [images]);
 
   const handleAnalyze = useCallback(async () => {
-    if (results) { handleClear(); return; }
-    if (!images.length) return;
-    // FIX: always use accumulatedOptimizedRef — these are guaranteed to be in the
-    // same order as images state since both are appended together in handleCropConfirm.
-    // Fallback to optimizedFiles state if ref is somehow empty (e.g. after page refresh).
-    const filesToSend = accumulatedOptimizedRef.current.length === images.length
-      ? accumulatedOptimizedRef.current
-      : optimizedFiles.length === images.length
-        ? optimizedFiles
-        : images.map(i => i.file);
+    if (results) { handleClear(); return; } if (!images.length) return;
+    const filesToSend = accumulatedOptimizedRef.current.length === images.length ? accumulatedOptimizedRef.current : optimizedFiles.length === images.length ? optimizedFiles : images.map(i => i.file);
     runAnalysis({ optimizedFiles: filesToSend, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
@@ -1328,133 +1102,123 @@ function ScanTab({ onAddToLog }) {
       {cropperFile && <ImageCropper file={cropperFile} onConfirm={handleCropConfirm} onCancel={handleCropCancel} />}
       {saveModal && <SaveToFolderModal result={saveModal.result} imageId={saveModal.imageId} onClose={() => setSaveModal(null)} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 space-y-4">
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }} className="lg:grid-cols-scan">
+        {/* Upload / preview panel */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {images.length === 0 ? (
-            <div className="relative border-2 border-dashed border-slate-800 bg-slate-900/10 rounded-3xl p-6 h-[400px] flex flex-col items-center justify-center cursor-pointer hover:border-slate-700 transition-colors"
+            <div style={{ border: "2px dashed var(--border)", borderRadius: 20, background: "var(--white)", padding: "48px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, cursor: "pointer" }}
               onClick={() => fileInputRef.current?.click()}>
-              <input key={fileInputKey} ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
-              <Upload className="h-8 w-8 text-slate-600 mb-2" />
-              <p className="text-slate-500 text-sm">Click to upload — auto-analyzes after crop</p>
-              <p className="text-slate-700 text-[10px] font-mono mt-1">CROP → OPTIMIZE → AUTO-ANALYZE</p>
+              <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
+              <div style={{ width: 52, height: 52, borderRadius: 14, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Upload size={22} color="var(--teal)" />
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Upload nutrition label</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Crop → optimize → analyze</div>
             </div>
           ) : (
-            <div className="space-y-3">
-              <div className="relative border border-slate-800 bg-slate-900/30 rounded-3xl p-4 h-[280px] flex items-center justify-center overflow-hidden">
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ position: "relative", border: "1px solid var(--border)", background: "var(--white)", borderRadius: 20, padding: 12, height: 280, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                 {currentPreview
-                  ? <img src={currentPreview} alt={`Preview ${activeIndex + 1}`} className="max-h-full max-w-full rounded-2xl object-contain border border-slate-800" />
-                  : <div className="text-slate-700 text-xs font-mono">No preview</div>}
+                  ? <img src={currentPreview} alt="Preview" style={{ maxHeight: "100%", maxWidth: "100%", borderRadius: 12, objectFit: "contain" }} />
+                  : <div style={{ color: "var(--muted)", fontSize: 13 }}>No preview</div>
+                }
                 {images.length > 1 && (
                   <>
                     <button onClick={() => setActiveIndex(i => Math.max(0, i - 1))} disabled={activeIndex === 0}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 bg-slate-900/80 border border-slate-700 rounded-full p-1 disabled:opacity-20 hover:border-slate-500 transition-colors">
-                      <ChevronLeft className="h-4 w-4" />
+                      style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: "50%", background: "var(--white)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: activeIndex === 0 ? 0.3 : 1 }}>
+                      <ChevronLeft size={14} />
                     </button>
                     <button onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))} disabled={activeIndex === images.length - 1}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 bg-slate-900/80 border border-slate-700 rounded-full p-1 disabled:opacity-20 hover:border-slate-500 transition-colors">
-                      <ChevronRight className="h-4 w-4" />
+                      style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: "50%", background: "var(--white)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: activeIndex === images.length - 1 ? 0.3 : 1 }}>
+                      <ChevronRight size={14} />
                     </button>
                   </>
                 )}
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {images.map((img, i) => {
-                  const thumbSrc = img.persistentUrl || img.preview || null;
+                  const thumbSrc = img.persistentUrl || img.preview;
                   return (
-                    <div key={i} onClick={() => setActiveIndex(i)}
-                      className={`relative w-14 h-14 rounded-xl overflow-hidden border cursor-pointer flex-shrink-0 transition-all ${i === activeIndex ? "border-cyan-500/70" : "border-slate-800 opacity-60 hover:opacity-100"}`}>
-                      {thumbSrc ? <img src={thumbSrc} alt={`Thumb ${i + 1}`} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-slate-800 flex items-center justify-center"><Upload className="h-4 w-4 text-slate-600" /></div>}
+                    <div key={i} onClick={() => setActiveIndex(i)} style={{ position: "relative", width: 56, height: 56, borderRadius: 12, overflow: "hidden", border: `2px solid ${i === activeIndex ? "var(--teal)" : "var(--border)"}`, cursor: "pointer", flexShrink: 0, opacity: i === activeIndex ? 1 : 0.6 }}>
+                      {thumbSrc ? <img src={thumbSrc} alt={`Thumb ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
                       {!results && (
                         <>
-                          <button onClick={e => { e.stopPropagation(); removeImage(i); }} className="absolute top-0.5 right-0.5 bg-slate-900/90 rounded-full p-0.5 hover:text-rose-400 z-10"><X className="h-2.5 w-2.5" /></button>
-                          <button onClick={e => { e.stopPropagation(); handleReCrop(i); }} className="absolute bottom-0.5 right-0.5 bg-slate-900/90 rounded-full p-0.5 hover:text-cyan-400 z-10"><Crop className="h-2.5 w-2.5" /></button>
+                          <button onClick={e => { e.stopPropagation(); removeImage(i); }} style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={9} /></button>
+                          <button onClick={e => { e.stopPropagation(); handleReCrop(i); }} style={{ position: "absolute", bottom: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Crop size={9} /></button>
                         </>
                       )}
-                      <div className="absolute bottom-0.5 left-0.5 bg-slate-900/90 rounded text-[8px] font-mono text-slate-400 px-1">{i + 1}</div>
-                      {img.cropData && <div className="absolute top-0.5 left-0.5 bg-cyan-500/80 rounded text-[7px] font-mono text-slate-950 px-1">✂</div>}
+                      <div style={{ position: "absolute", bottom: 2, left: 4, fontSize: 9, fontWeight: 700, color: "white", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{i + 1}</div>
                     </div>
                   );
                 })}
                 {!results && (
-                  <div onClick={() => fileInputRef.current?.click()}
-                    className="w-14 h-14 rounded-xl border border-dashed border-slate-700 flex items-center justify-center cursor-pointer hover:border-slate-500 transition-colors flex-shrink-0">
-                    <Upload className="h-4 w-4 text-slate-600" />
+                  <div onClick={() => fileInputRef.current?.click()} style={{ width: 56, height: 56, borderRadius: 12, border: "2px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                    <Upload size={16} color="var(--muted)" />
                   </div>
                 )}
               </div>
-              <input key={fileInputKey} ref={fileInputRef} type="file" className="hidden" onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
-              <p className="text-[10px] font-mono text-slate-600 text-center">
-                {images.length} IMAGE{images.length !== 1 ? "S" : ""} QUEUED
-                {allOptimized && !loading && !results && <span className="text-cyan-900 ml-2">· OPTIMIZED ✓</span>}
-                {loadingMsg && <span className="text-amber-800 ml-2">· {loadingMsg.toUpperCase()}</span>}
+              <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
+              <p style={{ fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
+                {images.length} image{images.length !== 1 ? "s" : ""} queued
+                {allOptimized && !loading && !results && <span style={{ color: "var(--teal)", marginLeft: 6 }}>· optimized ✓</span>}
+                {loadingMsg && <span style={{ color: "var(--orange)", marginLeft: 6 }}>· {loadingMsg}</span>}
               </p>
             </div>
           )}
 
           <button onClick={handleAnalyze} disabled={loading || images.length === 0 || !!cropperFile}
-            className={`w-full py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3 shadow-xl
-              ${results ? "bg-slate-900 text-rose-400 border border-rose-900/30"
-                : images.length === 0 || !!cropperFile ? "bg-slate-900 text-slate-700 border border-slate-800 cursor-not-allowed"
-                : "bg-cyan-500 text-slate-950 hover:bg-cyan-400"}`}>
-            {loading ? <Loader2 className="animate-spin h-5 w-5" /> : results ? <RefreshCcw className="h-5 w-5" /> : <Zap className="h-5 w-5" />}
-            {loading ? (loadingMsg || `PROCESSING ${images.length} IMAGE${images.length !== 1 ? "S" : ""}...`)
-              : results ? "CLEAR_SESSION"
-              : `RUN_EXTRACTION${images.length > 1 ? ` (${images.length})` : ""}`}
+            style={{ ...( results ? { ...ghostBtn, width: "100%", background: "var(--brown-lt)", borderColor: "var(--brown)", color: "var(--brown)" } : images.length === 0 || !!cropperFile ? { ...primaryBtn, opacity: 0.35, cursor: "not-allowed" } : primaryBtn ) }}>
+            {loading ? <Loader2 size={16} className="animate-spin" /> : results ? <RefreshCcw size={16} /> : <Zap size={16} />}
+            {loading ? (loadingMsg || `Processing ${images.length} image${images.length !== 1 ? "s" : ""}...`) : results ? "Clear session" : `Analyze${images.length > 1 ? ` (${images.length})` : ""}`}
           </button>
 
           {error && !loading && images.length > 0 && !results && (
-            <button onClick={handleAnalyze}
-              className="w-full py-3 rounded-2xl font-bold text-sm bg-slate-900 text-amber-400 border border-amber-900/40 hover:border-amber-700/50 transition-all flex items-center justify-center gap-2">
-              <RefreshCcw className="h-4 w-4" /> RETRY (IMAGES PRESERVED)
+            <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
+              <RefreshCcw size={14} /> Retry (images preserved)
             </button>
           )}
 
           {currentResult && (
-            <div className="space-y-2">
-              <input
-                value={logName}
-                onChange={e => setLogName(e.target.value)}
-                placeholder="Name this item before logging..."
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60"
-              />
-              <button onClick={() => onAddToLog({ name: logName.trim() || `Label ${activeIndex + 1}`, nutrition: currentResult })}
-                className="w-full py-3 rounded-2xl font-bold text-sm bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 hover:border-emerald-700/50 transition-all flex items-center justify-center gap-2">
-                <Plus className="h-4 w-4" /> LOG THIS ITEM
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <input value={logName} onChange={e => setLogName(e.target.value)} placeholder="Name this item before logging..." style={inputStyle} />
+              <button onClick={() => onAddToLog({ name: logName.trim() || `Label ${activeIndex + 1}`, nutrition: currentResult })} style={mintBtn}>
+                <Plus size={15} /> Log this item
               </button>
             </div>
           )}
         </div>
 
-        <div className="lg:col-span-8">
+        {/* Results panel */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && !loading && (
-            <div className="mb-4 bg-rose-950/40 border border-rose-800/50 rounded-2xl px-5 py-4 flex items-start gap-3">
-              <span className="text-rose-400 text-sm font-mono font-bold mt-0.5">ERR</span>
-              <div className="flex-1"><p className="text-rose-300 text-sm">{error}</p></div>
-              <button onClick={() => setError(null)} className="text-rose-700 hover:text-rose-400"><X className="h-4 w-4" /></button>
+            <div style={{ background: "#FDF0DC", border: "1px solid var(--orange)", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--orange)" }}>Error</span>
+              <p style={{ flex: 1, fontSize: 13, color: "var(--brown)" }}>{error}</p>
+              <button onClick={() => setError(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={14} color="var(--muted)" /></button>
             </div>
           )}
 
           {loading ? (
-            <div className="h-full flex flex-col items-center justify-center space-y-6 py-20">
-              <Loader2 className="animate-spin text-cyan-400 h-8 w-8" />
-              <p className="text-cyan-400 text-xs uppercase">{loadingMsg || "Running Ingestion..."}</p>
-              <p className="text-slate-700 text-[10px] font-mono">Auto-retry · Timeout: {REQUEST_TIMEOUT_MS / 1000}s</p>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: "60px 0" }}>
+              <Loader2 size={32} color="var(--teal)" className="animate-spin" />
+              <p style={{ fontSize: 13, color: "var(--teal)", fontWeight: 600 }}>{loadingMsg || "Running analysis..."}</p>
+              <p style={{ fontSize: 11, color: "var(--muted)" }}>Auto-retry · Timeout: {REQUEST_TIMEOUT_MS / 1000}s</p>
             </div>
           ) : results ? (
-            <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 space-y-6">
+            <div style={{ ...card, padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
               {results.length > 1 && (
-                <div className="space-y-2">
-                  <p className="text-[10px] font-mono text-slate-600">SELECT RESULT</p>
-                  <div className="flex gap-2 flex-wrap">
+                <div>
+                  <p style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Select result</p>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {results.map((_, i) => {
-                      const thumbSrc = images[i]?.persistentUrl || images[i]?.preview || null;
+                      const thumbSrc = images[i]?.persistentUrl || images[i]?.preview;
                       return (
                         <button key={i} onClick={() => switchToIndex(i, results)}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-xl border transition-all ${activeIndex === i ? "border-cyan-500/50 bg-cyan-500/10" : "border-slate-800 hover:border-slate-600"}`}>
-                          <div className={`w-10 h-10 rounded-lg overflow-hidden border flex-shrink-0 ${activeIndex === i ? "border-cyan-500/50" : "border-slate-700"}`}>
-                            {thumbSrc ? <img src={thumbSrc} alt={`Label ${i + 1}`} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-slate-800" />}
+                          style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 10, border: `1px solid ${activeIndex === i ? "var(--teal)" : "var(--border)"}`, background: activeIndex === i ? "var(--teal-lt)" : "var(--white)", cursor: "pointer" }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+                            {thumbSrc ? <img src={thumbSrc} alt={`Label ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
                           </div>
-                          <div className={`text-[10px] font-mono font-bold ${activeIndex === i ? "text-cyan-400" : "text-slate-500"}`}>IMG_{String(i + 1).padStart(2, "0")}</div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: activeIndex === i ? "var(--teal)" : "var(--muted)" }}>IMG {i + 1}</span>
                         </button>
                       );
                     })}
@@ -1462,58 +1226,66 @@ function ScanTab({ onAddToLog }) {
                 </div>
               )}
 
-              <div className="flex items-center gap-3 bg-slate-950/50 border border-slate-800 rounded-2xl p-3">
-                <div className="w-16 h-16 rounded-xl overflow-hidden border border-slate-700 flex-shrink-0 bg-slate-800">
-                  {currentPreview ? <img src={currentPreview} alt="Active label" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><Database className="h-4 w-4 text-slate-700" /></div>}
+              {/* Result header */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, background: "var(--brown-lt)", borderRadius: 12, padding: "10px 14px" }}>
+                <div style={{ width: 52, height: 52, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0, background: "var(--off)" }}>
+                  {currentPreview ? <img src={currentPreview} alt="Label" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Database size={16} color="var(--muted)" /></div>}
                 </div>
-                <div className="flex-1">
-                  <div className="text-[10px] font-mono text-slate-600">ANALYZING LABEL</div>
-                  <div className="text-sm font-bold text-slate-300 mt-0.5">Image {activeIndex + 1} of {results.length}</div>
-                  {images[activeIndex]?.cropData && <div className="text-[9px] font-mono text-cyan-800 mt-0.5">✂ CROPPED · OPTIMIZED</div>}
-                  {images[activeIndex]?.persistentUrl && <div className="text-[9px] font-mono text-emerald-900 mt-0.5">☁ PERSISTED</div>}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>Analyzing label</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brown)", marginTop: 2 }}>Image {activeIndex + 1} of {results.length}</div>
+                  {images[activeIndex]?.cropData && <div style={{ fontSize: 10, color: "var(--teal)", marginTop: 2 }}>✂ Cropped & optimized</div>}
                 </div>
                 <button onClick={() => setSaveModal({ result: currentResult, imageId: currentResult?.image_id || "" })}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 transition-colors text-xs font-bold flex-shrink-0">
-                  <BookmarkPlus className="h-4 w-4" /> SAVE
+                  style={{ ...ghostBtn, flexShrink: 0 }}>
+                  <BookmarkPlus size={13} /> Save
                 </button>
               </div>
 
-              <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl w-full max-w-sm">
+              {/* Per 100g / Per serving toggle */}
+              <div style={pillRow}>
                 {["per_100g", "per_serving"].map(tab => {
                   const hasData = currentResult?.[tab] && Object.keys(currentResult[tab]).length > 0;
+                  const active = activeTab === tab;
                   return (
                     <button key={tab} onClick={() => hasData && setActiveTab(tab)} disabled={!hasData}
-                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${!hasData ? "text-slate-700 cursor-not-allowed" : activeTab === tab ? tab === "per_100g" ? "bg-cyan-500 text-slate-950 shadow-lg" : "bg-purple-500 text-slate-950 shadow-lg" : "text-slate-500 hover:text-slate-300"}`}>
-                      {tab === "per_100g" ? "PER 100G" : "PER SERVING"}
+                      style={{ flex: 1, padding: "8px", borderRadius: 8, border: "none", fontSize: 12, fontWeight: 700, cursor: hasData ? "pointer" : "not-allowed", background: active ? "var(--teal)" : "transparent", color: !hasData ? "var(--border)" : active ? "white" : "var(--muted)" }}>
+                      {tab === "per_100g" ? "Per 100g" : "Per serving"}
                     </button>
                   );
                 })}
               </div>
 
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                <div className="flex items-center gap-2">
-                  <TableProperties className="h-4 w-4 text-slate-500" />
-                  <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">{activeTab === "per_100g" ? "Per 100g" : "Per Serving"} Schema</h2>
+              {/* Schema header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: 12, borderBottom: "1px solid var(--off2)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <TableProperties size={13} color="var(--muted)" /> {activeTab === "per_100g" ? "Per 100g" : "Per Serving"}
                 </div>
                 {activeTab === "per_serving" && currentResult?.per_serving?.size && (
-                  <span className="text-[10px] bg-purple-500/10 text-purple-400 px-3 py-1 rounded-full border border-purple-500/20 font-mono">SIZE: {currentResult.per_serving.size}</span>
+                  <span style={{ fontSize: 11, background: "var(--purp-lt)", color: "var(--purple)", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
+                    {currentResult.per_serving.size}
+                  </span>
                 )}
               </div>
 
               <NutrientGrid key={activeIndex} data={currentResult?.[activeTab]} activeTab={activeTab} per100gData={currentResult?.per_100g} />
 
-              <details className="group border border-slate-800 rounded-xl bg-slate-950/30">
-                <summary className="p-3 text-[9px] font-mono text-slate-600 cursor-pointer list-none flex justify-between items-center uppercase">
-                  <span>{">"} raw_data_payload [{activeIndex + 1}/{results.length}]</span>
-                  <span className="group-open:rotate-180 transition-transform">▼</span>
+              <details style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+                <summary style={{ padding: "10px 14px", fontSize: 11, color: "var(--muted)", cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between" }}>
+                  <span>Raw data payload [{activeIndex + 1}/{results.length}]</span>
+                  <span>▼</span>
                 </summary>
-                <div className="p-4 pt-0"><pre className="text-[10px] text-cyan-800 font-mono overflow-x-auto">{JSON.stringify(currentResult, null, 2)}</pre></div>
+                <div style={{ padding: "12px 14px", background: "var(--off)" }}>
+                  <pre style={{ fontSize: 10, color: "var(--brown)", fontFamily: "monospace", overflow: "auto" }}>{JSON.stringify(currentResult, null, 2)}</pre>
+                </div>
               </details>
             </div>
           ) : (
-            <div className="h-full border border-slate-900 bg-slate-900/5 rounded-3xl flex flex-col items-center justify-center p-12 text-center text-slate-700 min-h-[300px]">
-              <LayoutPanelLeft className="h-10 w-10 mb-4 opacity-10" />
-              <p className="text-sm italic">{images.length > 0 && !loading ? "Analysis running automatically..." : "Upload an image to begin"}</p>
+            <div style={{ border: "2px dashed var(--border)", borderRadius: 20, background: "var(--white)", padding: "60px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, minHeight: 280 }}>
+              <LayoutPanelLeft size={36} color="var(--border)" />
+              <p style={{ fontSize: 14, color: "var(--muted)", fontStyle: "italic" }}>
+                {images.length > 0 && !loading ? "Upload more images or hit Analyze" : "Upload a label to begin"}
+              </p>
             </div>
           )}
         </div>
@@ -1528,70 +1300,69 @@ function ScanTab({ onAddToLog }) {
 export default function App() {
   const [activeMainTab, setActiveMainTab] = useState("scan");
   const [addToLogItem, setAddToLogItem]   = useState(null);
-  const [logRefreshKey, setLogRefreshKey]         = useState(0);
-  // FIX: increment every time user navigates to Library so it remounts and reloads
-  const [libraryMountKey, setLibraryMountKey]     = useState(0);
+  const [logRefreshKey, setLogRefreshKey] = useState(0);
+  const [libraryMountKey, setLibraryMountKey] = useState(0);
+  const [editLogItem, setEditLogItem]     = useState(null);
 
-  const handleAddToLog = useCallback((item) => { setAddToLogItem(item); }, []);
+  const handleAddToLog  = useCallback((item) => { setAddToLogItem(item); }, []);
   const handleLogAdded  = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
-
-  const [editLogItem, setEditLogItem] = useState(null);
-
-  const handleEditEntry = useCallback((entry) => {
-    setEditLogItem(entry);
-  }, []);
+  const handleEditEntry = useCallback((entry) => { setEditLogItem(entry); }, []);
 
   const handleTabChange = useCallback((tabId) => {
     setActiveMainTab(tabId);
-    // FIX: remount LibraryTab every time user clicks Library so folders/items reload fresh
     if (tabId === "library") setLibraryMountKey(k => k + 1);
   }, []);
 
   const TABS = [
-    { id: "scan",    label: "Scan",    icon: <Zap      className="h-4 w-4" /> },
-    { id: "library", label: "Library", icon: <Folder   className="h-4 w-4" /> },
-    { id: "tracker", label: "Tracker", icon: <BarChart3 className="h-4 w-4" /> },
+    { id: "scan",    label: "Scan",    icon: <Zap size={13} />      },
+    { id: "library", label: "Library", icon: <Folder size={13} />   },
+    { id: "tracker", label: "Tracker", icon: <BarChart3 size={13} /> },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans">
-      {addToLogItem && <AddToLogModal item={addToLogItem} onClose={() => setAddToLogItem(null)} onAdded={handleLogAdded} />}
-      {editLogItem && <EditLogModal entry={editLogItem} onClose={() => setEditLogItem(null)} onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
+    <>
+      <style>{PALETTE_CSS}</style>
+      <div style={{ minHeight: "100vh", background: "var(--off)", color: "var(--text)" }}>
+        {addToLogItem && <AddToLogModal item={addToLogItem} onClose={() => setAddToLogItem(null)} onAdded={handleLogAdded} />}
+        {editLogItem  && <EditLogModal  entry={editLogItem}  onClose={() => setEditLogItem(null)}  onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
 
-      <div className="max-w-6xl mx-auto p-4 md:p-8">
-        <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-cyan-500/20 p-2 rounded-lg border border-cyan-500/30"><Database className="h-8 w-8 text-cyan-400" /></div>
+        {/* Header */}
+        <div style={{ background: "var(--teal)", padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 12, background: "rgba(174,246,199,0.2)", border: "1.5px solid rgba(174,246,199,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Database size={18} color="var(--mint)" />
+            </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight text-white">NutriScan <span className="text-cyan-400">Pipeline</span></h1>
-              <p className="text-[10px] font-mono text-slate-500 uppercase tracking-[0.2em]">Data Engineering Edition v3</p>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "white", letterSpacing: "-0.3px" }}>NutriScan</div>
+              <div style={{ fontSize: 10, color: "rgba(174,246,199,0.7)", letterSpacing: "0.8px", textTransform: "uppercase" }}>Pipeline v3</div>
             </div>
           </div>
-          <div className="flex gap-3"><StatusBadge icon={<Cloud className="h-3 w-3" />} label="API" status={API_URL} color="text-cyan-500" /></div>
-        </header>
+          <div style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)" }}>
+            {API_URL.replace("https://", "").replace("http://", "")}
+          </div>
+        </div>
 
-        <div className="flex gap-1 p-1 bg-slate-900/60 border border-slate-800 rounded-2xl mb-8 w-fit">
+        {/* Tab bar */}
+        <div style={{ background: "var(--teal-md)", display: "flex", padding: "8px 16px", gap: 6 }}>
           {TABS.map(tab => (
             <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${activeMainTab === tab.id ? "bg-slate-800 text-slate-100 shadow" : "text-slate-500 hover:text-slate-300"}`}>
+              style={{ padding: "7px 18px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, background: activeMainTab === tab.id ? "var(--mint)" : "rgba(255,255,255,0.1)", color: activeMainTab === tab.id ? "var(--mint-dk)" : "rgba(255,255,255,0.65)", transition: "all 0.15s" }}>
               {tab.icon} {tab.label}
             </button>
           ))}
         </div>
 
-        {/* ScanTab: display:none preserves upload/crop state across tab switches */}
-        <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
-          <ScanTab onAddToLog={handleAddToLog} />
-        </div>
-        {/* LibraryTab: remounts on every visit via key so folders always reload fresh */}
-        {activeMainTab === "library" && (
-          <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} />
-        )}
-        {/* TrackerTab: display:none + refreshKey for instant macro updates */}
-        <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
-          <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
+        {/* Content */}
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px 16px" }}>
+          <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
+            <ScanTab onAddToLog={handleAddToLog} />
+          </div>
+          {activeMainTab === "library" && <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} />}
+          <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
+            <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
