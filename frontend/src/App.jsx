@@ -129,10 +129,9 @@ async function applyPipelineToFile(file, cropData) {
   });
 }
 
-// Preview: just create a blob URL from the original file.
-// Skipping canvas entirely — iOS Safari reliably renders blob URLs from File objects.
-// The full pipeline (grayscale + resize) still runs separately for the API submission.
-function generatePreview(file) {
+// Preview: store the File object itself. Blob URLs are created fresh at render time
+// and never revoked prematurely. This is the most reliable approach for iOS Safari.
+function getPreviewUrl(file) {
   return URL.createObjectURL(file);
 }
 // =============================================================================
@@ -199,7 +198,6 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       setImages(prev => prev.map((img, idx) => ({
         ...img,
         persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null,
-        preview: arr[idx]?.processed_url || arr[idx]?.raw_url || img.preview,
       })));
       switchToIndex(0, arr);
     } else {
@@ -212,7 +210,6 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       setImages(prev => prev.map((img, idx) => ({
         ...img,
         persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null,
-        preview: arr[idx]?.processed_url || arr[idx]?.raw_url || img.preview,
       })));
       switchToIndex(0, arr);
     }
@@ -510,7 +507,7 @@ function AddToLogModal({ item, onClose, onAdded }) {
     setSaving(true);
     try {
       const submitServings = mode === "serving" ? servingsNum : 1;
-      const submitName     = mode === "manual" && manualName.trim() ? manualName.trim() : item.name;
+      const submitName     = manualName.trim() || item.name;
       await apiFetch("/log", { method: "POST", body: JSON.stringify({ name: submitName, servings: submitServings, nutrition: buildSubmitNutrition() }) });
       setStatus({ type: "ok", msg: "Added to today's log!" });
       onAdded();
@@ -527,7 +524,12 @@ function AddToLogModal({ item, onClose, onAdded }) {
           <button onClick={onClose} className="text-slate-600 hover:text-rose-400"><X className="h-4 w-4" /></button>
         </div>
 
-        <p className="text-sm text-slate-300 font-bold truncate">{item.name}</p>
+        <input
+          value={manualName}
+          onChange={e => setManualName(e.target.value)}
+          placeholder="Item name..."
+          className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm font-bold text-slate-200 focus:outline-none focus:border-emerald-500/60"
+        />
 
         <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl">
           {[["serving", "Per Serving"], ["grams", "By Weight"], ["manual", "Manual"]].map(([m, label]) => (
@@ -1021,6 +1023,7 @@ function ScanTab({ onAddToLog }) {
   const [cropperQueue, setCropperQueue] = useState([]);
   const [cropperFile, setCropperFile]   = useState(null);
   const [saveModal, setSaveModal]       = useState(null);
+  const [logName, setLogName]           = useState("");
   const fileInputRef = useRef(null);
 
   const accumulatedOptimizedRef = useRef([]);
@@ -1043,6 +1046,7 @@ function ScanTab({ onAddToLog }) {
 
   const switchToIndex = useCallback((i, resultArr) => {
     setActiveIndex(i);
+    setLogName(""); // reset name when switching images
     const r = (resultArr ?? results)?.[i];
     if (r?.per_100g && Object.keys(r.per_100g).length > 0) setActiveTab("per_100g");
     else if (r?.per_serving && Object.keys(r.per_serving).length > 0) setActiveTab("per_serving");
@@ -1063,12 +1067,11 @@ function ScanTab({ onAddToLog }) {
     const remaining = cropperQueue.slice(1);
 
     setLoadingMsg("Processing...");
-    // Generate preview immediately (sync blob URL from original file — works on iOS)
-    // Run API-optimized version in background
-    const previewUrl = generatePreview(file);
-    const optimized  = await applyPipelineToFile(file, cropData);
+    // Optimize for API submission (grayscale + resize)
+    const optimized = await applyPipelineToFile(file, cropData);
 
-    const imageEntry = { file, preview: previewUrl, cropData, persistentUrl: null };
+    // Store the original File object — blob URL created fresh at render time
+    const imageEntry = { file, preview: null, cropData, persistentUrl: null };
 
     // FIX: append to both state AND refs in the same order so indices always match
     setImages(prev => [...prev, imageEntry]);
@@ -1104,27 +1107,16 @@ function ScanTab({ onAddToLog }) {
   }, [images]);
 
   const removeImage = useCallback((index) => {
-    setImages(prev => {
-      const img = prev[index];
-      // Only revoke local blob previews, not persistent S3 URLs
-      if (img?.preview && img.preview.startsWith("blob:") && !img.persistentUrl) {
-        URL.revokeObjectURL(img.preview);
-      }
-      return prev.filter((_, i) => i !== index);
-    });
+    setImages(prev => prev.filter((_, i) => i !== index));
     setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev));
     setResults(null); setError(null);
   }, []);
 
   const handleClear = useCallback(() => {
-    // Revoke all preview blob URLs to free memory
-    images.forEach(img => {
-      if (img?.preview && img.preview.startsWith("blob:")) URL.revokeObjectURL(img.preview);
-    });
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab("per_100g");
-  }, [images]);
+  }, []);
 
   const handleAnalyze = useCallback(async () => {
     if (results) { handleClear(); return; }
@@ -1141,7 +1133,7 @@ function ScanTab({ onAddToLog }) {
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  const currentPreview = images[activeIndex]?.persistentUrl || images[activeIndex]?.preview || null;
+  const currentPreview = images[activeIndex]?.persistentUrl || (images[activeIndex]?.file ? getPreviewUrl(images[activeIndex].file) : null);
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
 
   return (
@@ -1180,7 +1172,7 @@ function ScanTab({ onAddToLog }) {
               </div>
               <div className="flex gap-2 flex-wrap">
                 {images.map((img, i) => {
-                  const thumbSrc = img.persistentUrl || img.preview;
+                  const thumbSrc = img.persistentUrl || (img.file ? getPreviewUrl(img.file) : null);
                   return (
                     <div key={i} onClick={() => setActiveIndex(i)}
                       className={`relative w-14 h-14 rounded-xl overflow-hidden border cursor-pointer flex-shrink-0 transition-all ${i === activeIndex ? "border-cyan-500/70" : "border-slate-800 opacity-60 hover:opacity-100"}`}>
@@ -1231,10 +1223,18 @@ function ScanTab({ onAddToLog }) {
           )}
 
           {currentResult && (
-            <button onClick={() => onAddToLog({ name: `Label ${activeIndex + 1}`, nutrition: currentResult })}
-              className="w-full py-3 rounded-2xl font-bold text-sm bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 hover:border-emerald-700/50 transition-all flex items-center justify-center gap-2">
-              <Plus className="h-4 w-4" /> LOG THIS ITEM
-            </button>
+            <div className="space-y-2">
+              <input
+                value={logName}
+                onChange={e => setLogName(e.target.value)}
+                placeholder="Name this item before logging..."
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500/60"
+              />
+              <button onClick={() => onAddToLog({ name: logName.trim() || `Label ${activeIndex + 1}`, nutrition: currentResult })}
+                className="w-full py-3 rounded-2xl font-bold text-sm bg-emerald-900/30 text-emerald-400 border border-emerald-900/40 hover:border-emerald-700/50 transition-all flex items-center justify-center gap-2">
+                <Plus className="h-4 w-4" /> LOG THIS ITEM
+              </button>
+            </div>
           )}
         </div>
 
@@ -1260,7 +1260,7 @@ function ScanTab({ onAddToLog }) {
                   <p className="text-[10px] font-mono text-slate-600">SELECT RESULT</p>
                   <div className="flex gap-2 flex-wrap">
                     {results.map((_, i) => {
-                      const thumbSrc = images[i]?.persistentUrl || images[i]?.preview;
+                      const thumbSrc = images[i]?.persistentUrl || (images[i]?.file ? getPreviewUrl(images[i].file) : null);
                       return (
                         <button key={i} onClick={() => switchToIndex(i, results)}
                           className={`flex items-center gap-2 px-2 py-1.5 rounded-xl border transition-all ${activeIndex === i ? "border-cyan-500/50 bg-cyan-500/10" : "border-slate-800 hover:border-slate-600"}`}>
