@@ -201,19 +201,24 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      // FIXED: Update images with the processed_url from API response
+      // Keep existing preview if API doesn't return a URL
       setImages(prev => prev.map((img, idx) => {
         const resultItem = arr[idx];
         const processedUrl = resultItem?.processed_url || resultItem?.raw_url || null;
-        // Revoke old preview URL if it was a blob URL and we have a new persistent URL
-        if (processedUrl && img.preview && img.preview.startsWith("blob:")) {
-          URL.revokeObjectURL(img.preview);
+        if (processedUrl) {
+          if (img.preview && img.preview.startsWith("blob:")) {
+            URL.revokeObjectURL(img.preview);
+          }
+          return {
+            ...img,
+            persistentUrl: processedUrl,
+            preview: processedUrl
+          };
         }
+        // If no URL from API, keep the existing preview but mark that analysis failed for this image
         return {
           ...img,
-          persistentUrl: processedUrl,
-          // Keep preview as fallback, but prioritize persistentUrl
-          preview: processedUrl || img.preview
+          analysisFailed: true
         };
       }));
       switchToIndex(0, arr);
@@ -224,24 +229,36 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      // FIXED: Update images with the processed_url from API response
+      // Keep existing previews if API doesn't return URLs
       setImages(prev => prev.map((img, idx) => {
         const resultItem = arr[idx];
         const processedUrl = resultItem?.processed_url || resultItem?.raw_url || null;
-        // Revoke old preview URL if it was a blob URL and we have a new persistent URL
-        if (processedUrl && img.preview && img.preview.startsWith("blob:")) {
-          URL.revokeObjectURL(img.preview);
+        if (processedUrl) {
+          if (img.preview && img.preview.startsWith("blob:")) {
+            URL.revokeObjectURL(img.preview);
+          }
+          return {
+            ...img,
+            persistentUrl: processedUrl,
+            preview: processedUrl
+          };
         }
         return {
           ...img,
-          persistentUrl: processedUrl,
-          // Keep preview as fallback, but prioritize persistentUrl
-          preview: processedUrl || img.preview
+          analysisFailed: true
         };
       }));
       switchToIndex(0, arr);
     }
-  } catch (err) { console.error("❌ Pipeline Failure:", err); setError(err.message); }
+  } catch (err) { 
+    console.error("❌ Pipeline Failure:", err); 
+    setError(err.message);
+    // Don't clear images on error - mark them as failed but keep previews
+    setImages(prev => prev.map(img => ({
+      ...img,
+      analysisFailed: true
+    })));
+  }
   finally { setLoading(false); setLoadingMsg(""); }
 }
 
@@ -1053,6 +1070,7 @@ function ScanTab({ onAddToLog }) {
   const [saveModal, setSaveModal] = useState(null);
   const [logName, setLogName] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
   const fileInputRef = useRef(null);
   const accumulatedOptimizedRef = useRef([]);
   const accumulatedImagesRef    = useRef([]);
@@ -1077,6 +1095,7 @@ function ScanTab({ onAddToLog }) {
     if (!files.length) return;
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setCropperQueue(files); setCropperFile(files[0]);
+    setRetryCount(0); // Reset retry count on new upload
   }, []);
 
   const handleCropConfirm = useCallback(async (cropData) => {
@@ -1100,12 +1119,14 @@ function ScanTab({ onAddToLog }) {
     setImages(prev => prev.filter((_, i) => i !== index)); setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setResults(null); setError(null); accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setCropperQueue([img.file]); setCropperFile(img.file);
+    setRetryCount(0);
   }, [images]);
 
   const removeImage = useCallback((index) => {
     setImages(prev => { const img = prev[index]; if (img?.preview && img.preview.startsWith("blob:") && !img.persistentUrl) URL.revokeObjectURL(img.preview); return prev.filter((_, i) => i !== index); });
     setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev)); setResults(null); setError(null);
+    setRetryCount(0);
   }, []);
 
   const handleClear = useCallback(() => {
@@ -1113,16 +1134,43 @@ function ScanTab({ onAddToLog }) {
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab("per_100g");
     setFileInputKey(k => k + 1);
+    setRetryCount(0);
   }, [images]);
 
   const handleAnalyze = useCallback(async () => {
-    if (results) { handleClear(); return; } if (!images.length) return;
-    const filesToSend = accumulatedOptimizedRef.current.length === images.length ? accumulatedOptimizedRef.current : optimizedFiles.length === images.length ? optimizedFiles : images.map(i => i.file);
-    await runAnalysis({ optimizedFiles: filesToSend, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
-  }, [images, optimizedFiles, results, handleClear, switchToIndex]);
+    if (results) { handleClear(); return; }
+    if (!images.length) return;
+    
+    // Add progressive delay for retries to avoid rate limiting
+    if (retryCount > 0) {
+      setLoadingMsg(`Waiting ${Math.min(retryCount * 2, 8)} seconds before retry...`);
+      await new Promise(resolve => setTimeout(resolve, Math.min(retryCount * 2000, 8000)));
+    }
+    
+    const filesToSend = accumulatedOptimizedRef.current.length === images.length 
+      ? accumulatedOptimizedRef.current 
+      : optimizedFiles.length === images.length 
+        ? optimizedFiles 
+        : images.map(i => i.file);
+    
+    try {
+      await runAnalysis({ 
+        optimizedFiles: filesToSend, 
+        setLoading, 
+        setLoadingMsg, 
+        setError, 
+        setResults, 
+        setImages, 
+        switchToIndex 
+      });
+      setRetryCount(0); // Reset retry count on success
+    } catch (err) {
+      setRetryCount(prev => prev + 1);
+      // Don't clear error immediately - let user decide to retry
+    }
+  }, [images, optimizedFiles, results, handleClear, switchToIndex, retryCount]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  // FIXED: Get the preview URL - prioritize persistentUrl from the image state
   const currentImage = images[activeIndex];
   const currentPreview = currentImage?.persistentUrl || currentImage?.preview || accumulatedImagesRef.current[activeIndex]?.preview || null;
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
@@ -1203,9 +1251,16 @@ function ScanTab({ onAddToLog }) {
           </button>
 
           {error && !loading && images.length > 0 && !results && (
-            <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
-              <RefreshCcw size={14} /> Retry (images preserved)
-            </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
+                <RefreshCcw size={14} /> Retry Analysis {retryCount > 0 ? `(Attempt ${retryCount + 1})` : ""}
+              </button>
+              {retryCount > 0 && (
+                <p style={{ fontSize: 11, color: "var(--orange)", textAlign: "center" }}>
+                  ⚠ Rate limit detected. Waiting longer between retries...
+                </p>
+              )}
+            </div>
           )}
 
           {currentResult && (
