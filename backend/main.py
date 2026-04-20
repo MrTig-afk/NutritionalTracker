@@ -4,7 +4,8 @@ import json
 import uuid
 import asyncio
 import boto3
-import duckdb
+import psycopg2
+import psycopg2.extras
 from datetime import datetime, date
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # ---------- CONFIG ----------
-DB_NAME        = os.getenv("DATABASE_NAME", "nutriscan.duckdb")
+DATABASE_URL   = os.getenv("DATABASE_URL")
 PRIMARY_MODEL  = "gemini-2.5-flash"
 FALLBACK_MODEL = "gemini-1.5-flash"
 MAX_IMAGE_PX   = 1024
@@ -32,7 +33,7 @@ JPEG_QUALITY   = 60
 GEMINI_TIMEOUT = 45
 MAX_RETRIES    = 2
 
-logger.info(f"📦 USING DB: {os.path.abspath(DB_NAME)}")
+logger.info(f"📦 DATABASE_URL configured: {bool(DATABASE_URL)}")
 
 # ---------- CLIENTS ----------
 s3_client = None
@@ -56,7 +57,7 @@ else:
     logger.warning("⚠️ Gemini API key missing")
 
 # ---------- FASTAPI ----------
-app = FastAPI(title="NutriScan API", version="3.1")
+app = FastAPI(title="NutriScan API", version="3.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -86,7 +87,7 @@ class MacroGoal(BaseModel):
     protein: float
     carbs: float
     fat: float
-    fibre: Optional[float] = 0.0  # FIX: added fibre goal support
+    fibre: Optional[float] = 0.0
 
 class LogEntry(BaseModel):
     name: str
@@ -176,17 +177,20 @@ RESPOND WITH JSON ONLY:"""
 
 # =============================================================================
 # KJ → KCAL CONVERSION HELPERS
-# Applied as a safety net after Gemini parsing in case the model missed the
-# instruction. Detects implausibly large calorie values (>900 kcal/100g is
-# unusual for food) and converts if they appear to be kJ values.
 # =============================================================================
 
 KJ_PER_KCAL = 4.184
-# Heuristic: if calories > 900 for a 100g serving it's almost certainly kJ
 KJ_HEURISTIC_THRESHOLD = 900
 
+def _parse_num(v) -> float:
+    if v is None:
+        return 0.0
+    if isinstance(v, (int, float)):
+        return float(v)
+    m = re.search(r"[\d.]+", str(v))
+    return float(m.group()) if m else 0.0
+
 def _convert_kj_if_needed(calories_raw) -> float:
-    """Convert kJ to kcal if the value is suspiciously large."""
     val = _parse_num(calories_raw)
     if val > KJ_HEURISTIC_THRESHOLD:
         converted = round(val / KJ_PER_KCAL)
@@ -195,7 +199,6 @@ def _convert_kj_if_needed(calories_raw) -> float:
     return val
 
 def normalize_nutrition_section(section: dict) -> dict:
-    """Normalize a per_serving or per_100g dict: convert kJ calories."""
     if not section or not isinstance(section, dict):
         return section
     result = dict(section)
@@ -204,7 +207,6 @@ def normalize_nutrition_section(section: dict) -> dict:
     return result
 
 def normalize_extracted_data(data: dict) -> dict:
-    """Apply kJ→kcal normalization to a full extraction result."""
     if not data or not isinstance(data, dict):
         return data
     result = dict(data)
@@ -216,11 +218,111 @@ def normalize_extracted_data(data: dict) -> dict:
 
 
 # =============================================================================
+# DATABASE LAYER — PostgreSQL
+# =============================================================================
+
+def get_db():
+    """Return a new psycopg2 connection. Caller must close it."""
+    if not DATABASE_URL:
+        raise Exception("DATABASE_URL environment variable not set")
+    conn = psycopg2.connect(DATABASE_URL)
+    conn.autocommit = False
+    return conn
+
+
+def init_db():
+    """Create all tables if they don't exist. Safe to run on every startup."""
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS extractions (
+                id         VARCHAR PRIMARY KEY,
+                created_at TIMESTAMP,
+                s3_url     TEXT,
+                raw_json   JSONB
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS image_records (
+                image_id      VARCHAR PRIMARY KEY,
+                user_id       VARCHAR NOT NULL,
+                created_at    TIMESTAMP,
+                raw_url       TEXT,
+                processed_url TEXT,
+                extracted_data JSONB
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS folders (
+                folder_id  VARCHAR PRIMARY KEY,
+                user_id    VARCHAR NOT NULL,
+                name       VARCHAR NOT NULL,
+                created_at TIMESTAMP
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS folder_items (
+                item_id    VARCHAR PRIMARY KEY,
+                folder_id  VARCHAR NOT NULL,
+                user_id    VARCHAR NOT NULL,
+                image_id   VARCHAR,
+                name       VARCHAR NOT NULL,
+                nutrition  JSONB,
+                created_at TIMESTAMP
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_goals (
+                user_id    VARCHAR PRIMARY KEY,
+                calories   DOUBLE PRECISION,
+                protein    DOUBLE PRECISION,
+                carbs      DOUBLE PRECISION,
+                fat        DOUBLE PRECISION,
+                fibre      DOUBLE PRECISION DEFAULT 0,
+                updated_at TIMESTAMP
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS daily_log (
+                log_id     VARCHAR PRIMARY KEY,
+                user_id    VARCHAR NOT NULL,
+                date       VARCHAR NOT NULL,
+                name       VARCHAR NOT NULL,
+                servings   DOUBLE PRECISION,
+                nutrition  JSONB,
+                created_at TIMESTAMP
+            )
+        """)
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("✅ PostgreSQL database initialized (all tables)")
+    except Exception as e:
+        logger.error(f"❌ DB init failed: {e}")
+        raise
+
+
+@app.on_event("startup")
+def startup():
+    init_db()
+    logger.info("\n📋 Registered Routes:")
+    for route in app.routes:
+        logger.info(f"   {getattr(route, 'methods', {'GET'})} {route.path}")
+
+
+# =============================================================================
 # STORAGE LAYER
 # =============================================================================
 
 def optimize_image(image_bytes: bytes, content_type: str = "image/jpeg") -> bytes:
-    """Defensive backend optimization. Frontend already optimizes; this is a safety net."""
     try:
         img = Image.open(io.BytesIO(image_bytes))
         if img.mode in ("RGBA", "P", "LA"):
@@ -246,12 +348,6 @@ async def upload_raw_and_processed(
     image_id: str,
     content_type: str,
 ) -> tuple:
-    """
-    Upload both raw and processed images to structured S3 paths:
-        users/{user_id}/raw/{image_id}.jpg
-        users/{user_id}/processed/{image_id}.jpg
-    Returns (raw_url, processed_url).
-    """
     if not s3_client:
         return ("", "")
 
@@ -264,10 +360,7 @@ async def upload_raw_and_processed(
             await loop.run_in_executor(
                 None,
                 lambda: s3_client.put_object(
-                    Bucket=S3_BUCKET,
-                    Key=key,
-                    Body=body,
-                    ContentType="image/jpeg",
+                    Bucket=S3_BUCKET, Key=key, Body=body, ContentType="image/jpeg",
                 ),
             )
             url = f"https://{S3_BUCKET}.s3.amazonaws.com/{key}"
@@ -361,110 +454,6 @@ def parse_gemini_json(raw_text: str):
 
 
 # =============================================================================
-# DATABASE LAYER
-# =============================================================================
-
-def get_db():
-    return duckdb.connect(DB_NAME)
-
-
-def init_db():
-    try:
-        con = get_db()
-
-        # Legacy table — kept for backward compat
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS extractions (
-                id VARCHAR PRIMARY KEY,
-                created_at TIMESTAMP,
-                s3_url TEXT,
-                raw_json JSON
-            )
-        """)
-
-        # Extended image records with dual S3 URLs
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS image_records (
-                image_id      VARCHAR PRIMARY KEY,
-                user_id       VARCHAR NOT NULL,
-                created_at    TIMESTAMP,
-                raw_url       TEXT,
-                processed_url TEXT,
-                extracted_data JSON
-            )
-        """)
-
-        # Folders
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS folders (
-                folder_id  VARCHAR PRIMARY KEY,
-                user_id    VARCHAR NOT NULL,
-                name       VARCHAR NOT NULL,
-                created_at TIMESTAMP
-            )
-        """)
-
-        # Folder items
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS folder_items (
-                item_id    VARCHAR PRIMARY KEY,
-                folder_id  VARCHAR NOT NULL,
-                user_id    VARCHAR NOT NULL,
-                image_id   VARCHAR,
-                name       VARCHAR NOT NULL,
-                nutrition  JSON,
-                created_at TIMESTAMP
-            )
-        """)
-
-        # User macro goals — FIX: added fibre column with migration support
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS user_goals (
-                user_id    VARCHAR PRIMARY KEY,
-                calories   DOUBLE,
-                protein    DOUBLE,
-                carbs      DOUBLE,
-                fat        DOUBLE,
-                fibre      DOUBLE DEFAULT 0,
-                updated_at TIMESTAMP
-            )
-        """)
-
-        # Migration: add fibre column if it doesn't exist yet (backward compat)
-        try:
-            con.execute("ALTER TABLE user_goals ADD COLUMN fibre DOUBLE DEFAULT 0")
-            logger.info("✅ Migrated user_goals: added fibre column")
-        except Exception:
-            pass  # Column already exists
-
-        # Daily log — one row per entry
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS daily_log (
-                log_id     VARCHAR PRIMARY KEY,
-                user_id    VARCHAR NOT NULL,
-                date       VARCHAR NOT NULL,
-                name       VARCHAR NOT NULL,
-                servings   DOUBLE,
-                nutrition  JSON,
-                created_at TIMESTAMP
-            )
-        """)
-
-        con.close()
-        logger.info("✅ Database initialized (all tables)")
-    except Exception as e:
-        logger.error(f"❌ DB init failed: {e}")
-
-
-@app.on_event("startup")
-def startup():
-    init_db()
-    logger.info("\n📋 Registered Routes:")
-    for route in app.routes:
-        logger.info(f"   {getattr(route, 'methods', {'GET'})} {route.path}")
-
-
-# =============================================================================
 # HEALTH CHECK
 # =============================================================================
 
@@ -476,7 +465,7 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "s3_configured": s3_client is not None,
         "gemini_configured": gemini_client is not None,
-        "version": "3.1",
+        "version": "3.2",
     }
 
 
@@ -498,47 +487,44 @@ async def analyze_label(
     user_id   = get_user_id(x_user_id)
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
-    logger.info(f"📥 Single image: {file.filename} ({len(raw_bytes)} bytes) user={user_id}")
 
     processed_bytes = optimize_image(raw_bytes, file.content_type or "image/jpeg")
-
-    contents  = [PROMPT_SINGLE, types.Part.from_bytes(data=processed_bytes, mime_type="image/jpeg")]
-    gemini_task = asyncio.create_task(call_gemini_with_retry(contents, label="single"))
-    s3_task     = asyncio.create_task(
-        upload_raw_and_processed(raw_bytes, processed_bytes, user_id, image_id, file.content_type or "image/jpeg")
+    raw_url, processed_url = await upload_raw_and_processed(
+        raw_bytes, processed_bytes, user_id, image_id, file.content_type or "image/jpeg"
     )
 
-    try:
-        raw_text = await gemini_task
-    except HTTPException:
-        s3_task.cancel()
-        raise
+    image_part = types.Part.from_bytes(data=processed_bytes, mime_type="image/jpeg")
+    contents   = [image_part, PROMPT_SINGLE]
 
-    raw_url, processed_url = await s3_task
+    raw_text = await call_gemini_with_retry(contents, label=image_id[:8])
 
     try:
-        parsed = parse_gemini_json(raw_text)
-    except json.JSONDecodeError as e:
+        result = parse_gemini_json(raw_text)
+        result = normalize_extracted_data(result)
+    except Exception as e:
         raise HTTPException(status_code=500, detail={
             "error_type": "parse_error", "retryable": True,
-            "message": f"Gemini returned invalid JSON: {e}",
+            "message": f"Failed to parse Gemini response: {str(e)}",
         })
 
-    # FIX: Apply kJ→kcal normalization as a safety net
-    parsed = normalize_extracted_data(parsed)
+    result["image_id"]      = image_id
+    result["raw_url"]       = raw_url
+    result["processed_url"] = processed_url
 
     try:
-        db = get_db()
-        db.execute("INSERT INTO extractions VALUES (?, ?, ?, ?)",
-                   [image_id, datetime.now(), processed_url, json.dumps(parsed)])
-        db.execute("INSERT INTO image_records VALUES (?, ?, ?, ?, ?, ?)",
-                   [image_id, user_id, datetime.now(), raw_url, processed_url, json.dumps(parsed)])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "INSERT INTO image_records (image_id, user_id, created_at, raw_url, processed_url, extracted_data) VALUES (%s, %s, %s, %s, %s, %s)",
+            [image_id, user_id, datetime.now(), raw_url, processed_url, json.dumps(result)],
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
-        logger.error(f"❌ DB save failed (non-fatal): {e}")
+        logger.warning(f"⚠️ DB insert failed (non-fatal): {e}")
 
-    logger.info(f"✅ Single processed: {image_id}")
-    return {**parsed, "image_id": image_id, "raw_url": raw_url, "processed_url": processed_url}
+    return result
 
 
 @app.post("/analyze-labels")
@@ -546,128 +532,72 @@ async def analyze_labels(
     files: List[UploadFile] = File(...),
     x_user_id: Optional[str] = Header(default=None),
 ):
-    if not files:
-        raise HTTPException(status_code=400, detail={
-            "error_type": "validation", "retryable": False, "message": "No files provided",
-        })
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
-            "error_type": "configuration", "retryable": False, "message": "Gemini API not configured",
+            "error_type": "configuration", "retryable": False,
+            "message": "Gemini API not configured",
         })
-
-    MAX_IMAGES = 10
-    if len(files) > MAX_IMAGES:
+    if len(files) > 10:
         raise HTTPException(status_code=400, detail={
-            "error_type": "validation", "retryable": False,
-            "message": f"Too many images. Max: {MAX_IMAGES}",
+            "error_type": "too_many_files", "retryable": False,
+            "message": "Maximum 10 images per batch",
         })
 
     user_id = get_user_id(x_user_id)
-    logger.info(f"📥 Batch {len(files)} file(s) user={user_id}")
 
-    images_data = []
-    for idx, f in enumerate(files):
-        raw = await f.read()
-        images_data.append({
-            "image_id":    str(uuid.uuid4()),
-            "user_id":     user_id,
-            "bytes":       raw,
-            "processed":   optimize_image(raw, f.content_type or "image/jpeg"),
-            "content_type": f.content_type or "image/jpeg",
-            "filename":    f.filename,
-        })
-        logger.info(f"   📄 File {idx + 1}: {f.filename} ({len(raw)} bytes)")
+    processed_images = []
+    image_ids        = []
+    upload_tasks     = []
 
-    # Smart routing: 1 image → single prompt
-    if len(images_data) == 1:
-        img      = images_data[0]
-        contents = [PROMPT_SINGLE, types.Part.from_bytes(data=img["processed"], mime_type="image/jpeg")]
-        g_task   = asyncio.create_task(call_gemini_with_retry(contents, label="routed-single"))
-        s_task   = asyncio.create_task(
-            upload_raw_and_processed(img["bytes"], img["processed"], user_id, img["image_id"], img["content_type"])
-        )
-        raw_text = await g_task
-        raw_url, processed_url = await s_task
+    for f in files:
+        raw_bytes       = await f.read()
+        processed_bytes = optimize_image(raw_bytes, f.content_type or "image/jpeg")
+        image_id        = str(uuid.uuid4())
+        image_ids.append(image_id)
+        processed_images.append(processed_bytes)
+        upload_tasks.append(upload_raw_and_processed(
+            raw_bytes, processed_bytes, user_id, image_id, f.content_type or "image/jpeg"
+        ))
 
-        try:
-            parsed = parse_gemini_json(raw_text)
-        except json.JSONDecodeError as e:
-            raise HTTPException(status_code=500, detail={
-                "error_type": "parse_error", "retryable": True,
-                "message": f"Gemini returned invalid JSON: {e}",
-            })
+    upload_results = await asyncio.gather(*upload_tasks)
 
-        if isinstance(parsed, dict):
-            parsed = [parsed]
+    contents = []
+    for pb in processed_images:
+        contents.append(types.Part.from_bytes(data=pb, mime_type="image/jpeg"))
+    contents.append(build_batch_prompt(len(files)))
 
-        # FIX: Apply kJ→kcal normalization
-        parsed = [normalize_extracted_data(p) for p in parsed]
-
-        try:
-            db = get_db()
-            db.execute("INSERT INTO extractions VALUES (?, ?, ?, ?)",
-                       [img["image_id"], datetime.now(), processed_url, json.dumps(parsed[0])])
-            db.execute("INSERT INTO image_records VALUES (?, ?, ?, ?, ?, ?)",
-                       [img["image_id"], user_id, datetime.now(), raw_url, processed_url, json.dumps(parsed[0])])
-            db.close()
-        except Exception as e:
-            logger.error(f"❌ DB save failed (non-fatal): {e}")
-
-        return [{**parsed[0], "image_id": img["image_id"], "raw_url": raw_url, "processed_url": processed_url}]
-
-    # Multi-image batch
-    n = len(images_data)
-    contents = [build_batch_prompt(n)]
-    for img in images_data:
-        contents.append(types.Part.from_bytes(data=img["processed"], mime_type="image/jpeg"))
-
-    logger.info(f"🤖 Sending {n} images to Gemini...")
+    raw_text = await call_gemini_with_retry(contents, label=f"batch-{len(files)}")
 
     try:
-        raw_text = await call_gemini_with_retry(contents, label=f"batch-{n}")
-    except HTTPException:
-        raise
-
-    try:
-        parsed = parse_gemini_json(raw_text)
-    except json.JSONDecodeError as e:
-        logger.error(f"❌ JSON parse failure. Raw: {raw_text[:500]}")
+        results = parse_gemini_json(raw_text)
+        if not isinstance(results, list):
+            results = [results]
+        results = [normalize_extracted_data(r) for r in results]
+    except Exception as e:
         raise HTTPException(status_code=500, detail={
             "error_type": "parse_error", "retryable": True,
-            "message": f"Gemini returned invalid JSON: {e}",
+            "message": f"Failed to parse batch response: {str(e)}",
         })
 
-    if isinstance(parsed, dict):
-        parsed = [parsed]
-    while len(parsed) < n:
-        parsed.append({"error": "Missing data", "per_100g": {}, "per_serving": {}})
-    parsed = parsed[:n]
-
-    # FIX: Apply kJ→kcal normalization to all results
-    parsed = [normalize_extracted_data(p) for p in parsed]
-
-    s3_tasks   = [
-        upload_raw_and_processed(img["bytes"], img["processed"], user_id, img["image_id"], img["content_type"])
-        for img in images_data
-    ]
-    s3_results = await asyncio.gather(*s3_tasks)
-
     try:
-        db = get_db()
-        for img, (raw_url, processed_url), result in zip(images_data, s3_results, parsed):
-            db.execute("INSERT INTO extractions VALUES (?, ?, ?, ?)",
-                       [img["image_id"], datetime.now(), processed_url, json.dumps(result)])
-            db.execute("INSERT INTO image_records VALUES (?, ?, ?, ?, ?, ?)",
-                       [img["image_id"], user_id, datetime.now(), raw_url, processed_url, json.dumps(result)])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        for i, result in enumerate(results):
+            raw_url, processed_url = upload_results[i] if i < len(upload_results) else ("", "")
+            result["image_id"]      = image_ids[i]
+            result["raw_url"]       = raw_url
+            result["processed_url"] = processed_url
+            cur.execute(
+                "INSERT INTO image_records (image_id, user_id, created_at, raw_url, processed_url, extracted_data) VALUES (%s, %s, %s, %s, %s, %s)",
+                [image_ids[i], user_id, datetime.now(), raw_url, processed_url, json.dumps(result)],
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
-        logger.error(f"❌ DB save failed (non-fatal): {e}")
+        logger.warning(f"⚠️ Batch DB insert failed (non-fatal): {e}")
 
-    logger.info(f"✅ Batch complete: {n} images")
-    return [
-        {**result, "image_id": img["image_id"], "raw_url": raw_url, "processed_url": processed_url}
-        for img, (raw_url, processed_url), result in zip(images_data, s3_results, parsed)
-    ]
+    return results
 
 
 # =============================================================================
@@ -682,28 +612,79 @@ async def create_folder(
     user_id   = get_user_id(x_user_id)
     folder_id = str(uuid.uuid4())
     try:
-        db = get_db()
-        db.execute("INSERT INTO folders VALUES (?, ?, ?, ?)",
-                   [folder_id, user_id, body.name, datetime.now()])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "INSERT INTO folders (folder_id, user_id, name, created_at) VALUES (%s, %s, %s, %s)",
+            [folder_id, user_id, body.name, datetime.now()],
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"folder_id": folder_id, "user_id": user_id, "name": body.name}
+    return {"folder_id": folder_id, "name": body.name}
 
 
 @app.get("/folders")
 async def list_folders(x_user_id: Optional[str] = Header(default=None)):
     user_id = get_user_id(x_user_id)
     try:
-        db   = get_db()
-        rows = db.execute(
-            "SELECT folder_id, name, created_at FROM folders WHERE user_id = ? ORDER BY created_at DESC",
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT folder_id, name FROM folders WHERE user_id = %s ORDER BY created_at DESC",
             [user_id],
-        ).fetchall()
-        db.close()
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return [{"folder_id": r[0], "name": r[1], "created_at": str(r[2])} for r in rows]
+    return [{"folder_id": r[0], "name": r[1]} for r in rows]
+
+
+@app.get("/folders/{folder_id}")
+async def get_folder(
+    folder_id: str,
+    x_user_id: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id(x_user_id)
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT folder_id, name FROM folders WHERE folder_id = %s AND user_id = %s",
+            [folder_id, user_id],
+        )
+        folder = cur.fetchone()
+        if not folder:
+            cur.close(); conn.close()
+            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Folder not found"})
+        cur.execute(
+            "SELECT item_id, name, nutrition FROM folder_items WHERE folder_id = %s AND user_id = %s ORDER BY created_at DESC",
+            [folder_id, user_id],
+        )
+        items = cur.fetchall()
+        cur.close()
+        conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
+
+    return {
+        "folder_id": folder[0],
+        "name":      folder[1],
+        "items": [
+            {
+                "item_id":   row[0],
+                "name":      row[1],
+                "nutrition": row[2] if isinstance(row[2], dict) else json.loads(row[2]),
+            }
+            for row in items
+        ],
+    }
 
 
 @app.post("/folders/{folder_id}/items")
@@ -715,64 +696,18 @@ async def add_folder_item(
     user_id = get_user_id(x_user_id)
     item_id = str(uuid.uuid4())
     try:
-        db  = get_db()
-        row = db.execute(
-            "SELECT folder_id FROM folders WHERE folder_id = ? AND user_id = ?",
-            [folder_id, user_id],
-        ).fetchone()
-        if not row:
-            db.close()
-            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Folder not found"})
-        db.execute("INSERT INTO folder_items VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   [item_id, folder_id, user_id, body.image_id, body.name, json.dumps(body.nutrition), datetime.now()])
-        db.close()
-    except HTTPException:
-        raise
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "INSERT INTO folder_items (item_id, folder_id, user_id, image_id, name, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            [item_id, folder_id, user_id, body.image_id, body.name, json.dumps(body.nutrition), datetime.now()],
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"item_id": item_id, "folder_id": folder_id, "name": body.name}
-
-
-@app.get("/folders/{folder_id}")
-async def get_folder(
-    folder_id: str,
-    x_user_id: Optional[str] = Header(default=None),
-):
-    user_id = get_user_id(x_user_id)
-    try:
-        db     = get_db()
-        folder = db.execute(
-            "SELECT folder_id, name, created_at FROM folders WHERE folder_id = ? AND user_id = ?",
-            [folder_id, user_id],
-        ).fetchone()
-        if not folder:
-            db.close()
-            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Folder not found"})
-        items = db.execute(
-            "SELECT item_id, image_id, name, nutrition, created_at FROM folder_items WHERE folder_id = ? ORDER BY created_at DESC",
-            [folder_id],
-        ).fetchall()
-        db.close()
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-
-    return {
-        "folder_id":  folder[0],
-        "name":       folder[1],
-        "created_at": str(folder[2]),
-        "items": [
-            {
-                "item_id":    r[0],
-                "image_id":   r[1],
-                "name":       r[2],
-                "nutrition":  json.loads(r[3]) if isinstance(r[3], str) else r[3],
-                "created_at": str(r[4]),
-            }
-            for r in items
-        ],
-    }
+    return {"item_id": item_id, "name": body.name}
 
 
 @app.delete("/folders/{folder_id}/items/{item_id}")
@@ -783,10 +718,15 @@ async def delete_folder_item(
 ):
     user_id = get_user_id(x_user_id)
     try:
-        db = get_db()
-        db.execute("DELETE FROM folder_items WHERE item_id = ? AND folder_id = ? AND user_id = ?",
-                   [item_id, folder_id, user_id])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "DELETE FROM folder_items WHERE item_id = %s AND folder_id = %s AND user_id = %s",
+            [item_id, folder_id, user_id],
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}
@@ -799,17 +739,20 @@ async def delete_folder(
 ):
     user_id = get_user_id(x_user_id)
     try:
-        db = get_db()
-        db.execute("DELETE FROM folder_items WHERE folder_id = ? AND user_id = ?", [folder_id, user_id])
-        db.execute("DELETE FROM folders WHERE folder_id = ? AND user_id = ?", [folder_id, user_id])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute("DELETE FROM folder_items WHERE folder_id = %s AND user_id = %s", [folder_id, user_id])
+        cur.execute("DELETE FROM folders WHERE folder_id = %s AND user_id = %s", [folder_id, user_id])
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}
 
 
 # =============================================================================
-# MACRO GOALS ENDPOINTS — FIX: added fibre support
+# MACRO GOALS ENDPOINTS
 # =============================================================================
 
 @app.post("/goals")
@@ -820,17 +763,23 @@ async def set_goals(
     user_id = get_user_id(x_user_id)
     fibre   = body.fibre or 0.0
     try:
-        db       = get_db()
-        existing = db.execute("SELECT user_id FROM user_goals WHERE user_id = ?", [user_id]).fetchone()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute("SELECT user_id FROM user_goals WHERE user_id = %s", [user_id])
+        existing = cur.fetchone()
         if existing:
-            db.execute(
-                "UPDATE user_goals SET calories=?, protein=?, carbs=?, fat=?, fibre=?, updated_at=? WHERE user_id=?",
+            cur.execute(
+                "UPDATE user_goals SET calories=%s, protein=%s, carbs=%s, fat=%s, fibre=%s, updated_at=%s WHERE user_id=%s",
                 [body.calories, body.protein, body.carbs, body.fat, fibre, datetime.now(), user_id],
             )
         else:
-            db.execute("INSERT INTO user_goals VALUES (?, ?, ?, ?, ?, ?, ?)",
-                       [user_id, body.calories, body.protein, body.carbs, body.fat, fibre, datetime.now()])
-        db.close()
+            cur.execute(
+                "INSERT INTO user_goals (user_id, calories, protein, carbs, fat, fibre, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                [user_id, body.calories, body.protein, body.carbs, body.fat, fibre, datetime.now()],
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {
@@ -843,16 +792,19 @@ async def set_goals(
 async def get_goals(x_user_id: Optional[str] = Header(default=None)):
     user_id = get_user_id(x_user_id)
     try:
-        db  = get_db()
-        row = db.execute(
-            "SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = ?", [user_id]
-        ).fetchone()
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = %s",
+            [user_id],
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     if not row:
         return {"calories": 2000.0, "protein": 150.0, "carbs": 250.0, "fat": 65.0, "fibre": 30.0}
-    # FIX: handle old rows without fibre column gracefully
     fibre = row[4] if len(row) > 4 and row[4] is not None else 0.0
     return {"calories": row[0], "protein": row[1], "carbs": row[2], "fat": row[3], "fibre": fibre}
 
@@ -860,15 +812,6 @@ async def get_goals(x_user_id: Optional[str] = Header(default=None)):
 # =============================================================================
 # DAILY LOG ENDPOINTS
 # =============================================================================
-
-def _parse_num(v) -> float:
-    if v is None:
-        return 0.0
-    if isinstance(v, (int, float)):
-        return float(v)
-    m = re.search(r"[\d.]+", str(v))
-    return float(m.group()) if m else 0.0
-
 
 @app.post("/log")
 async def add_log_entry(
@@ -879,10 +822,15 @@ async def add_log_entry(
     log_id  = str(uuid.uuid4())
     today   = date.today().isoformat()
     try:
-        db = get_db()
-        db.execute("INSERT INTO daily_log VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   [log_id, user_id, today, body.name, body.servings, json.dumps(body.nutrition), datetime.now()])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "INSERT INTO daily_log (log_id, user_id, date, name, servings, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            [log_id, user_id, today, body.name, body.servings, json.dumps(body.nutrition), datetime.now()],
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"log_id": log_id, "date": today, "name": body.name, "servings": body.servings}
@@ -896,34 +844,33 @@ async def get_daily_log(
     user_id     = get_user_id(x_user_id)
     target_date = log_date or date.today().isoformat()
     try:
-        db   = get_db()
-        rows = db.execute(
-            "SELECT log_id, name, servings, nutrition FROM daily_log WHERE user_id = ? AND date = ? ORDER BY created_at",
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT log_id, name, servings, nutrition FROM daily_log WHERE user_id = %s AND date = %s ORDER BY created_at",
             [user_id, target_date],
-        ).fetchall()
-        db.close()
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
 
     items  = []
-    # FIX: include fibre in totals
     totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0, "fibre": 0.0}
 
     for row in rows:
         log_id, name, servings, nutrition_raw = row
-        nutrition = json.loads(nutrition_raw) if isinstance(nutrition_raw, str) else nutrition_raw
+        nutrition = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
 
-        # FIX: Robust per_serving resolution — prefer per_serving, fallback to per_100g
         if nutrition.get("per_serving") and len(nutrition["per_serving"]) > 0:
             per_serving = nutrition["per_serving"]
         elif nutrition.get("per_100g") and len(nutrition["per_100g"]) > 0:
             per_serving = nutrition["per_100g"]
             logger.info(f"   ℹ️ [{name}] No per_serving — falling back to per_100g for log calculation")
         else:
-            # Flat nutrition dict (pre-scaled grams mode submission)
             per_serving = nutrition
 
-        # FIX: Apply kJ→kcal conversion on stored data too (handles legacy entries)
         cal_raw = per_serving.get("calories", 0)
         cal_val = _parse_num(cal_raw)
         if cal_val > KJ_HEURISTIC_THRESHOLD:
@@ -945,7 +892,6 @@ async def get_daily_log(
             "log_id":   log_id,
             "name":     name,
             "servings": servings,
-            # Return full nutrition object so frontend can scale by weight in edit modal
             "nutrition": nutrition,
             "contribution": {
                 "calories": round(cal,  1),
@@ -971,19 +917,22 @@ async def update_log_entry(
 ):
     user_id = get_user_id(x_user_id)
     try:
-        db  = get_db()
-        row = db.execute(
-            "SELECT log_id FROM daily_log WHERE log_id = ? AND user_id = ?",
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT log_id FROM daily_log WHERE log_id = %s AND user_id = %s",
             [log_id, user_id],
-        ).fetchone()
-        if not row:
-            db.close()
+        )
+        if not cur.fetchone():
+            cur.close(); conn.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Log entry not found"})
-        db.execute(
-            "UPDATE daily_log SET name=?, servings=?, nutrition=? WHERE log_id=? AND user_id=?",
+        cur.execute(
+            "UPDATE daily_log SET name=%s, servings=%s, nutrition=%s WHERE log_id=%s AND user_id=%s",
             [body.name, body.servings, json.dumps(body.nutrition), log_id, user_id],
         )
-        db.close()
+        conn.commit()
+        cur.close()
+        conn.close()
     except HTTPException:
         raise
     except Exception as e:
@@ -998,9 +947,12 @@ async def delete_log_entry(
 ):
     user_id = get_user_id(x_user_id)
     try:
-        db = get_db()
-        db.execute("DELETE FROM daily_log WHERE log_id = ? AND user_id = ?", [log_id, user_id])
-        db.close()
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute("DELETE FROM daily_log WHERE log_id = %s AND user_id = %s", [log_id, user_id])
+        conn.commit()
+        cur.close()
+        conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}

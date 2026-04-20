@@ -201,7 +201,7 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      setImages(prev => prev.map((img, idx) => ({ ...img, persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null })));
+      setImages(prev => prev.map((img, idx) => { const url = arr[idx]?.processed_url || arr[idx]?.raw_url || null; return url ? { ...img, persistentUrl: url } : img; }));
       switchToIndex(0, arr);
     } else {
       optimizedFiles.forEach(f => formData.append("files", f));
@@ -210,7 +210,7 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      setImages(prev => prev.map((img, idx) => ({ ...img, persistentUrl: arr[idx]?.processed_url || arr[idx]?.raw_url || null })));
+      setImages(prev => prev.map((img, idx) => { const url = arr[idx]?.processed_url || arr[idx]?.raw_url || null; return url ? { ...img, persistentUrl: url } : img; }));
       switchToIndex(0, arr);
     }
   } catch (err) { console.error("❌ Pipeline Failure:", err); setError(err.message); }
