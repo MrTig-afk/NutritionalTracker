@@ -1094,7 +1094,8 @@ function ScanTab({ onAddToLog }) {
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  const currentPreview = images[activeIndex]?.persistentUrl || images[activeIndex]?.preview || null;
+  // Use accumulatedImagesRef as fallback — immune to React batching delays after runAnalysis
+  const currentPreview = images[activeIndex]?.persistentUrl || images[activeIndex]?.preview || accumulatedImagesRef.current[activeIndex]?.preview || null;
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
 
   return (
@@ -1137,7 +1138,7 @@ function ScanTab({ onAddToLog }) {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {images.map((img, i) => {
-                  const thumbSrc = img.persistentUrl || img.preview;
+                  const thumbSrc = img.persistentUrl || img.preview || accumulatedImagesRef.current[i]?.preview || null;
                   return (
                     <div key={i} onClick={() => setActiveIndex(i)} style={{ position: "relative", width: 56, height: 56, borderRadius: 12, overflow: "hidden", border: `2px solid ${i === activeIndex ? "var(--teal)" : "var(--border)"}`, cursor: "pointer", flexShrink: 0, opacity: i === activeIndex ? 1 : 0.6 }}>
                       {thumbSrc ? <img src={thumbSrc} alt={`Thumb ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
@@ -1211,7 +1212,7 @@ function ScanTab({ onAddToLog }) {
                   <p style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Select result</p>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {results.map((_, i) => {
-                      const thumbSrc = images[i]?.persistentUrl || images[i]?.preview;
+                      const thumbSrc = images[i]?.persistentUrl || images[i]?.preview || accumulatedImagesRef.current[i]?.preview || null;
                       return (
                         <button key={i} onClick={() => switchToIndex(i, results)}
                           style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 10, border: `1px solid ${activeIndex === i ? "var(--teal)" : "var(--border)"}`, background: activeIndex === i ? "var(--teal-lt)" : "var(--white)", cursor: "pointer" }}>
