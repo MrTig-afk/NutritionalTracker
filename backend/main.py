@@ -945,7 +945,8 @@ async def get_daily_log(
             "log_id":   log_id,
             "name":     name,
             "servings": servings,
-            "nutrition": per_serving,
+            # Return full nutrition object so frontend can scale by weight in edit modal
+            "nutrition": nutrition,
             "contribution": {
                 "calories": round(cal,  1),
                 "protein":  round(prot, 1),

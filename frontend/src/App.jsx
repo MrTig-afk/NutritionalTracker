@@ -661,6 +661,7 @@ function EditLogModal({ entry, onClose, onSaved }) {
       scaledNutrition = per100g;
     } else if (perServing && servingGrams && gramsNum > 0) {
       scalingInfo = { factor: gramsNum / servingGrams, baseLabel: `per serving (${servingGrams}g)`, targetLabel: `${gramsNum}g` };
+      scaledNutrition = perServing;
     } else {
       scalingInfo = { factor: 1, baseLabel: "no size data", warn: true };
     }
