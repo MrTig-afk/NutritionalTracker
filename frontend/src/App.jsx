@@ -631,6 +631,170 @@ function AddToLogModal({ item, onClose, onAdded }) {
 }
 
 // =============================================================================
+// EDIT LOG MODAL — updates existing entry in place via PUT /log/{log_id}
+// =============================================================================
+function EditLogModal({ entry, onClose, onSaved }) {
+  const [mode, setMode]         = useState("serving");
+  const [servings, setServings] = useState(String(entry.servings || 1));
+  const [grams, setGrams]       = useState("");
+  const [name, setName]         = useState(entry.name || "");
+  const [saving, setSaving]     = useState(false);
+  const [status, setStatus]     = useState(null);
+
+  const nutrition   = entry.nutrition || {};
+  const per100g     = nutrition.per_100g    && Object.keys(nutrition.per_100g).length    > 0 ? nutrition.per_100g    : null;
+  const perServing  = nutrition.per_serving && Object.keys(nutrition.per_serving).length > 0 ? nutrition.per_serving : null;
+  const baseNutrition = perServing ?? per100g ?? nutrition;
+  const servingGrams  = perServing ? extractServingGrams(perServing.size) : null;
+
+  const servingsNum = parseFloat(servings) || 1;
+  const gramsNum    = parseFloat(grams)    || 0;
+
+  let scaledNutrition = { ...baseNutrition };
+  let scalingInfo     = null;
+
+  if (mode === "serving") {
+    scalingInfo = { factor: servingsNum, baseLabel: perServing?.size ? `per serving (${perServing.size})` : "per serving" };
+  } else {
+    if (per100g && gramsNum > 0) {
+      scalingInfo = { factor: gramsNum / 100, baseLabel: "per 100g", targetLabel: `${gramsNum}g` };
+      scaledNutrition = per100g;
+    } else if (perServing && servingGrams && gramsNum > 0) {
+      scalingInfo = { factor: gramsNum / servingGrams, baseLabel: `per serving (${servingGrams}g)`, targetLabel: `${gramsNum}g` };
+    } else {
+      scalingInfo = { factor: 1, baseLabel: "no size data", warn: true };
+    }
+  }
+
+  const factor = scalingInfo?.factor ?? 1;
+  const getVal = (key) => (parseNumeric(scaledNutrition[key]) || 0) * factor;
+
+  const cal  = getVal("calories");
+  const prot = getVal("protein");
+  const carb = getVal("carbohydrates");
+  const fat  = getVal("fat");
+  const fib  = getVal("fibre");
+
+  const buildNutrition = () => {
+    if (mode === "serving") return entry.nutrition;
+    return {
+      per_serving: {
+        size:          `${gramsNum}g`,
+        calories:      Math.round(cal),
+        fat:           `${fat.toFixed(1)}g`,
+        carbohydrates: `${carb.toFixed(1)}g`,
+        protein:       `${prot.toFixed(1)}g`,
+        fibre:         `${fib.toFixed(1)}g`,
+      },
+    };
+  };
+
+  const save = async () => {
+    if (mode === "serving" && servingsNum <= 0) return;
+    if (mode === "grams"   && gramsNum   <= 0) return;
+    setSaving(true);
+    try {
+      const submitServings = mode === "serving" ? servingsNum : 1;
+      await apiFetch(`/log/${entry.log_id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: name.trim() || entry.name, servings: submitServings, nutrition: buildNutrition() }),
+      });
+      setStatus({ type: "ok", msg: "Updated!" });
+      onSaved();
+      setTimeout(onClose, 700);
+    } catch (e) {
+      setStatus({ type: "error", msg: e.message });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2"><PenLine className="h-4 w-4 text-cyan-400" /> Edit Log Entry</h3>
+          <button onClick={onClose} className="text-slate-600 hover:text-rose-400"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div>
+          <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Name</label>
+          <input value={name} onChange={e => setName(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
+        </div>
+
+        <div className="flex p-1 bg-slate-950 border border-slate-800 rounded-xl">
+          {[["serving", "Per Serving"], ["grams", "By Weight"]].map(([m, label]) => (
+            <button key={m} onClick={() => setMode(m)}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${mode === m ? "bg-cyan-500 text-slate-950 shadow" : "text-slate-500 hover:text-slate-300"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === "serving" ? (
+          <div>
+            <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Servings</label>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))}
+                className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-slate-400 hover:border-slate-500">
+                <Minus className="h-3 w-3" />
+              </button>
+              <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)}
+                className="w-20 text-center px-2 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 focus:outline-none focus:border-cyan-500/60" />
+              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))}
+                className="w-8 h-8 rounded-full border border-slate-700 flex items-center justify-center text-slate-400 hover:border-slate-500">
+                <Plus className="h-3 w-3" />
+              </button>
+            </div>
+            {baseNutrition?.size && <p className="text-[10px] font-mono text-slate-600 mt-1">Base: {baseNutrition.size}</p>}
+          </div>
+        ) : (
+          <div>
+            <label className="text-[10px] font-mono text-slate-600 uppercase mb-1 block">Amount (grams)</label>
+            <div className="flex items-center gap-3">
+              <input type="number" min="1" step="1" value={grams} onChange={e => setGrams(e.target.value)} placeholder="e.g. 150"
+                className="flex-1 px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60" />
+              <span className="text-sm font-mono text-slate-400 font-bold">g</span>
+            </div>
+          </div>
+        )}
+
+        {scalingInfo && (
+          <div className="text-[10px] font-mono text-slate-600">
+            {scalingInfo.warn
+              ? <span className="text-amber-600">⚠ No size data</span>
+              : <span>BASE: {scalingInfo.baseLabel}{scalingInfo.targetLabel && <span className="text-cyan-700 ml-2">→ {scalingInfo.targetLabel} | ×{scalingInfo.factor.toFixed(4)}</span>}{mode === "serving" && servingsNum !== 1 && <span className="text-cyan-700 ml-2">× {servingsNum} servings</span>}</span>
+            }
+          </div>
+        )}
+
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: "Cal",   value: cal,  unit: "kcal", color: "text-amber-400"  },
+            { label: "Prot",  value: prot, unit: "g",    color: "text-cyan-400"   },
+            { label: "Carbs", value: carb, unit: "g",    color: "text-blue-400"   },
+            { label: "Fat",   value: fat,  unit: "g",    color: "text-orange-400" },
+          ].map(({ label, value, unit, color }) => (
+            <div key={label} className="bg-slate-950/60 border border-slate-800 rounded-xl p-2 text-center">
+              <p className="text-[9px] font-mono text-slate-600">{label}</p>
+              <p className={`text-sm font-bold ${color}`}>{value.toFixed(1)}</p>
+              <p className="text-[8px] font-mono text-slate-700">{unit}</p>
+            </div>
+          ))}
+        </div>
+
+        {status && <p className={`text-xs font-mono ${status.type === "ok" ? "text-emerald-500" : "text-rose-400"}`}>{status.msg}</p>}
+
+        <button onClick={save} disabled={saving || (mode === "serving" ? servingsNum <= 0 : gramsNum <= 0)}
+          className="w-full py-3 rounded-xl bg-cyan-500 text-slate-950 font-bold text-sm hover:bg-cyan-400 transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+          {saving ? <Loader2 className="animate-spin h-4 w-4" /> : <Check className="h-4 w-4" />}
+          {saving ? "Saving..." : "Save Changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // MACRO PROGRESS BAR
 // =============================================================================
 function MacroBar({ label, current, goal, color }) {
@@ -1370,15 +1534,10 @@ export default function App() {
   const handleAddToLog = useCallback((item) => { setAddToLogItem(item); }, []);
   const handleLogAdded  = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
 
-  const handleEditEntry = useCallback(async (entry) => {
-    // Delete old log entry then reopen modal pre-filled so user can adjust and re-log
-    try { await apiFetch(`/log/${entry.log_id}`, { method: "DELETE" }); }
-    catch (e) { console.error("Edit delete failed:", e); }
-    setLogRefreshKey(k => k + 1);
-    setAddToLogItem({
-      name:      entry.name,
-      nutrition: entry.nutrition ? { per_serving: entry.nutrition } : {},
-    });
+  const [editLogItem, setEditLogItem] = useState(null);
+
+  const handleEditEntry = useCallback((entry) => {
+    setEditLogItem(entry);
   }, []);
 
   const handleTabChange = useCallback((tabId) => {
@@ -1396,6 +1555,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans">
       {addToLogItem && <AddToLogModal item={addToLogItem} onClose={() => setAddToLogItem(null)} onAdded={handleLogAdded} />}
+      {editLogItem && <EditLogModal entry={editLogItem} onClose={() => setEditLogItem(null)} onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
 
       <div className="max-w-6xl mx-auto p-4 md:p-8">
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
