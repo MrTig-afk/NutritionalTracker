@@ -6,7 +6,7 @@ import asyncio
 import boto3
 import psycopg2
 import psycopg2.extras
-import PyJWT as pyjwt
+import jwt as pyjwt
 from datetime import datetime, date
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
