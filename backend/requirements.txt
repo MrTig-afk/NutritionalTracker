@@ -5,4 +5,4 @@ google-genai
 Pillow
 boto3
 psycopg2-binary
-PyJWT
+pyjwt
