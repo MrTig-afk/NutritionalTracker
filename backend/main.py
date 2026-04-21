@@ -6,6 +6,7 @@ import asyncio
 import boto3
 import psycopg2
 import psycopg2.extras
+import PyJWT as pyjwt
 from datetime import datetime, date
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # ---------- CONFIG ----------
-DATABASE_URL   = os.getenv("DATABASE_URL")
+DATABASE_URL   = os.getenv("DATABASE_URL")  # Set to Supabase connection string
 PRIMARY_MODEL  = "gemini-2.5-flash"
 FALLBACK_MODEL = "gemini-1.5-flash"
 MAX_IMAGE_PX   = 1024
@@ -57,7 +58,7 @@ else:
     logger.warning("⚠️ Gemini API key missing")
 
 # ---------- FASTAPI ----------
-app = FastAPI(title="NutriScan API", version="3.2")
+app = FastAPI(title="NutriScan API", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,11 +68,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------- MOCK AUTH ----------
-DEFAULT_USER_ID = "user_default"
+# ---------- SUPABASE AUTH ----------
+SUPABASE_URL        = os.getenv("SUPABASE_URL", "https://zdmsfftfqnajanpbvcgn.supabase.co")
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")  # Settings → API → JWT Secret
 
-def get_user_id(x_user_id: Optional[str] = None) -> str:
-    return x_user_id if x_user_id else DEFAULT_USER_ID
+def get_user_id(authorization: Optional[str] = None) -> str:
+    """Extract user ID from Supabase JWT. Falls back to default if no token (dev mode)."""
+    if not authorization:
+        logger.warning("⚠️ No authorization header — using default user (dev mode)")
+        return "user_default"
+    try:
+        token = authorization.replace("Bearer ", "").strip()
+        if not SUPABASE_JWT_SECRET:
+            raise Exception("SUPABASE_JWT_SECRET not configured")
+        payload = pyjwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+        user_id = payload.get("sub")
+        if not user_id:
+            raise Exception("No sub claim in JWT")
+        return user_id
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail={"error_type": "token_expired", "message": "Session expired. Please log in again."})
+    except Exception as e:
+        logger.warning(f"⚠️ JWT verification failed: {e}")
+        raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
 
 # ---------- PYDANTIC MODELS ----------
 class FolderCreate(BaseModel):
@@ -476,7 +500,7 @@ async def health_check():
 @app.post("/analyze-label")
 async def analyze_label(
     file: UploadFile = File(...),
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
@@ -484,7 +508,7 @@ async def analyze_label(
             "message": "Gemini API not configured",
         })
 
-    user_id   = get_user_id(x_user_id)
+    user_id   = get_user_id(authorization)
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
 
@@ -530,7 +554,7 @@ async def analyze_label(
 @app.post("/analyze-labels")
 async def analyze_labels(
     files: List[UploadFile] = File(...),
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
@@ -543,7 +567,7 @@ async def analyze_labels(
             "message": "Maximum 10 images per batch",
         })
 
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
 
     processed_images = []
     image_ids        = []
@@ -607,9 +631,9 @@ async def analyze_labels(
 @app.post("/folders")
 async def create_folder(
     body: FolderCreate,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id   = get_user_id(x_user_id)
+    user_id   = get_user_id(authorization)
     folder_id = str(uuid.uuid4())
     try:
         conn = get_db()
@@ -627,8 +651,8 @@ async def create_folder(
 
 
 @app.get("/folders")
-async def list_folders(x_user_id: Optional[str] = Header(default=None)):
-    user_id = get_user_id(x_user_id)
+async def list_folders(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -647,9 +671,9 @@ async def list_folders(x_user_id: Optional[str] = Header(default=None)):
 @app.get("/folders/{folder_id}")
 async def get_folder(
     folder_id: str,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -691,9 +715,9 @@ async def get_folder(
 async def add_folder_item(
     folder_id: str,
     body: FolderItemCreate,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     item_id = str(uuid.uuid4())
     try:
         conn = get_db()
@@ -714,9 +738,9 @@ async def add_folder_item(
 async def delete_folder_item(
     folder_id: str,
     item_id: str,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -735,9 +759,9 @@ async def delete_folder_item(
 @app.delete("/folders/{folder_id}")
 async def delete_folder(
     folder_id: str,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -758,9 +782,9 @@ async def delete_folder(
 @app.post("/goals")
 async def set_goals(
     body: MacroGoal,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     fibre   = body.fibre or 0.0
     try:
         conn = get_db()
@@ -789,8 +813,8 @@ async def set_goals(
 
 
 @app.get("/goals")
-async def get_goals(x_user_id: Optional[str] = Header(default=None)):
-    user_id = get_user_id(x_user_id)
+async def get_goals(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -816,9 +840,9 @@ async def get_goals(x_user_id: Optional[str] = Header(default=None)):
 @app.post("/log")
 async def add_log_entry(
     body: LogEntry,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     log_id  = str(uuid.uuid4())
     today   = date.today().isoformat()
     try:
@@ -839,9 +863,9 @@ async def add_log_entry(
 @app.get("/log")
 async def get_daily_log(
     log_date: Optional[str] = None,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id     = get_user_id(x_user_id)
+    user_id     = get_user_id(authorization)
     target_date = log_date or date.today().isoformat()
     try:
         conn = get_db()
@@ -913,9 +937,9 @@ async def get_daily_log(
 async def update_log_entry(
     log_id: str,
     body: LogEntry,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -943,9 +967,9 @@ async def update_log_entry(
 @app.delete("/log/{log_id}")
 async def delete_log_entry(
     log_id: str,
-    x_user_id: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
-    user_id = get_user_id(x_user_id)
+    user_id = get_user_id(authorization)
     try:
         conn = get_db()
         cur  = conn.cursor()

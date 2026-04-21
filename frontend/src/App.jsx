@@ -20,6 +20,59 @@ const MAX_FRONTEND_RETRIES = 2;
 const RETRY_DELAY_MS       = [1500, 3000];
 
 // =============================================================================
+// SUPABASE CLIENT
+// =============================================================================
+const SUPABASE_URL      = "https://zdmsfftfqnajanpbvcgn.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbXNmZnRmcW5hamFucGJ2Y2duIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTI4NTQsImV4cCI6MjA5MjI4ODg1NH0.Hro4TSxUz9EAOfsxQ4Fg0RsvHO2yi7YhthmT4GJ3Uio";
+
+// Minimal Supabase auth helper — no SDK needed
+const supabase = {
+  async signInWithOtp(email) {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
+      body: JSON.stringify({ email, create_user: true }),
+    });
+    if (!res.ok) { const err = await res.json(); throw new Error(err.message || "Failed to send magic link"); }
+    return res.json();
+  },
+  getSession() {
+    try {
+      // Supabase stores session in localStorage under this key
+      const raw = localStorage.getItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      // Check expiry
+      if (parsed?.expires_at && parsed.expires_at * 1000 < Date.now()) {
+        localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
+        return null;
+      }
+      return parsed;
+    } catch { return null; }
+  },
+  signOut() {
+    localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
+    window.location.reload();
+  },
+  // Handle magic link token from URL hash on redirect
+  async handleAuthCallback() {
+    const hash = window.location.hash;
+    if (!hash.includes("access_token")) return null;
+    const params = new URLSearchParams(hash.replace("#", ""));
+    const accessToken  = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    const expiresAt    = parseInt(params.get("expires_at") || "0");
+    if (!accessToken) return null;
+    // Store session
+    const session = { access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt };
+    localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
+    // Clean URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+    return session;
+  },
+};
+
+// =============================================================================
 // PALETTE — injected as CSS vars, used everywhere via style={}
 // =============================================================================
 const PALETTE_CSS = `
@@ -181,7 +234,17 @@ async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
 }
 
 async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API_URL}${path}`, { headers: { "Content-Type": "application/json", ...options.headers }, ...options });
+  const session = supabase.getSession();
+  const authHeader = session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {};
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { "Content-Type": "application/json", ...authHeader, ...options.headers },
+    ...options,
+  });
+  if (res.status === 401) {
+    // Session expired — force logout
+    supabase.signOut();
+    throw new Error("Session expired. Please log in again.");
+  }
   if (!res.ok) { const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` })); throw new Error(err.message || `HTTP ${res.status}`); }
   return res.json();
 }
@@ -201,26 +264,7 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      // Keep existing preview if API doesn't return a URL
-      setImages(prev => prev.map((img, idx) => {
-        const resultItem = arr[idx];
-        const processedUrl = resultItem?.processed_url || resultItem?.raw_url || null;
-        if (processedUrl) {
-          if (img.preview && img.preview.startsWith("blob:")) {
-            URL.revokeObjectURL(img.preview);
-          }
-          return {
-            ...img,
-            persistentUrl: processedUrl,
-            preview: processedUrl
-          };
-        }
-        // If no URL from API, keep the existing preview but mark that analysis failed for this image
-        return {
-          ...img,
-          analysisFailed: true
-        };
-      }));
+      setImages(prev => prev.map((img, idx) => { const url = arr[idx]?.processed_url || arr[idx]?.raw_url || null; return url ? { ...img, persistentUrl: url } : img; }));
       switchToIndex(0, arr);
     } else {
       optimizedFiles.forEach(f => formData.append("files", f));
@@ -229,36 +273,10 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
-      // Keep existing previews if API doesn't return URLs
-      setImages(prev => prev.map((img, idx) => {
-        const resultItem = arr[idx];
-        const processedUrl = resultItem?.processed_url || resultItem?.raw_url || null;
-        if (processedUrl) {
-          if (img.preview && img.preview.startsWith("blob:")) {
-            URL.revokeObjectURL(img.preview);
-          }
-          return {
-            ...img,
-            persistentUrl: processedUrl,
-            preview: processedUrl
-          };
-        }
-        return {
-          ...img,
-          analysisFailed: true
-        };
-      }));
+      setImages(prev => prev.map((img, idx) => { const url = arr[idx]?.processed_url || arr[idx]?.raw_url || null; return url ? { ...img, persistentUrl: url } : img; }));
       switchToIndex(0, arr);
     }
-  } catch (err) { 
-    console.error("❌ Pipeline Failure:", err); 
-    setError(err.message);
-    // Don't clear images on error - mark them as failed but keep previews
-    setImages(prev => prev.map(img => ({
-      ...img,
-      analysisFailed: true
-    })));
-  }
+  } catch (err) { console.error("❌ Pipeline Failure:", err); setError(err.message); }
   finally { setLoading(false); setLoadingMsg(""); }
 }
 
@@ -1070,7 +1088,6 @@ function ScanTab({ onAddToLog }) {
   const [saveModal, setSaveModal] = useState(null);
   const [logName, setLogName] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
-  const [retryCount, setRetryCount] = useState(0);
   const fileInputRef = useRef(null);
   const accumulatedOptimizedRef = useRef([]);
   const accumulatedImagesRef    = useRef([]);
@@ -1095,7 +1112,6 @@ function ScanTab({ onAddToLog }) {
     if (!files.length) return;
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setCropperQueue(files); setCropperFile(files[0]);
-    setRetryCount(0); // Reset retry count on new upload
   }, []);
 
   const handleCropConfirm = useCallback(async (cropData) => {
@@ -1119,14 +1135,12 @@ function ScanTab({ onAddToLog }) {
     setImages(prev => prev.filter((_, i) => i !== index)); setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setResults(null); setError(null); accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setCropperQueue([img.file]); setCropperFile(img.file);
-    setRetryCount(0);
   }, [images]);
 
   const removeImage = useCallback((index) => {
     setImages(prev => { const img = prev[index]; if (img?.preview && img.preview.startsWith("blob:") && !img.persistentUrl) URL.revokeObjectURL(img.preview); return prev.filter((_, i) => i !== index); });
     setOptimizedFiles(prev => prev.filter((_, i) => i !== index));
     setActiveIndex(prev => (prev >= index && prev > 0 ? prev - 1 : prev)); setResults(null); setError(null);
-    setRetryCount(0);
   }, []);
 
   const handleClear = useCallback(() => {
@@ -1134,45 +1148,17 @@ function ScanTab({ onAddToLog }) {
     accumulatedOptimizedRef.current = []; accumulatedImagesRef.current = [];
     setImages([]); setOptimizedFiles([]); setResults(null); setError(null); setActiveIndex(0); setActiveTab("per_100g");
     setFileInputKey(k => k + 1);
-    setRetryCount(0);
   }, [images]);
 
   const handleAnalyze = useCallback(async () => {
-    if (results) { handleClear(); return; }
-    if (!images.length) return;
-    
-    // Add progressive delay for retries to avoid rate limiting
-    if (retryCount > 0) {
-      setLoadingMsg(`Waiting ${Math.min(retryCount * 2, 8)} seconds before retry...`);
-      await new Promise(resolve => setTimeout(resolve, Math.min(retryCount * 2000, 8000)));
-    }
-    
-    const filesToSend = accumulatedOptimizedRef.current.length === images.length 
-      ? accumulatedOptimizedRef.current 
-      : optimizedFiles.length === images.length 
-        ? optimizedFiles 
-        : images.map(i => i.file);
-    
-    try {
-      await runAnalysis({ 
-        optimizedFiles: filesToSend, 
-        setLoading, 
-        setLoadingMsg, 
-        setError, 
-        setResults, 
-        setImages, 
-        switchToIndex 
-      });
-      setRetryCount(0); // Reset retry count on success
-    } catch (err) {
-      setRetryCount(prev => prev + 1);
-      // Don't clear error immediately - let user decide to retry
-    }
-  }, [images, optimizedFiles, results, handleClear, switchToIndex, retryCount]);
+    if (results) { handleClear(); return; } if (!images.length) return;
+    const filesToSend = accumulatedOptimizedRef.current.length === images.length ? accumulatedOptimizedRef.current : optimizedFiles.length === images.length ? optimizedFiles : images.map(i => i.file);
+    runAnalysis({ optimizedFiles: filesToSend, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex });
+  }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  const currentImage = images[activeIndex];
-  const currentPreview = currentImage?.persistentUrl || currentImage?.preview || accumulatedImagesRef.current[activeIndex]?.preview || null;
+  // Use accumulatedImagesRef as fallback — immune to React batching delays after runAnalysis
+  const currentPreview = images[activeIndex]?.persistentUrl || images[activeIndex]?.preview || accumulatedImagesRef.current[activeIndex]?.preview || null;
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
 
   return (
@@ -1251,16 +1237,9 @@ function ScanTab({ onAddToLog }) {
           </button>
 
           {error && !loading && images.length > 0 && !results && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
-                <RefreshCcw size={14} /> Retry Analysis {retryCount > 0 ? `(Attempt ${retryCount + 1})` : ""}
-              </button>
-              {retryCount > 0 && (
-                <p style={{ fontSize: 11, color: "var(--orange)", textAlign: "center" }}>
-                  ⚠ Rate limit detected. Waiting longer between retries...
-                </p>
-              )}
-            </div>
+            <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
+              <RefreshCcw size={14} /> Retry (images preserved)
+            </button>
           )}
 
           {currentResult && (
@@ -1380,14 +1359,110 @@ function ScanTab({ onAddToLog }) {
 }
 
 // =============================================================================
+// LOGIN SCREEN
+// =============================================================================
+function LoginScreen({ onLogin }) {
+  const [email, setEmail]       = useState("");
+  const [sending, setSending]   = useState(false);
+  const [sent, setSent]         = useState(false);
+  const [error, setError]       = useState(null);
+
+  const handleSubmit = async () => {
+    if (!email.trim()) return;
+    setSending(true); setError(null);
+    try {
+      await supabase.signInWithOtp(email.trim());
+      setSent(true);
+    } catch (e) {
+      setError(e.message);
+    } finally { setSending(false); }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--off)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 24 }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: 16, background: "var(--teal)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+            <Database size={26} color="var(--mint)" />
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.5px" }}>NutriScan</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, letterSpacing: "0.8px", textTransform: "uppercase" }}>Pipeline v4</div>
+        </div>
+
+        {/* Card */}
+        <div style={{ background: "var(--white)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, display: "flex", flexDirection: "column", gap: 16 }}>
+          {!sent ? (
+            <>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text)" }}>Sign in</div>
+                <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>We'll send a magic link to your email. No password needed.</div>
+              </div>
+              <div>
+                <label style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 6 }}>Email address</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleSubmit()}
+                  placeholder="you@example.com"
+                  style={{ width: "100%", padding: "10px 14px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 15, color: "var(--text)", boxSizing: "border-box" }}
+                  autoFocus
+                />
+              </div>
+              {error && <p style={{ fontSize: 12, color: "var(--danger)", margin: 0 }}>{error}</p>}
+              <button
+                onClick={handleSubmit}
+                disabled={sending || !email.trim()}
+                style={{ width: "100%", padding: "13px", background: "var(--teal)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: sending || !email.trim() ? "not-allowed" : "pointer", opacity: sending || !email.trim() ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                {sending ? <Loader2 size={16} className="animate-spin" /> : null}
+                {sending ? "Sending..." : "Send Magic Link"}
+              </button>
+            </>
+          ) : (
+            <div style={{ textAlign: "center", padding: "8px 0" }}>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--mint)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <Check size={22} color="var(--mint-dk)" />
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>Check your email</div>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8, lineHeight: 1.6 }}>
+                We sent a magic link to <strong>{email}</strong>.<br />
+                Click the link to sign in.
+              </div>
+              <button onClick={() => { setSent(false); setEmail(""); }} style={{ marginTop: 16, fontSize: 12, color: "var(--teal)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                Use a different email
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =============================================================================
 // ROOT APP
 // =============================================================================
 export default function App() {
+  const [session, setSession]             = useState(undefined); // undefined = loading
   const [activeMainTab, setActiveMainTab] = useState("scan");
   const [addToLogItem, setAddToLogItem]   = useState(null);
   const [logRefreshKey, setLogRefreshKey] = useState(0);
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
+
+  // Handle magic link callback and session restore on mount
+  useEffect(() => {
+    const init = async () => {
+      // Check if returning from magic link
+      const callbackSession = await supabase.handleAuthCallback();
+      if (callbackSession) { setSession(callbackSession); return; }
+      // Restore existing session
+      const existing = supabase.getSession();
+      setSession(existing);
+    };
+    init();
+  }, []);
 
   const handleAddToLog  = useCallback((item) => { setAddToLogItem(item); }, []);
   const handleLogAdded  = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
@@ -1404,6 +1479,36 @@ export default function App() {
     { id: "tracker", label: "Tracker", icon: <BarChart3 size={13} /> },
   ];
 
+  // Loading state
+  if (session === undefined) {
+    return (
+      <>
+        <style>{PALETTE_CSS}</style>
+        <div style={{ minHeight: "100vh", background: "var(--off)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Loader2 size={32} color="var(--teal)" className="animate-spin" />
+        </div>
+      </>
+    );
+  }
+
+  // Not logged in
+  if (!session) {
+    return (
+      <>
+        <style>{PALETTE_CSS}</style>
+        <LoginScreen />
+      </>
+    );
+  }
+
+  // Logged in — get user email for display
+  const userEmail = (() => {
+    try {
+      const payload = JSON.parse(atob(session.access_token.split(".")[1]));
+      return payload.email || payload.sub?.slice(0, 8) + "...";
+    } catch { return "User"; }
+  })();
+
   return (
     <>
       <style>{PALETTE_CSS}</style>
@@ -1419,11 +1524,14 @@ export default function App() {
             </div>
             <div>
               <div style={{ fontSize: 20, fontWeight: 700, color: "white", letterSpacing: "-0.3px" }}>NutriScan</div>
-              <div style={{ fontSize: 10, color: "rgba(174,246,199,0.7)", letterSpacing: "0.8px", textTransform: "uppercase" }}>Pipeline v3</div>
+              <div style={{ fontSize: 10, color: "rgba(174,246,199,0.7)", letterSpacing: "0.8px", textTransform: "uppercase" }}>Pipeline v4</div>
             </div>
           </div>
-          <div style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)" }}>
-            {API_URL.replace("https://", "").replace("http://", "")}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 11, color: "rgba(174,246,199,0.8)" }}>{userEmail}</div>
+            <button onClick={() => supabase.signOut()} style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer" }}>
+              Sign out
+            </button>
           </div>
         </div>
 
