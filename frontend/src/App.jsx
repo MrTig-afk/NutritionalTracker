@@ -97,6 +97,17 @@ const PALETTE_CSS = `
   }
   input, select, textarea, button { font-family: inherit; }
   input:focus, select:focus { outline: 2px solid var(--teal); outline-offset: -1px; }
+
+  /* Responsive nav */
+  .ns-bottom-nav { display: flex; }
+  .ns-top-tabs   { display: none; }
+  .ns-content    { padding-bottom: 96px; }
+
+  @media (min-width: 768px) {
+    .ns-bottom-nav { display: none; }
+    .ns-top-tabs   { display: flex; }
+    .ns-content    { max-width: 960px !important; padding-bottom: 32px; }
+  }
 `;
 
 // =============================================================================
@@ -1611,13 +1622,28 @@ export default function App() {
         {editLogItem  && <EditLogModal  entry={editLogItem}  onClose={() => setEditLogItem(null)}  onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
 
         {/* Top App Bar */}
-        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(174,246,199,0.18)", border: "1.5px solid rgba(174,246,199,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
             </div>
             <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan</span>
           </div>
+
+          {/* Desktop tabs — hidden on mobile via CSS */}
+          <div className="ns-top-tabs" style={{ alignItems: "center", gap: 4 }}>
+            {TABS.map(tab => {
+              const active = activeMainTab === tab.id;
+              return (
+                <button key={tab.id} onClick={() => handleTabChange(tab.id)}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: active ? "rgba(174,246,199,0.2)" : "transparent", color: active ? "var(--mint)" : "rgba(255,255,255,0.7)", transition: "all 0.15s" }}>
+                  <Icon n={tab.icon} size={18} style={{ fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {avatarUrl
               ? <img src={avatarUrl} alt="avatar" style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.5)" }} />
@@ -1630,7 +1656,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div style={{ flex: 1, maxWidth: 600, width: "100%", margin: "0 auto", padding: "20px 16px 96px" }}>
+        <div className="ns-content" style={{ flex: 1, maxWidth: 600, width: "100%", margin: "0 auto", padding: "20px 16px" }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
             <ScanTab onAddToLog={handleAddToLog} />
           </div>
@@ -1640,8 +1666,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Bottom Navigation */}
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", display: "flex", height: 72, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        {/* Bottom Navigation — hidden on desktop via CSS */}
+        <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", height: 72, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           {TABS.map(tab => {
             const active = activeMainTab === tab.id;
             return (
