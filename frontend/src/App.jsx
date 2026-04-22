@@ -1,11 +1,26 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
-import {
-  Upload, Zap, Loader2, RefreshCcw, Database, Cloud, TableProperties,
-  LayoutPanelLeft, Scale, X, ChevronLeft, ChevronRight, Crop, Check,
-  FolderPlus, Folder, FolderOpen, BookmarkPlus, Target, Plus, Minus,
-  Trash2, BarChart3, CalendarDays, ChevronDown, ChevronUp, Save, PenLine
-} from "lucide-react";
+
+// Material Symbols Outlined icon wrapper
+const Icon = ({ n, size = 20, style: s = {}, cls = "" }) => (
+  <span
+    className={`material-symbols-outlined${cls ? " " + cls : ""}`}
+    style={{ fontSize: size, lineHeight: 1, display: "inline-flex", alignItems: "center", userSelect: "none", flexShrink: 0, ...s }}
+  >
+    {n}
+  </span>
+);
+
+// CSS spinner (replaces Loader2)
+const Spin = ({ size = 20, color = "var(--teal)" }) => (
+  <div style={{
+    width: size, height: size, borderRadius: "50%",
+    border: "2.5px solid rgba(0,0,0,0.08)",
+    borderTopColor: color,
+    animation: "ns-spin 0.75s linear infinite",
+    flexShrink: 0, display: "inline-block",
+  }} />
+);
 
 // =============================================================================
 // CONFIG
@@ -43,33 +58,46 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // PALETTE — injected as CSS vars, used everywhere via style={}
 // =============================================================================
 const PALETTE_CSS = `
+  @keyframes ns-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
   :root {
     --teal:      #006D77;
-    --teal-lt:   #E0F2F3;
+    --teal-lt:   #DCF4F5;
     --teal-md:   #004E56;
     --teal-dk:   #003940;
-    --purple:    #8C86AA;
-    --purp-lt:   #EEEDF6;
     --mint:      #AEF6C7;
     --mint-dk:   #1A6B3C;
-    --brown:     #583E23;
+    --bg:        #F4FAF9;
+    --surface:   #FFFFFF;
+    --off:       #EFF5F5;
+    --off2:      #E0ECEB;
+    --white:     #FFFFFF;
+    --border:    #C0CBCA;
+    --border2:   #8FA09F;
+    --text:      #191C1C;
+    --text2:     #3F4949;
+    --muted:     #6F7979;
+    --orange:    #C25700;
+    --orange-lt: #FFE0C7;
+    --purple:    #6B5EA8;
+    --purp-lt:   #EEEDF6;
+    --brown:     #4A3728;
     --brown-lt:  #F5EDE0;
-    --brown-md:  #3D2B17;
-    --orange:    #B66D0D;
-    --orange-lt: #FDF0DC;
-    --white:     #FDFCF9;
-    --off:       #F2EEE7;
-    --off2:      #EAE3D8;
-    --border:    #D9D0C4;
-    --border2:   #C4B9A8;
-    --text:      #2C2017;
-    --muted:     #7A6A55;
-    --danger:    #C0392B;
+    --danger:    #BA1A1A;
+    --danger-lt: #FFDAD6;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Georgia', serif; background: var(--off); color: var(--text); }
+  body {
+    margin: 0;
+    font-family: 'Manrope', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
   input, select, textarea, button { font-family: inherit; }
-  input:focus, select:focus { outline: none; }
+  input:focus, select:focus { outline: 2px solid var(--teal); outline-offset: -1px; }
 `;
 
 // =============================================================================
@@ -386,18 +414,18 @@ function ImageCropper({ file, onConfirm, onCancel }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
             <p style={{ fontSize: 13, fontWeight: 700, color: "var(--white)", display: "flex", alignItems: "center", gap: 8 }}>
-              <Crop size={14} color="var(--mint)" /> Crop Nutrition Label
+              <Icon n="crop" size={14} style={{ color: "var(--mint)" }} /> Crop Nutrition Label
             </p>
             <p style={{ fontSize: 11, color: "rgba(253,252,249,0.5)", marginTop: 2 }}>Drag corners to resize · Drag inside to move</p>
           </div>
-          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(253,252,249,0.5)" }}><X size={18} /></button>
+          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(253,252,249,0.5)" }}><Icon n="close" size={18} /></button>
         </div>
         <div ref={containerRef} style={{ width: "100%", borderRadius: 14, overflow: "hidden", border: "1px solid var(--border2)", touchAction: "none", userSelect: "none" }}>
           {imageLoaded
             ? <canvas ref={canvasRef} width={canvasSize.w} height={canvasSize.h} style={{ display: "block", width: "100%", touchAction: "none", cursor: "crosshair" }}
                 onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
                 onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp} />
-            : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240 }}><Loader2 size={24} color="var(--teal)" className="animate-spin" /></div>
+            : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240 }}><Spin size={24} /></div>
           }
         </div>
         {cropRect && <p style={{ fontSize: 10, color: "rgba(253,252,249,0.4)", textAlign: "center", marginTop: 8 }}>REGION: {Math.round(cropRect.w / imgScale)}×{Math.round(cropRect.h / imgScale)}px</p>}
@@ -405,7 +433,7 @@ function ImageCropper({ file, onConfirm, onCancel }) {
           <button onClick={onCancel} style={{ flex: 1, padding: "11px", background: "rgba(253,252,249,0.08)", border: "1px solid rgba(253,252,249,0.2)", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "rgba(253,252,249,0.7)", cursor: "pointer" }}>Cancel</button>
           <button onClick={() => onConfirm(null)} style={{ flex: 1, padding: "11px", background: "rgba(253,252,249,0.08)", border: "1px solid rgba(253,252,249,0.2)", borderRadius: 10, fontSize: 13, fontWeight: 600, color: "rgba(253,252,249,0.7)", cursor: "pointer" }}>Full image</button>
           <button onClick={handleConfirm} style={{ flex: 1, padding: "11px", background: "var(--teal)", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            <Check size={14} /> Confirm
+            <Icon n="check" size={14} /> Confirm
           </button>
         </div>
       </div>
@@ -455,8 +483,8 @@ function SaveToFolderModal({ result, imageId, onClose, onSaved, initialName }) {
     <div style={overlayBg}>
       <div style={modalBox}>
         <div style={modalHeader}>
-          <div style={modalTitle}><BookmarkPlus size={15} color="var(--teal)" /> Save to Folder</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
+          <div style={modalTitle}><Icon n="bookmark_add" size={15} style={{ color: "var(--teal)" }} /> Save to Folder</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         {!initialName && (
           <div>
@@ -473,11 +501,11 @@ function SaveToFolderModal({ result, imageId, onClose, onSaved, initialName }) {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={newFolder} onChange={e => setNewFolder(e.target.value)} placeholder="New folder name..." onKeyDown={handleFolderKeyDown} style={{ ...inputStyle, flex: 1 }} />
-          <button onClick={createFolder} style={{ ...ghostBtn, padding: "9px 12px" }}><FolderPlus size={14} /></button>
+          <button onClick={createFolder} style={{ ...ghostBtn, padding: "9px 12px" }}><Icon n="create_new_folder" size={14} /></button>
         </div>
         {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
         <button onClick={save} disabled={saving || !selectedFolder || !itemName.trim()} style={{ ...primaryBtn, opacity: (saving || !selectedFolder || !itemName.trim()) ? 0.45 : 1 }}>
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          {saving ? <Spin size={14} /> : <Icon n="save" size={14} />}
           {saving ? "Saving..." : "Save"}
         </button>
       </div>
@@ -551,8 +579,8 @@ function AddToLogModal({ item, onClose, onAdded }) {
     <div style={overlayBg}>
       <div style={modalBox}>
         <div style={modalHeader}>
-          <div style={modalTitle}><CalendarDays size={15} color="var(--mint-dk)" /> Add to Today's Log</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
+          <div style={modalTitle}><Icon n="calendar_today" size={15} style={{ color: "var(--mint-dk)" }} /> Add to Today's Log</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         <input value={manualName} onChange={e => setManualName(e.target.value)} placeholder="Item name..." style={{ ...inputStyle, fontWeight: 700 }} />
         <div style={pillRow}>
@@ -564,9 +592,9 @@ function AddToLogModal({ item, onClose, onAdded }) {
           <div>
             <label style={labelStyle}>Servings</label>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={12} /></button>
+              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="remove" size={12} /></button>
               <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)} style={{ ...inputStyle, width: 80, textAlign: "center" }} />
-              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={12} /></button>
+              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="add" size={12} /></button>
             </div>
             {baseNutrition.size && <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Base: {baseNutrition.size}</p>}
           </div>
@@ -608,7 +636,7 @@ function AddToLogModal({ item, onClose, onAdded }) {
         </div>
         {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
         <button onClick={save} disabled={saving || !canSave} style={{ ...mintBtn, opacity: (saving || !canSave) ? 0.45 : 1 }}>
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          {saving ? <Spin size={14} /> : <Icon n="add" size={14} />}
           {saving ? "Adding..." : "Add to Log"}
         </button>
       </div>
@@ -669,8 +697,8 @@ function EditLogModal({ entry, onClose, onSaved }) {
     <div style={overlayBg}>
       <div style={modalBox}>
         <div style={modalHeader}>
-          <div style={modalTitle}><PenLine size={15} color="var(--teal)" /> Edit Log Entry</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
+          <div style={modalTitle}><Icon n="edit" size={15} style={{ color: "var(--teal)" }} /> Edit Log Entry</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         <div>
           <label style={labelStyle}>Name</label>
@@ -685,9 +713,9 @@ function EditLogModal({ entry, onClose, onSaved }) {
           <div>
             <label style={labelStyle}>Servings</label>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Minus size={12} /></button>
+              <button onClick={() => setServings(s => String(Math.max(0.5, parseFloat(s) - 0.5)))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="remove" size={12} /></button>
               <input type="number" min="0.5" step="0.5" value={servings} onChange={e => setServings(e.target.value)} style={{ ...inputStyle, width: 80, textAlign: "center" }} />
-              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Plus size={12} /></button>
+              <button onClick={() => setServings(s => String(parseFloat(s) + 0.5))} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid var(--border2)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="add" size={12} /></button>
             </div>
             {baseNutrition?.size && <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Base: {baseNutrition.size}</p>}
           </div>
@@ -711,7 +739,7 @@ function EditLogModal({ entry, onClose, onSaved }) {
         </div>
         {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
         <button onClick={save} disabled={saving || (mode === "serving" ? servingsNum <= 0 : gramsNum <= 0)} style={{ ...primaryBtn, opacity: saving ? 0.45 : 1 }}>
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+          {saving ? <Spin size={14} /> : <Icon n="check" size={14} />}
           {saving ? "Saving..." : "Save Changes"}
         </button>
       </div>
@@ -776,7 +804,7 @@ function TrackerTab({ refreshKey, onEditEntry }) {
     finally { setDeletingId(null); }
   };
 
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Loader2 size={24} color="var(--teal)" className="animate-spin" /></div>;
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Spin size={24} /></div>;
 
   const totals = logData?.totals || { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
@@ -786,7 +814,7 @@ function TrackerTab({ refreshKey, onEditEntry }) {
       <div style={card}>
         <div style={cardHeader}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
-            <Target size={14} color="var(--teal)" /> Daily Goals
+            <Icon n="my_location" size={14} style={{ color: "var(--teal)" }} /> Daily Goals
           </div>
           <button onClick={() => { setGoalDraft({ ...goals }); setEditingGoals(v => !v); }}
             style={{ fontSize: 12, fontWeight: 600, color: "var(--teal)", background: "none", border: "none", cursor: "pointer" }}>
@@ -840,13 +868,13 @@ function TrackerTab({ refreshKey, onEditEntry }) {
         <div style={{ ...cardHeader, background: "var(--off)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button onClick={() => setSelectedDate(d => addDays(d, -1))} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <ChevronLeft size={13} />
+              <Icon n="chevron_left" size={13} />
             </button>
             <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 6 }}>
-              <CalendarDays size={14} color="var(--teal)" /> {formatDisplayDate(selectedDate)}
+              <Icon n="calendar_today" size={14} style={{ color: "var(--teal)" }} /> {formatDisplayDate(selectedDate)}
             </div>
             <button onClick={() => setSelectedDate(d => addDays(d, 1))} disabled={selectedDate >= today} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedDate >= today ? 0.3 : 1 }}>
-              <ChevronRight size={13} />
+              <Icon n="chevron_right" size={13} />
             </button>
             {selectedDate !== today && (
               <button onClick={() => setSelectedDate(today)} style={{ fontSize: 10, padding: "3px 8px", background: "var(--teal-lt)", border: "1px solid var(--teal)", borderRadius: 6, color: "var(--teal)", cursor: "pointer", fontWeight: 600 }}>
@@ -872,11 +900,11 @@ function TrackerTab({ refreshKey, onEditEntry }) {
               </div>
               <button onClick={() => onEditEntry && onEditEntry(entry)}
                 style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <PenLine size={13} color="var(--teal)" />
+                <Icon n="edit" size={13} style={{ color: "var(--teal)" }} />
               </button>
               <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
                 style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {deletingId === entry.log_id ? <Loader2 size={13} color="var(--muted)" className="animate-spin" /> : <Trash2 size={13} color="var(--danger)" />}
+                {deletingId === entry.log_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
               </button>
             </div>
           ))
@@ -948,7 +976,7 @@ function LibraryTab({ onAddToLog }) {
     catch (e) { console.error(e); }
   };
 
-  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Loader2 size={24} color="var(--teal)" className="animate-spin" /></div>;
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Spin size={24} /></div>;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -957,7 +985,7 @@ function LibraryTab({ onAddToLog }) {
           style={{ ...inputStyle, flex: 1 }} />
         <button onClick={createFolder} disabled={creating || !newFolderName.trim()}
           style={{ ...primaryBtn, width: "auto", padding: "9px 16px", fontSize: 13, opacity: (creating || !newFolderName.trim()) ? 0.45 : 1 }}>
-          {creating ? <Loader2 size={13} className="animate-spin" /> : <FolderPlus size={13} />} Create
+          {creating ? <Spin size={13} /> : <Icon n="create_new_folder" size={13} />} Create
         </button>
       </div>
 
@@ -989,14 +1017,14 @@ function LibraryTab({ onAddToLog }) {
                   <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
                     {imageUrl
                       ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0 }}><img src={imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} /></div>
-                      : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Database size={14} color="var(--teal)" /></div>
+                      : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={14} style={{ color: "var(--teal)" }} /></div>
                     }
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                       <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.folderName} · {cal}kcal · P {prot}g · C {carb}g · F {fat}g</div>
                     </div>
                     <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-                      <Plus size={11} /> Log
+                      <Icon n="add" size={11} /> Log
                     </button>
                   </div>
                 );
@@ -1010,14 +1038,14 @@ function LibraryTab({ onAddToLog }) {
             <div key={folder.folder_id} style={card}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer" }} onClick={() => openFolderById(folder.folder_id)}>
                 {openFolder === folder.folder_id
-                  ? <FolderOpen size={18} color="var(--teal)" />
-                  : <Folder size={18} color="var(--muted)" />}
+                  ? <Icon n="folder_open" size={18} style={{ color: "var(--teal)" }} />
+                  : <Icon n="folder" size={18} style={{ color: "var(--muted)" }} />}
                 <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{folder.name}</span>
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>{folderData[folder.folder_id]?.items?.length ?? ""} items</span>
                 <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
-                  <Trash2 size={13} color="var(--muted)" />
+                  <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />
                 </button>
-                {openFolder === folder.folder_id ? <ChevronUp size={14} color="var(--muted)" /> : <ChevronDown size={14} color="var(--muted)" />}
+                {openFolder === folder.folder_id ? <Icon n="expand_less" size={14} style={{ color: "var(--muted)" }} /> : <Icon n="expand_more" size={14} style={{ color: "var(--muted)" }} />}
               </div>
 
               {openFolder === folder.folder_id && folderData[folder.folder_id] && (
@@ -1036,17 +1064,17 @@ function LibraryTab({ onAddToLog }) {
                         <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 10px 20px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
                           {imageUrl
                             ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0 }}><img src={imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} /></div>
-                            : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Database size={14} color="var(--teal)" /></div>
+                            : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={14} style={{ color: "var(--teal)" }} /></div>
                           }
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{cal}kcal · P {prot}g · C {carb}g · F {fat}g</div>
                           </div>
                           <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-                            <Plus size={11} /> Log
+                            <Icon n="add" size={11} /> Log
                           </button>
                           <button onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
-                            {deletingItem === item.item_id ? <Loader2 size={13} color="var(--muted)" className="animate-spin" /> : <Trash2 size={13} color="var(--muted)" />}
+                            {deletingItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                           </button>
                         </div>
                       );
@@ -1092,7 +1120,7 @@ function NutrientGrid({ data, activeTab, per100gData }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ background: "var(--off)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--brown)", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-          <Scale size={13} color="var(--teal)" /> Custom Serving Calculator
+          <Icon n="scale" size={13} style={{ color: "var(--teal)" }} /> Custom Serving Calculator
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <input type="number" min="1" step="any" placeholder="e.g. 58" value={customGrams} onChange={e => setCustomGrams(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
@@ -1228,7 +1256,7 @@ function ScanTab({ onAddToLog }) {
               onClick={() => fileInputRef.current?.click()}>
               <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
               <div style={{ width: 52, height: 52, borderRadius: 14, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Upload size={22} color="var(--teal)" />
+                <Icon n="upload" size={22} style={{ color: "var(--teal)" }} />
               </div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Upload nutrition label</div>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Crop → optimize → analyze</div>
@@ -1244,11 +1272,11 @@ function ScanTab({ onAddToLog }) {
                   <>
                     <button onClick={() => setActiveIndex(i => Math.max(0, i - 1))} disabled={activeIndex === 0}
                       style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: "50%", background: "var(--white)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: activeIndex === 0 ? 0.3 : 1 }}>
-                      <ChevronLeft size={14} />
+                      <Icon n="chevron_left" size={14} />
                     </button>
                     <button onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))} disabled={activeIndex === images.length - 1}
                       style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: "50%", background: "var(--white)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: activeIndex === images.length - 1 ? 0.3 : 1 }}>
-                      <ChevronRight size={14} />
+                      <Icon n="chevron_right" size={14} />
                     </button>
                   </>
                 )}
@@ -1261,8 +1289,8 @@ function ScanTab({ onAddToLog }) {
                       {thumbSrc ? <img src={thumbSrc} alt={`Thumb ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
                       {!results && (
                         <>
-                          <button onClick={e => { e.stopPropagation(); removeImage(i); }} style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={9} /></button>
-                          <button onClick={e => { e.stopPropagation(); handleReCrop(i); }} style={{ position: "absolute", bottom: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Crop size={9} /></button>
+                          <button onClick={e => { e.stopPropagation(); removeImage(i); }} style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="close" size={9} /></button>
+                          <button onClick={e => { e.stopPropagation(); handleReCrop(i); }} style={{ position: "absolute", bottom: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="crop" size={9} /></button>
                         </>
                       )}
                       <div style={{ position: "absolute", bottom: 2, left: 4, fontSize: 9, fontWeight: 700, color: "white", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{i + 1}</div>
@@ -1271,7 +1299,7 @@ function ScanTab({ onAddToLog }) {
                 })}
                 {!results && (
                   <div onClick={() => fileInputRef.current?.click()} style={{ width: 56, height: 56, borderRadius: 12, border: "2px dashed var(--border)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
-                    <Upload size={16} color="var(--muted)" />
+                    <Icon n="upload" size={16} style={{ color: "var(--muted)" }} />
                   </div>
                 )}
               </div>
@@ -1286,13 +1314,13 @@ function ScanTab({ onAddToLog }) {
 
           <button onClick={handleAnalyze} disabled={loading || images.length === 0 || !!cropperFile}
             style={{ ...( results ? { ...ghostBtn, width: "100%", background: "var(--brown-lt)", borderColor: "var(--brown)", color: "var(--brown)" } : images.length === 0 || !!cropperFile ? { ...primaryBtn, opacity: 0.35, cursor: "not-allowed" } : primaryBtn ) }}>
-            {loading ? <Loader2 size={16} className="animate-spin" /> : results ? <RefreshCcw size={16} /> : <Zap size={16} />}
+            {loading ? <Spin size={16} color="white" /> : results ? <Icon n="refresh" size={16} /> : <Icon n="bolt" size={16} />}
             {loading ? (loadingMsg || `Processing ${images.length} image${images.length !== 1 ? "s" : ""}...`) : results ? "Clear session" : `Analyze${images.length > 1 ? ` (${images.length})` : ""}`}
           </button>
 
           {error && !loading && images.length > 0 && !results && (
             <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
-              <RefreshCcw size={14} /> Retry (images preserved)
+              <Icon n="refresh" size={14} /> Retry (images preserved)
             </button>
           )}
 
@@ -1300,7 +1328,7 @@ function ScanTab({ onAddToLog }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <input value={logName} onChange={e => setLogName(e.target.value)} placeholder="Name this item before logging..." style={inputStyle} />
               <button onClick={() => onAddToLog({ name: logName.trim() || `Label ${activeIndex + 1}`, nutrition: currentResult })} style={mintBtn}>
-                <Plus size={15} /> Log this item
+                <Icon n="add" size={15} /> Log this item
               </button>
             </div>
           )}
@@ -1312,13 +1340,13 @@ function ScanTab({ onAddToLog }) {
             <div style={{ background: "#FDF0DC", border: "1px solid var(--orange)", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 10, alignItems: "flex-start" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "var(--orange)" }}>Error</span>
               <p style={{ flex: 1, fontSize: 13, color: "var(--brown)" }}>{error}</p>
-              <button onClick={() => setError(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><X size={14} color="var(--muted)" /></button>
+              <button onClick={() => setError(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><Icon n="close" size={14} style={{ color: "var(--muted)" }} /></button>
             </div>
           )}
 
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: "60px 0" }}>
-              <Loader2 size={32} color="var(--teal)" className="animate-spin" />
+              <Spin size={32} />
               <p style={{ fontSize: 13, color: "var(--teal)", fontWeight: 600 }}>{loadingMsg || "Running analysis..."}</p>
               <p style={{ fontSize: 11, color: "var(--muted)" }}>Auto-retry · Timeout: {REQUEST_TIMEOUT_MS / 1000}s</p>
             </div>
@@ -1347,7 +1375,7 @@ function ScanTab({ onAddToLog }) {
               {/* Result header */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, background: "var(--brown-lt)", borderRadius: 12, padding: "10px 14px" }}>
                 <div style={{ width: 52, height: 52, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0, background: "var(--off)" }}>
-                  {currentPreview ? <img src={currentPreview} alt="Label" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Database size={16} color="var(--muted)" /></div>}
+                  {currentPreview ? <img src={currentPreview} alt="Label" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={16} style={{ color: "var(--muted)" }} /></div>}
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>Analyzing label</div>
@@ -1356,7 +1384,7 @@ function ScanTab({ onAddToLog }) {
                 </div>
                 <button onClick={() => setSaveModal({ result: currentResult, imageId: currentResult?.image_id || "", name: logName.trim() })}
                   style={{ ...ghostBtn, flexShrink: 0 }}>
-                  <BookmarkPlus size={13} /> Save
+                  <Icon n="bookmark_add" size={13} /> Save
                 </button>
               </div>
 
@@ -1377,7 +1405,7 @@ function ScanTab({ onAddToLog }) {
               {/* Schema header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: 12, borderBottom: "1px solid var(--off2)" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)", display: "flex", alignItems: "center", gap: 6 }}>
-                  <TableProperties size={13} color="var(--muted)" /> {activeTab === "per_100g" ? "Per 100g" : "Per Serving"}
+                  <Icon n="table_chart" size={13} style={{ color: "var(--muted)" }} /> {activeTab === "per_100g" ? "Per 100g" : "Per Serving"}
                 </div>
                 {activeTab === "per_serving" && currentResult?.per_serving?.size && (
                   <span style={{ fontSize: 11, background: "var(--purp-lt)", color: "var(--purple)", padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>
@@ -1391,7 +1419,7 @@ function ScanTab({ onAddToLog }) {
             </div>
           ) : (
             <div style={{ border: "2px dashed var(--border)", borderRadius: 20, background: "var(--white)", padding: "60px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, minHeight: 280 }}>
-              <LayoutPanelLeft size={36} color="var(--border)" />
+              <Icon n="grid_view" size={36} style={{ color: "var(--border)" }} />
               <p style={{ fontSize: 14, color: "var(--muted)", fontStyle: "italic" }}>
                 {images.length > 0 && !loading ? "Upload more images or hit Analyze" : "Upload a label to begin"}
               </p>
@@ -1406,11 +1434,11 @@ function ScanTab({ onAddToLog }) {
 // =============================================================================
 // LOGIN SCREEN
 // =============================================================================
-function LoginScreen({ onLogin }) {
-  const [email, setEmail]       = useState("");
-  const [sending, setSending]   = useState(false);
-  const [sent, setSent]         = useState(false);
-  const [error, setError]       = useState(null);
+function LoginScreen() {
+  const [email, setEmail]     = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent]       = useState(false);
+  const [error, setError]     = useState(null);
 
   const handleSubmit = async () => {
     if (!email.trim()) return;
@@ -1424,54 +1452,70 @@ function LoginScreen({ onLogin }) {
     } finally { setSending(false); }
   };
 
+  const inputStyle = {
+    width: "100%", padding: "12px 14px",
+    background: "var(--off)", border: "1.5px solid var(--border)",
+    borderRadius: 12, fontSize: 15, color: "var(--text)",
+  };
+
   return (
-    <div style={{ minHeight: "100vh", background: "var(--off)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 24 }}>
-        {/* Logo */}
+    <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 20px" }}>
+      <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 28 }}>
+
+        {/* Logo block */}
         <div style={{ textAlign: "center" }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: "var(--teal)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-            <Database size={26} color="var(--mint)" />
+          <div style={{ width: 64, height: 64, borderRadius: 20, background: "var(--teal)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px", boxShadow: "0 8px 24px rgba(0,109,119,0.35)" }}>
+            <Icon n="nutrition" size={30} style={{ color: "var(--mint)" }} />
           </div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.5px" }}>NutriScan</div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, letterSpacing: "0.8px", textTransform: "uppercase" }}>Pipeline v4</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.8px" }}>NutriScan</div>
+          <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>Track your nutrition with ease</div>
         </div>
 
         {/* Card */}
-        <div style={{ background: "var(--white)", border: "1px solid var(--border)", borderRadius: 20, padding: 28, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ background: "var(--surface)", borderRadius: 24, padding: 28, display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 2px 16px rgba(0,0,0,0.08), 0 0 0 1px var(--border)" }}>
           {!sent ? (
             <>
               <div>
-                <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text)" }}>Sign in</div>
-                <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>We'll send a magic link to your email. No password needed.</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Welcome back</div>
+                <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 5, lineHeight: 1.5 }}>Enter your email to receive a sign-in link.</div>
               </div>
+
               <div>
-                <label style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 6 }}>Email address</label>
+                <label style={{ fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", display: "block", marginBottom: 7 }}>Email address</label>
                 <input
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && handleSubmit()}
                   placeholder="you@example.com"
-                  style={{ width: "100%", padding: "10px 14px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 15, color: "var(--text)", boxSizing: "border-box" }}
+                  style={inputStyle}
                   autoFocus
                 />
               </div>
-              {error && <p style={{ fontSize: 12, color: "var(--danger)", margin: 0 }}>{error}</p>}
+
+              {error && (
+                <div style={{ background: "var(--danger-lt, #FFDAD6)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
+                  {error}
+                </div>
+              )}
+
               <button
                 onClick={handleSubmit}
                 disabled={sending || !email.trim()}
-                style={{ width: "100%", padding: "13px", background: "var(--teal)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: sending || !email.trim() ? "not-allowed" : "pointer", opacity: sending || !email.trim() ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                {sending ? <Loader2 size={16} className="animate-spin" /> : null}
-                {sending ? "Sending..." : "Send Magic Link"}
+                style={{ width: "100%", padding: "14px", background: "var(--teal)", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 700, cursor: sending || !email.trim() ? "not-allowed" : "pointer", opacity: sending || !email.trim() ? 0.55 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.2px" }}>
+                {sending ? <Spin size={18} color="white" /> : <Icon n="send" size={18} style={{ color: "white" }} />}
+                {sending ? "Sending…" : "Send Sign-in Link"}
               </button>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>or</span>
+                <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>or</span>
                 <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
               </div>
+
               <button
                 onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })}
-                style={{ width: "100%", padding: "13px", background: "var(--white)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                style={{ width: "100%", padding: "13px", background: "var(--surface)", color: "var(--text)", border: "1.5px solid var(--border)", borderRadius: 14, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
                   <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
                   <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.04a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
@@ -1482,16 +1526,15 @@ function LoginScreen({ onLogin }) {
               </button>
             </>
           ) : (
-            <div style={{ textAlign: "center", padding: "8px 0" }}>
-              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--mint)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                <Check size={22} color="var(--mint-dk)" />
+            <div style={{ textAlign: "center", padding: "12px 0" }}>
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}>
+                <Icon n="mark_email_read" size={28} style={{ color: "var(--teal)" }} />
               </div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text)" }}>Check your email</div>
-              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8, lineHeight: 1.6 }}>
-                We sent a magic link to <strong>{email}</strong>.<br />
-                Click the link to sign in.
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Check your inbox</div>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 10, lineHeight: 1.7 }}>
+                We sent a sign-in link to<br /><strong style={{ color: "var(--text)" }}>{email}</strong>
               </div>
-              <button onClick={() => { setSent(false); setEmail(""); }} style={{ marginTop: 16, fontSize: 12, color: "var(--teal)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+              <button onClick={() => { setSent(false); setEmail(""); }} style={{ marginTop: 20, fontSize: 13, color: "var(--teal)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline" }}>
                 Use a different email
               </button>
             </div>
@@ -1531,9 +1574,9 @@ export default function App() {
   }, []);
 
   const TABS = [
-    { id: "scan",    label: "Scan",    icon: <Zap size={13} />      },
-    { id: "library", label: "Library", icon: <Folder size={13} />   },
-    { id: "tracker", label: "Tracker", icon: <BarChart3 size={13} /> },
+    { id: "scan",    label: "Scan",    icon: "document_scanner" },
+    { id: "library", label: "Library", icon: "folder"           },
+    { id: "tracker", label: "Tracker", icon: "bar_chart"        },
   ];
 
   // Loading state
@@ -1541,8 +1584,8 @@ export default function App() {
     return (
       <>
         <style>{PALETTE_CSS}</style>
-        <div style={{ minHeight: "100vh", background: "var(--off)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Loader2 size={32} color="var(--teal)" className="animate-spin" />
+        <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Spin size={36} />
         </div>
       </>
     );
@@ -1564,44 +1607,31 @@ export default function App() {
   return (
     <>
       <style>{PALETTE_CSS}</style>
-      <div style={{ minHeight: "100vh", background: "var(--off)", color: "var(--text)" }}>
+      <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex", flexDirection: "column" }}>
         {addToLogItem && <AddToLogModal item={addToLogItem} onClose={() => setAddToLogItem(null)} onAdded={handleLogAdded} />}
         {editLogItem  && <EditLogModal  entry={editLogItem}  onClose={() => setEditLogItem(null)}  onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
 
-        {/* Header */}
-        <div style={{ background: "var(--teal)", padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: "rgba(174,246,199,0.2)", border: "1.5px solid rgba(174,246,199,0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Database size={18} color="var(--mint)" />
+        {/* Top App Bar */}
+        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(174,246,199,0.18)", border: "1.5px solid rgba(174,246,199,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
             </div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "white", letterSpacing: "-0.3px" }}>NutriScan</div>
-              <div style={{ fontSize: 10, color: "rgba(174,246,199,0.7)", letterSpacing: "0.8px", textTransform: "uppercase" }}>Pipeline v4</div>
-            </div>
+            <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {avatarUrl
-              ? <img src={avatarUrl} alt="avatar" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.4)" }} />
-              : <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(174,246,199,0.2)", border: "2px solid rgba(174,246,199,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "var(--mint)" }}>{userInitial}</div>
+              ? <img src={avatarUrl} alt="avatar" style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.5)" }} />
+              : <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(174,246,199,0.2)", border: "2px solid rgba(174,246,199,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "var(--mint)" }}>{userInitial}</div>
             }
-            <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer" }}>
+            <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 12, padding: "5px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer", fontWeight: 600 }}>
               Sign out
             </button>
           </div>
         </div>
 
-        {/* Tab bar */}
-        <div style={{ background: "var(--teal-md)", display: "flex", padding: "8px 16px", gap: 6 }}>
-          {TABS.map(tab => (
-            <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-              style={{ padding: "7px 18px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, background: activeMainTab === tab.id ? "var(--mint)" : "rgba(255,255,255,0.1)", color: activeMainTab === tab.id ? "var(--mint-dk)" : "rgba(255,255,255,0.65)", transition: "all 0.15s" }}>
-              {tab.icon} {tab.label}
-            </button>
-          ))}
-        </div>
-
         {/* Content */}
-        <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px 16px" }}>
+        <div style={{ flex: 1, maxWidth: 600, width: "100%", margin: "0 auto", padding: "20px 16px 96px" }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
             <ScanTab onAddToLog={handleAddToLog} />
           </div>
@@ -1609,6 +1639,22 @@ export default function App() {
           <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
             <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
           </div>
+        </div>
+
+        {/* Bottom Navigation */}
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", display: "flex", height: 72, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+          {TABS.map(tab => {
+            const active = activeMainTab === tab.id;
+            return (
+              <button key={tab.id} onClick={() => handleTabChange(tab.id)}
+                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: "8px 0", color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
+                  <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: "0.2px" }}>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </>
