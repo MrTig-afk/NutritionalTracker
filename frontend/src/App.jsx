@@ -25,16 +25,6 @@ const RETRY_DELAY_MS       = [1500, 3000];
 const SUPABASE_URL      = "https://zdmsfftfqnajanpbvcgn.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbXNmZnRmcW5hamFucGJ2Y2duIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTI4NTQsImV4cCI6MjA5MjI4ODg1NH0.Hro4TSxUz9EAOfsxQ4Fg0RsvHO2yi7YhthmT4GJ3Uio";
 
-function generateCodeVerifier() {
-  const array = new Uint8Array(32);
-  crypto.getRandomValues(array);
-  return btoa(String.fromCharCode(...array)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-async function generateCodeChallenge(verifier) {
-  const data = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
 
 // Minimal Supabase auth helper — no SDK needed
 const supabase = {
@@ -66,12 +56,9 @@ const supabase = {
     localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
     window.location.reload();
   },
-  async signInWithGoogle() {
-    const verifier   = generateCodeVerifier();
-    const challenge  = await generateCodeChallenge(verifier);
-    sessionStorage.setItem('supabase_pkce_verifier', verifier);
+  signInWithGoogle() {
     const redirectTo = encodeURIComponent(window.location.origin);
-    window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}&code_challenge=${challenge}&code_challenge_method=S256`;
+    window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`;
   },
   // Handle callback from both magic link (hash) and Google OAuth (PKCE code in query params)
   async handleAuthCallback() {
@@ -92,39 +79,6 @@ const supabase = {
       return session;
     }
     // PKCE flow — code in query params (Google OAuth)
-    const searchParams = new URLSearchParams(window.location.search);
-    const code  = searchParams.get("code");
-    const error = searchParams.get("error");
-    console.log("[auth] URL search:", window.location.search);
-    console.log("[auth] code:", code, "error:", error);
-    if (error) {
-      console.error("[auth] OAuth error:", error, searchParams.get("error_description"));
-      return null;
-    }
-    if (code) {
-      const verifier = sessionStorage.getItem('supabase_pkce_verifier');
-      console.log("[auth] verifier found:", !!verifier);
-      sessionStorage.removeItem('supabase_pkce_verifier');
-      if (verifier) {
-        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-          body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
-        });
-        const data = await res.json();
-        console.log("[auth] token exchange status:", res.status, "data:", data);
-        if (res.ok) {
-          const session = {
-            access_token:  data.access_token,
-            refresh_token: data.refresh_token,
-            expires_at:    Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
-          };
-          localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
-          window.history.replaceState({}, document.title, window.location.pathname);
-          return session;
-        }
-      }
-    }
     return null;
   },
 };
