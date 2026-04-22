@@ -28,7 +28,7 @@ load_dotenv()
 # ---------- CONFIG ----------
 DATABASE_URL   = os.getenv("DATABASE_URL")  # Set to Supabase connection string
 PRIMARY_MODEL  = "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-1.5-flash"
+FALLBACK_MODEL = "gemini-2.0-flash"
 MAX_IMAGE_PX   = 1024
 JPEG_QUALITY   = 60
 GEMINI_TIMEOUT = 45
