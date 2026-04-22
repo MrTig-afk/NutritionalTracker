@@ -25,9 +25,8 @@ const Spin = ({ size = 20, color = "var(--teal)" }) => (
 // =============================================================================
 // CONFIG
 // =============================================================================
-const API_URL = import.meta.env.DEV
-  ? "http://localhost:8000"
-  : (import.meta.env.VITE_API_URL || "https://nutritionaltracker.onrender.com");
+const API_URL = import.meta.env.VITE_API_URL
+  || (import.meta.env.DEV ? "http://localhost:8000" : "https://nutritionaltracker.onrender.com");
 
 const MAX_IMAGE_PX         = 1024;
 const JPEG_QUALITY         = 0.85;
