@@ -77,8 +77,7 @@ _jwks_client = pyjwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
 def get_user_id(authorization: Optional[str] = None) -> str:
     """Extract user ID from Supabase JWT. Supports both HS256 and RS256."""
     if not authorization:
-        logger.warning("⚠️ No authorization header — using default user (dev mode)")
-        return "user_default"
+        raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Missing authorization header"})
     try:
         token = authorization.replace("Bearer ", "").strip()
         header = pyjwt.get_unverified_header(token)

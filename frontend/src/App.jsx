@@ -23,8 +23,8 @@ const RETRY_DELAY_MS       = [1500, 3000];
 // =============================================================================
 // SUPABASE CLIENT
 // =============================================================================
-const SUPABASE_URL      = "https://zdmsfftfqnajanpbvcgn.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbXNmZnRmcW5hamFucGJ2Y2duIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTI4NTQsImV4cCI6MjA5MjI4ODg1NH0.Hro4TSxUz9EAOfsxQ4Fg0RsvHO2yi7YhthmT4GJ3Uio";
+const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -211,11 +211,13 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
   if (!optimizedFiles.length) return;
   setLoading(true); setError(null);
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const authHeader = session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {};
     const formData = new FormData();
     if (optimizedFiles.length === 1) {
       formData.append("file", optimizedFiles[0]);
       setLoadingMsg("Analyzing label...");
-      const response = await fetchWithRetry(`${API_URL}/analyze-label`, { method: "POST", body: formData });
+      const response = await fetchWithRetry(`${API_URL}/analyze-label`, { method: "POST", body: formData, headers: authHeader });
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
@@ -224,7 +226,7 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
     } else {
       optimizedFiles.forEach(f => formData.append("files", f));
       setLoadingMsg(`Analyzing ${optimizedFiles.length} labels...`);
-      const response = await fetchWithRetry(`${API_URL}/analyze-labels`, { method: "POST", body: formData });
+      const response = await fetchWithRetry(`${API_URL}/analyze-labels`, { method: "POST", body: formData, headers: authHeader });
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
