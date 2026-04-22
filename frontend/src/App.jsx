@@ -88,9 +88,18 @@ const supabase = {
       return session;
     }
     // PKCE flow — code in query params (Google OAuth)
-    const code = new URLSearchParams(window.location.search).get("code");
+    const searchParams = new URLSearchParams(window.location.search);
+    const code  = searchParams.get("code");
+    const error = searchParams.get("error");
+    console.log("[auth] URL search:", window.location.search);
+    console.log("[auth] code:", code, "error:", error);
+    if (error) {
+      console.error("[auth] OAuth error:", error, searchParams.get("error_description"));
+      return null;
+    }
     if (code) {
       const verifier = sessionStorage.getItem('supabase_pkce_verifier');
+      console.log("[auth] verifier found:", !!verifier);
       sessionStorage.removeItem('supabase_pkce_verifier');
       if (verifier) {
         const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
@@ -98,8 +107,9 @@ const supabase = {
           headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
           body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
         });
+        const data = await res.json();
+        console.log("[auth] token exchange status:", res.status, "data:", data);
         if (res.ok) {
-          const data    = await res.json();
           const session = {
             access_token:  data.access_token,
             refresh_token: data.refresh_token,
