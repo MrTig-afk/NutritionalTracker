@@ -1,84 +1,57 @@
-/* 1. REQUIRED TAILWIND DIRECTIVES */
 @import "tailwindcss";
 
-/* 2. YOUR CUSTOM THEME VARIABLES */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow: rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --teal:      #006D77;
+  --teal-lt:   #DCF4F5;
+  --teal-md:   #004E56;
+  --teal-dk:   #003940;
+  --mint:      #AEF6C7;
+  --mint-dk:   #1A6B3C;
+  --bg:        #F4FAF9;
+  --surface:   #FFFFFF;
+  --off:       #EFF5F5;
+  --off2:      #E0ECEB;
+  --border:    #C0CBCA;
+  --border2:   #8FA09F;
+  --text:      #191C1C;
+  --text2:     #3F4949;
+  --muted:     #6F7979;
+  --orange:    #C25700;
+  --orange-lt: #FFE0C7;
+  --purple:    #6B5EA8;
+  --purp-lt:   #EEEDF6;
+  --brown:     #4A3728;
+  --brown-lt:  #F5EDE0;
+  --danger:    #BA1A1A;
+  --danger-lt: #FFDAD6;
+}
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+*, *::before, *::after { box-sizing: border-box; }
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: 'Manrope', system-ui, -apple-system, sans-serif;
   background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-@media (max-width: 1024px) {
-  :root { font-size: 16px; }
-}
-
-/* 3. DARK MODE OVERRIDES */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d; /* This matches the dark slate-900 feel */
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow: rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-}
-
-/* 4. BASE ELEMENT STYLING */
-body {
-  margin: 0;
-  background-color: var(--bg);
-  color: var(--text);
+  overscroll-behavior-y: none;
 }
 
 #root {
-  /* We keep your centering logic but allow Tailwind to handle the inner layout */
-  width: 100%; 
-  max-width: 1200px;
-  margin: 0 auto;
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+  min-height: 100dvh;
 }
 
-/* Syncing your H1/H2 with your custom variables */
-h1, h2, h3 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+input, select, textarea, button {
+  font-family: inherit;
 }
 
-code {
-  font-family: var(--mono);
-  font-size: 15px;
-  padding: 4px 8px;
-  background: var(--code-bg);
-  border-radius: 4px;
-  color: var(--text-h);
+input:focus, select:focus {
+  outline: 2px solid var(--teal);
+  outline-offset: -1px;
 }
