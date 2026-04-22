@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { createClient } from "@supabase/supabase-js";
 import {
   Upload, Zap, Loader2, RefreshCcw, Database, Cloud, TableProperties,
   LayoutPanelLeft, Scale, X, ChevronLeft, ChevronRight, Crop, Check,
@@ -25,63 +26,7 @@ const RETRY_DELAY_MS       = [1500, 3000];
 const SUPABASE_URL      = "https://zdmsfftfqnajanpbvcgn.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbXNmZnRmcW5hamFucGJ2Y2duIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTI4NTQsImV4cCI6MjA5MjI4ODg1NH0.Hro4TSxUz9EAOfsxQ4Fg0RsvHO2yi7YhthmT4GJ3Uio";
 
-
-// Minimal Supabase auth helper — no SDK needed
-const supabase = {
-  async signInWithOtp(email) {
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "apikey": SUPABASE_ANON_KEY },
-      body: JSON.stringify({ email, create_user: true }),
-    });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.message || "Failed to send magic link"); }
-    return res.json();
-  },
-  getSession() {
-    try {
-      // Supabase stores session in localStorage under this key
-      const raw = localStorage.getItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      // Check expiry
-      if (parsed?.expires_at && parsed.expires_at * 1000 < Date.now()) {
-        console.log("[auth] session expired, removing. expires_at:", parsed.expires_at, "now:", Math.floor(Date.now()/1000));
-        localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
-        return null;
-      }
-      return parsed;
-    } catch { return null; }
-  },
-  signOut() {
-    localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
-    window.location.reload();
-  },
-  signInWithGoogle() {
-    const redirectTo = encodeURIComponent(window.location.origin);
-    window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}`;
-  },
-  // Handle callback from both magic link (hash) and Google OAuth (PKCE code in query params)
-  async handleAuthCallback() {
-    console.log("[auth] handleAuthCallback — hash:", window.location.hash, "search:", window.location.search);
-    // Implicit flow — tokens in URL hash (magic link)
-    const hash = window.location.hash;
-    if (hash.includes("access_token")) {
-      console.log("[auth] implicit flow detected");
-      const params       = new URLSearchParams(hash.replace("#", ""));
-      const accessToken  = params.get("access_token");
-      const refreshToken = params.get("refresh_token");
-      const expiresAt    = parseInt(params.get("expires_at") || "0");
-      console.log("[auth] implicit — expiresAt:", expiresAt, "hasToken:", !!accessToken);
-      if (!accessToken) return null;
-      const session = { access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt };
-      localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
-      window.history.replaceState({}, document.title, window.location.pathname);
-      return session;
-    }
-    // PKCE flow — code in query params (Google OAuth)
-    return null;
-  },
-};
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // =============================================================================
 // PALETTE — injected as CSS vars, used everywhere via style={}
@@ -245,15 +190,14 @@ async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
 }
 
 async function apiFetch(path, options = {}) {
-  const session = supabase.getSession();
+  const { data: { session } } = await supabase.auth.getSession();
   const authHeader = session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {};
   const res = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...authHeader, ...options.headers },
     ...options,
   });
   if (res.status === 401) {
-    // Session expired — force logout
-    supabase.signOut();
+    await supabase.auth.signOut();
     throw new Error("Session expired. Please log in again.");
   }
   if (!res.ok) { const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` })); throw new Error(err.message || `HTTP ${res.status}`); }
@@ -1382,7 +1326,8 @@ function LoginScreen({ onLogin }) {
     if (!email.trim()) return;
     setSending(true); setError(null);
     try {
-      await supabase.signInWithOtp(email.trim());
+      const { error: otpError } = await supabase.auth.signInWithOtp({ email: email.trim() });
+      if (otpError) throw new Error(otpError.message);
       setSent(true);
     } catch (e) {
       setError(e.message);
@@ -1435,7 +1380,7 @@ function LoginScreen({ onLogin }) {
                 <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
               </div>
               <button
-                onClick={() => supabase.signInWithGoogle()}
+                onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })}
                 style={{ width: "100%", padding: "13px", background: "var(--white)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
                   <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
@@ -1478,17 +1423,12 @@ export default function App() {
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
 
-  // Handle magic link callback and session restore on mount
+  // SDK handles callbacks, session restore, and token refresh automatically
   useEffect(() => {
-    const init = async () => {
-      // Check if returning from magic link
-      const callbackSession = await supabase.handleAuthCallback();
-      if (callbackSession) { setSession(callbackSession); return; }
-      // Restore existing session
-      const existing = supabase.getSession();
-      setSession(existing);
-    };
-    init();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleAddToLog  = useCallback((item) => { setAddToLogItem(item); }, []);
@@ -1528,13 +1468,7 @@ export default function App() {
     );
   }
 
-  // Logged in — get user email for display
-  const userEmail = (() => {
-    try {
-      const payload = JSON.parse(atob(session.access_token.split(".")[1]));
-      return payload.email || payload.sub?.slice(0, 8) + "...";
-    } catch { return "User"; }
-  })();
+  const userEmail = session?.user?.email || "User";
 
   return (
     <>
@@ -1556,7 +1490,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ fontSize: 11, color: "rgba(174,246,199,0.8)" }}>{userEmail}</div>
-            <button onClick={() => supabase.signOut()} style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer" }}>
+            <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer" }}>
               Sign out
             </button>
           </div>
