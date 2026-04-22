@@ -25,6 +25,17 @@ const RETRY_DELAY_MS       = [1500, 3000];
 const SUPABASE_URL      = "https://zdmsfftfqnajanpbvcgn.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpkbXNmZnRmcW5hamFucGJ2Y2duIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTI4NTQsImV4cCI6MjA5MjI4ODg1NH0.Hro4TSxUz9EAOfsxQ4Fg0RsvHO2yi7YhthmT4GJ3Uio";
 
+function generateCodeVerifier() {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+async function generateCodeChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
 // Minimal Supabase auth helper — no SDK needed
 const supabase = {
   async signInWithOtp(email) {
@@ -54,21 +65,53 @@ const supabase = {
     localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
     window.location.reload();
   },
-  // Handle magic link token from URL hash on redirect
+  async signInWithGoogle() {
+    const verifier   = generateCodeVerifier();
+    const challenge  = await generateCodeChallenge(verifier);
+    sessionStorage.setItem('supabase_pkce_verifier', verifier);
+    const redirectTo = encodeURIComponent(window.location.origin);
+    window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${redirectTo}&code_challenge=${challenge}&code_challenge_method=S256`;
+  },
+  // Handle callback from both magic link (hash) and Google OAuth (PKCE code in query params)
   async handleAuthCallback() {
+    // Implicit flow — tokens in URL hash (magic link)
     const hash = window.location.hash;
-    if (!hash.includes("access_token")) return null;
-    const params = new URLSearchParams(hash.replace("#", ""));
-    const accessToken  = params.get("access_token");
-    const refreshToken = params.get("refresh_token");
-    const expiresAt    = parseInt(params.get("expires_at") || "0");
-    if (!accessToken) return null;
-    // Store session
-    const session = { access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt };
-    localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
-    // Clean URL
-    window.history.replaceState({}, document.title, window.location.pathname);
-    return session;
+    if (hash.includes("access_token")) {
+      const params       = new URLSearchParams(hash.replace("#", ""));
+      const accessToken  = params.get("access_token");
+      const refreshToken = params.get("refresh_token");
+      const expiresAt    = parseInt(params.get("expires_at") || "0");
+      if (!accessToken) return null;
+      const session = { access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt };
+      localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return session;
+    }
+    // PKCE flow — code in query params (Google OAuth)
+    const code = new URLSearchParams(window.location.search).get("code");
+    if (code) {
+      const verifier = sessionStorage.getItem('supabase_pkce_verifier');
+      sessionStorage.removeItem('supabase_pkce_verifier');
+      if (verifier) {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=pkce`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+          body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+        });
+        if (res.ok) {
+          const data    = await res.json();
+          const session = {
+            access_token:  data.access_token,
+            refresh_token: data.refresh_token,
+            expires_at:    Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+          };
+          localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
+          window.history.replaceState({}, document.title, window.location.pathname);
+          return session;
+        }
+      }
+    }
+    return null;
   },
 };
 
@@ -1417,6 +1460,22 @@ function LoginScreen({ onLogin }) {
                 style={{ width: "100%", padding: "13px", background: "var(--teal)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: sending || !email.trim() ? "not-allowed" : "pointer", opacity: sending || !email.trim() ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                 {sending ? <Loader2 size={16} className="animate-spin" /> : null}
                 {sending ? "Sending..." : "Send Magic Link"}
+              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>or</span>
+                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              </div>
+              <button
+                onClick={() => supabase.signInWithGoogle()}
+                style={{ width: "100%", padding: "13px", background: "var(--white)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+                  <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
+                  <path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.04a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17z"/>
+                  <path fill="#FBBC05" d="M4.5 10.48A4.8 4.8 0 0 1 4.5 7.52V5.45H1.83a8 8 0 0 0 0 7.1l2.67-2.07z"/>
+                  <path fill="#EA4335" d="M8.98 4.18c1.17 0 2.23.4 3.06 1.2l2.3-2.3A8 8 0 0 0 1.83 5.45L4.5 7.52A4.8 4.8 0 0 1 8.98 4.18z"/>
+                </svg>
+                Continue with Google
               </button>
             </>
           ) : (
