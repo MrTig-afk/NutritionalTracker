@@ -5,5 +5,5 @@ google-genai
 Pillow
 boto3
 psycopg2-binary
-pyjwt
+pyjwt[crypto]
 python-multipart

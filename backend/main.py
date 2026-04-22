@@ -70,23 +70,29 @@ app.add_middleware(
 
 # ---------- SUPABASE AUTH ----------
 SUPABASE_URL        = os.getenv("SUPABASE_URL", "https://zdmsfftfqnajanpbvcgn.supabase.co")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")  # Settings → API → JWT Secret
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+
+_jwks_client = pyjwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True)
 
 def get_user_id(authorization: Optional[str] = None) -> str:
-    """Extract user ID from Supabase JWT. Falls back to default if no token (dev mode)."""
+    """Extract user ID from Supabase JWT. Supports both HS256 and RS256."""
     if not authorization:
         logger.warning("⚠️ No authorization header — using default user (dev mode)")
         return "user_default"
     try:
         token = authorization.replace("Bearer ", "").strip()
-        if not SUPABASE_JWT_SECRET:
-            raise Exception("SUPABASE_JWT_SECRET not configured")
-        payload = pyjwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-        )
+        header = pyjwt.get_unverified_header(token)
+        alg    = header.get("alg", "HS256")
+        logger.info(f"🔑 JWT alg: {alg}")
+
+        if alg == "HS256":
+            if not SUPABASE_JWT_SECRET:
+                raise Exception("SUPABASE_JWT_SECRET not configured")
+            payload = pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        else:
+            signing_key = _jwks_client.get_signing_key_from_jwt(token)
+            payload = pyjwt.decode(token, signing_key.key, algorithms=[alg], options={"verify_aud": False})
+
         user_id = payload.get("sub")
         if not user_id:
             raise Exception("No sub claim in JWT")
