@@ -138,6 +138,22 @@ function resolveNutrition(nutrition) {
   return nutrition;
 }
 
+function formatDisplayDate(isoDate) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+  return `${String(day).padStart(2, "0")}-${String(month).padStart(2, "0")}-${year} (${dayName})`;
+}
+
+function addDays(isoDate, n) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const d = new Date(year, month - 1, day + n);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
 // =============================================================================
 // IMAGE PIPELINE
 // =============================================================================
@@ -400,10 +416,10 @@ function ImageCropper({ file, onConfirm, onCancel }) {
 // =============================================================================
 // SAVE TO FOLDER MODAL
 // =============================================================================
-function SaveToFolderModal({ result, imageId, onClose }) {
+function SaveToFolderModal({ result, imageId, onClose, onSaved, initialName }) {
   const [folders, setFolders] = useState([]);
   const [newFolder, setNewFolder] = useState("");
-  const [itemName, setItemName] = useState("");
+  const [itemName, setItemName] = useState(initialName || "");
   const [selectedFolder, setSelectedFolder] = useState("");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
@@ -429,6 +445,7 @@ function SaveToFolderModal({ result, imageId, onClose }) {
       const nutrition = result.per_serving ? { per_serving: result.per_serving, per_100g: result.per_100g } : result;
       await apiFetch(`/folders/${selectedFolder}/items`, { method: "POST", body: JSON.stringify({ name: itemName.trim(), image_id: imageId || "", nutrition }) });
       setStatus({ type: "ok", msg: "Saved to folder!" });
+      if (onSaved) onSaved(itemName.trim());
       setTimeout(onClose, 1200);
     } catch (e) { setStatus({ type: "error", msg: e.message }); }
     finally { setSaving(false); }
@@ -441,10 +458,12 @@ function SaveToFolderModal({ result, imageId, onClose }) {
           <div style={modalTitle}><BookmarkPlus size={15} color="var(--teal)" /> Save to Folder</div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><X size={16} /></button>
         </div>
-        <div>
-          <label style={labelStyle}>Item Name</label>
-          <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Greek Yogurt" style={inputStyle} />
-        </div>
+        {!initialName && (
+          <div>
+            <label style={labelStyle}>Item Name</label>
+            <input value={itemName} onChange={e => setItemName(e.target.value)} placeholder="e.g. Greek Yogurt" style={inputStyle} />
+          </div>
+        )}
         <div>
           <label style={labelStyle}>Folder</label>
           <select value={selectedFolder} onChange={e => setSelectedFolder(e.target.value)} style={inputStyle}>
@@ -723,21 +742,23 @@ function MacroBar({ label, current, goal, color }) {
 // TRACKER TAB
 // =============================================================================
 function TrackerTab({ refreshKey, onEditEntry }) {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const [goals, setGoals] = useState({ calories: 2000, protein: 150, carbs: 250, fat: 65 });
   const [logData, setLogData] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(today);
   const [editingGoals, setEditingGoals] = useState(false);
   const [goalDraft, setGoalDraft] = useState({});
   const [loading, setLoading] = useState(true);
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  const today = new Date().toISOString().slice(0, 10);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${today}`)]); setGoals(g); setLogData(l); }
+    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); setGoals(g); setLogData(l); }
     catch (e) { console.error("Tracker load failed:", e); }
     finally { setLoading(false); }
-  }, [today]);
+  }, [selectedDate]);
 
   useEffect(() => { loadData(); }, [loadData, refreshKey]);
 
@@ -817,13 +838,28 @@ function TrackerTab({ refreshKey, onEditEntry }) {
       {/* Log entries */}
       <div style={card}>
         <div style={{ ...cardHeader, background: "var(--off)" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
-            <CalendarDays size={14} color="var(--teal)" /> Today's Log — {today}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={() => setSelectedDate(d => addDays(d, -1))} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <ChevronLeft size={13} />
+            </button>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 6 }}>
+              <CalendarDays size={14} color="var(--teal)" /> {formatDisplayDate(selectedDate)}
+            </div>
+            <button onClick={() => setSelectedDate(d => addDays(d, 1))} disabled={selectedDate >= today} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedDate >= today ? 0.3 : 1 }}>
+              <ChevronRight size={13} />
+            </button>
+            {selectedDate !== today && (
+              <button onClick={() => setSelectedDate(today)} style={{ fontSize: 10, padding: "3px 8px", background: "var(--teal-lt)", border: "1px solid var(--teal)", borderRadius: 6, color: "var(--teal)", cursor: "pointer", fontWeight: 600 }}>
+                Today
+              </button>
+            )}
           </div>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>{logData?.items?.length || 0} entries</span>
         </div>
         {!logData?.items?.length ? (
-          <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--muted)", fontSize: 14, fontStyle: "italic" }}>No entries yet. Add food from Library.</div>
+          <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--muted)", fontSize: 14, fontStyle: "italic" }}>
+            {selectedDate === today ? "No entries yet. Add food from Library." : "No entries for this day."}
+          </div>
         ) : (
           logData.items.map((entry, idx) => (
             <div key={entry.log_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
@@ -1132,7 +1168,7 @@ function ScanTab({ onAddToLog }) {
   return (
     <>
       {cropperFile && <ImageCropper file={cropperFile} onConfirm={handleCropConfirm} onCancel={handleCropCancel} />}
-      {saveModal && <SaveToFolderModal result={saveModal.result} imageId={saveModal.imageId} onClose={() => setSaveModal(null)} />}
+      {saveModal && <SaveToFolderModal result={saveModal.result} imageId={saveModal.imageId} onClose={() => setSaveModal(null)} onSaved={(name) => setLogName(name)} initialName={saveModal.name || ""} />}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }} className="lg:grid-cols-scan">
         {/* Upload / preview panel */}
@@ -1268,7 +1304,7 @@ function ScanTab({ onAddToLog }) {
                   <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brown)", marginTop: 2 }}>Image {activeIndex + 1} of {results.length}</div>
                   {images[activeIndex]?.cropData && <div style={{ fontSize: 10, color: "var(--teal)", marginTop: 2 }}>✂ Cropped & optimized</div>}
                 </div>
-                <button onClick={() => setSaveModal({ result: currentResult, imageId: currentResult?.image_id || "" })}
+                <button onClick={() => setSaveModal({ result: currentResult, imageId: currentResult?.image_id || "", name: logName.trim() })}
                   style={{ ...ghostBtn, flexShrink: 0 }}>
                   <BookmarkPlus size={13} /> Save
                 </button>
