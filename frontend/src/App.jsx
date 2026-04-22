@@ -295,22 +295,22 @@ async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError
 // =============================================================================
 // SHARED STYLE HELPERS
 // =============================================================================
-const card = { background: "var(--white)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" };
-const cardHeader = { background: "var(--brown-lt)", padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" };
-const inputStyle = { width: "100%", padding: "9px 12px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 14, color: "var(--text)" };
-const labelStyle = { fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 4 };
-const primaryBtn = { width: "100%", padding: "13px", background: "var(--teal)", color: "white", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
-const mintBtn = { width: "100%", padding: "13px", background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
-const ghostBtn = { padding: "9px 14px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12, fontWeight: 600, color: "var(--brown)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
-const overlayBg = { position: "fixed", inset: 0, zIndex: 50, background: "rgba(44,32,23,0.75)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
-const modalBox = { width: "100%", maxWidth: 400, background: "var(--white)", border: "1px solid var(--border2)", borderRadius: 20, padding: 24, display: "flex", flexDirection: "column", gap: 16 };
+const card       = { background: "var(--surface)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px var(--border)" };
+const cardHeader  = { background: "var(--off)", padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" };
+const inputStyle  = { width: "100%", padding: "10px 13px", background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: 10, fontSize: 14, color: "var(--text)" };
+const labelStyle  = { fontSize: 11, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", display: "block", marginBottom: 5 };
+const primaryBtn  = { width: "100%", padding: "13px", background: "var(--teal)", color: "white", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
+const mintBtn     = { width: "100%", padding: "13px", background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 };
+const ghostBtn    = { padding: "9px 14px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, fontSize: 12, fontWeight: 600, color: "var(--text2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
+const overlayBg   = { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
+const modalBox    = { width: "100%", maxWidth: 420, background: "var(--surface)", borderRadius: 20, padding: 24, display: "flex", flexDirection: "column", gap: 16, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" };
 const modalHeader = { display: "flex", alignItems: "center", justifyContent: "space-between" };
-const modalTitle = { fontSize: 15, fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center", gap: 8 };
-const pillRow = { display: "flex", padding: 4, background: "var(--off2)", border: "1px solid var(--border)", borderRadius: 10, gap: 4 };
-const macroCells = (vals) => vals.map(({ label, value, unit, color }) => (
+const modalTitle  = { fontSize: 15, fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center", gap: 8 };
+const pillRow     = { display: "flex", padding: 4, background: "var(--off2)", borderRadius: 10, gap: 3 };
+const macroCells  = (vals) => vals.map(({ label, value, unit, color }) => (
   <div key={label} style={{ flex: 1, background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
-    <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase" }}>{label}</div>
-    <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 2 }}>{value.toFixed(1)}</div>
+    <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}</div>
+    <div style={{ fontSize: 16, fontWeight: 800, color, marginTop: 2 }}>{value.toFixed(1)}</div>
     <div style={{ fontSize: 10, color: "var(--muted)" }}>{unit}</div>
   </div>
 ));
@@ -351,7 +351,7 @@ function ImageCropper({ file, onConfirm, onCancel }) {
     const canvas = canvasRef.current; const ctx = canvas.getContext("2d");
     const { w: cw, h: ch } = canvasSize;
     ctx.clearRect(0, 0, cw, ch); ctx.drawImage(imgRef.current, 0, 0, cw, ch);
-    ctx.fillStyle = "rgba(44,32,23,0.55)";
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(0, 0, cw, cropRect.y); ctx.fillRect(0, cropRect.y + cropRect.h, cw, ch - cropRect.y - cropRect.h);
     ctx.fillRect(0, cropRect.y, cropRect.x, cropRect.h); ctx.fillRect(cropRect.x + cropRect.w, cropRect.y, cw - cropRect.x - cropRect.w, cropRect.h);
     ctx.strokeStyle = "#006D77"; ctx.lineWidth = 2; ctx.setLineDash([]);
