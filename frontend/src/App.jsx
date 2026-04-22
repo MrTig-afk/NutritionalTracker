@@ -55,6 +55,7 @@ const supabase = {
       const parsed = JSON.parse(raw);
       // Check expiry
       if (parsed?.expires_at && parsed.expires_at * 1000 < Date.now()) {
+        console.log("[auth] session expired, removing. expires_at:", parsed.expires_at, "now:", Math.floor(Date.now()/1000));
         localStorage.removeItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`);
         return null;
       }
@@ -74,13 +75,16 @@ const supabase = {
   },
   // Handle callback from both magic link (hash) and Google OAuth (PKCE code in query params)
   async handleAuthCallback() {
+    console.log("[auth] handleAuthCallback — hash:", window.location.hash, "search:", window.location.search);
     // Implicit flow — tokens in URL hash (magic link)
     const hash = window.location.hash;
     if (hash.includes("access_token")) {
+      console.log("[auth] implicit flow detected");
       const params       = new URLSearchParams(hash.replace("#", ""));
       const accessToken  = params.get("access_token");
       const refreshToken = params.get("refresh_token");
       const expiresAt    = parseInt(params.get("expires_at") || "0");
+      console.log("[auth] implicit — expiresAt:", expiresAt, "hasToken:", !!accessToken);
       if (!accessToken) return null;
       const session = { access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt };
       localStorage.setItem(`sb-zdmsfftfqnajanpbvcgn-auth-token`, JSON.stringify(session));
