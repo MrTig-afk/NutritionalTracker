@@ -1388,15 +1388,6 @@ function ScanTab({ onAddToLog }) {
 
               <NutrientGrid key={activeIndex} data={currentResult?.[activeTab]} activeTab={activeTab} per100gData={currentResult?.per_100g} />
 
-              <details style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-                <summary style={{ padding: "10px 14px", fontSize: 11, color: "var(--muted)", cursor: "pointer", listStyle: "none", display: "flex", justifyContent: "space-between" }}>
-                  <span>Raw data payload [{activeIndex + 1}/{results.length}]</span>
-                  <span>▼</span>
-                </summary>
-                <div style={{ padding: "12px 14px", background: "var(--off)" }}>
-                  <pre style={{ fontSize: 10, color: "var(--brown)", fontFamily: "monospace", overflow: "auto" }}>{JSON.stringify(currentResult, null, 2)}</pre>
-                </div>
-              </details>
             </div>
           ) : (
             <div style={{ border: "2px dashed var(--border)", borderRadius: 20, background: "var(--white)", padding: "60px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, minHeight: 280 }}>
@@ -1567,7 +1558,8 @@ export default function App() {
     );
   }
 
-  const userEmail = session?.user?.email || "User";
+  const avatarUrl   = session?.user?.user_metadata?.avatar_url;
+  const userInitial = (session?.user?.email || "U")[0].toUpperCase();
 
   return (
     <>
@@ -1588,7 +1580,10 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: 11, color: "rgba(174,246,199,0.8)" }}>{userEmail}</div>
+            {avatarUrl
+              ? <img src={avatarUrl} alt="avatar" style={{ width: 32, height: 32, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.4)" }} />
+              : <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(174,246,199,0.2)", border: "2px solid rgba(174,246,199,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "var(--mint)" }}>{userInitial}</div>
+            }
             <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 11, padding: "4px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer" }}>
               Sign out
             </button>
