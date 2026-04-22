@@ -897,10 +897,19 @@ function LibraryTab({ onAddToLog }) {
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deletingItem, setDeletingItem] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadFolders = useCallback(async () => {
     setLoading(true); setFolderData({});
-    try { setFolders(await apiFetch("/folders")); }
+    try {
+      const fl = await apiFetch("/folders");
+      setFolders(fl);
+      fl.forEach(f => {
+        apiFetch(`/folders/${f.folder_id}`)
+          .then(data => setFolderData(prev => ({ ...prev, [f.folder_id]: data })))
+          .catch(() => {});
+      });
+    }
     catch (e) { console.error(e); }
     finally { setLoading(false); }
   }, []);
@@ -952,7 +961,48 @@ function LibraryTab({ onAddToLog }) {
         </button>
       </div>
 
-      {folders.length === 0 ? (
+      <input
+        value={searchQuery}
+        onChange={e => setSearchQuery(e.target.value)}
+        placeholder="Search items across all folders..."
+        style={inputStyle}
+      />
+
+      {searchQuery.trim() ? (
+        (() => {
+          const q = searchQuery.toLowerCase();
+          const hits = folders.flatMap(folder =>
+            (folderData[folder.folder_id]?.items || [])
+              .filter(item => item.name.toLowerCase().includes(q))
+              .map(item => ({ ...item, folderName: folder.name, folderId: folder.folder_id }))
+          );
+          return hits.length === 0
+            ? <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--muted)", fontSize: 14, fontStyle: "italic", border: "2px dashed var(--border)", borderRadius: 16 }}>No items match "{searchQuery}"</div>
+            : <div style={card}>{hits.map((item, idx) => {
+                const nutrition = item.nutrition?.per_serving ?? item.nutrition ?? {};
+                const cal  = parseNumeric(nutrition.calories)      || 0;
+                const prot = parseNumeric(nutrition.protein)       || 0;
+                const carb = parseNumeric(nutrition.carbohydrates) || 0;
+                const fat  = parseNumeric(nutrition.fat)           || 0;
+                const imageUrl = item.nutrition?.processed_url || item.nutrition?.raw_url || null;
+                return (
+                  <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
+                    {imageUrl
+                      ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0 }}><img src={imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} /></div>
+                      : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Database size={14} color="var(--teal)" /></div>
+                    }
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.folderName} · {cal}kcal · P {prot}g · C {carb}g · F {fat}g</div>
+                    </div>
+                    <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                      <Plus size={11} /> Log
+                    </button>
+                  </div>
+                );
+              })}</div>;
+        })()
+      ) : folders.length === 0 ? (
         <div style={{ padding: "48px 16px", textAlign: "center", color: "var(--muted)", fontSize: 14, fontStyle: "italic", border: "2px dashed var(--border)", borderRadius: 16 }}>No folders yet. Create one above.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
