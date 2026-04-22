@@ -26,6 +26,17 @@ const RETRY_DELAY_MS       = [1500, 3000];
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  document.body.innerHTML = `<div style="font-family:monospace;padding:2rem;color:#c00">
+    <h2>Missing environment variables</h2>
+    <p>VITE_SUPABASE_URL: ${SUPABASE_URL ? "✓" : "✗ NOT SET"}</p>
+    <p>VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY ? "✓" : "✗ NOT SET"}</p>
+    <p>Check Vercel → Project Settings → Environment Variables.</p>
+    <p>Names must start with <strong>VITE_</strong> and the deployment must be rebuilt after adding them.</p>
+  </div>`;
+  throw new Error("Missing Supabase environment variables");
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // =============================================================================
