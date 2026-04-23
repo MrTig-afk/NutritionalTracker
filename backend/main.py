@@ -33,6 +33,7 @@ MAX_IMAGE_PX   = 1024
 JPEG_QUALITY   = 60
 GEMINI_TIMEOUT = 45
 MAX_RETRIES    = 2
+DAILY_LIMIT    = 10
 
 logger.info(f"📦 DATABASE_URL configured: {bool(DATABASE_URL)}")
 
@@ -101,6 +102,75 @@ def get_user_id(authorization: Optional[str] = None) -> str:
     except Exception as e:
         logger.warning(f"⚠️ JWT verification failed: {e}")
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
+
+
+def get_user_info(authorization: Optional[str] = None) -> tuple:
+    """Extract user ID and email from Supabase JWT."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Missing authorization header"})
+    try:
+        token = authorization.replace("Bearer ", "").strip()
+        header = pyjwt.get_unverified_header(token)
+        alg    = header.get("alg", "HS256")
+        if alg == "HS256":
+            if not SUPABASE_JWT_SECRET:
+                raise Exception("SUPABASE_JWT_SECRET not configured")
+            payload = pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        else:
+            signing_key = _jwks_client.get_signing_key_from_jwt(token)
+            payload = pyjwt.decode(token, signing_key.key, algorithms=[alg], options={"verify_aud": False})
+        user_id = payload.get("sub")
+        if not user_id:
+            raise Exception("No sub claim in JWT")
+        return user_id, payload.get("email", "")
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail={"error_type": "token_expired", "message": "Session expired. Please log in again."})
+    except Exception as e:
+        logger.warning(f"⚠️ JWT verification failed: {e}")
+        raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
+
+
+def check_and_track(user_id: str, email: str):
+    """Upsert user email and enforce daily rate limit."""
+    today = date.today().isoformat()
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute("""
+            INSERT INTO users (user_id, email, last_seen)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, last_seen = EXCLUDED.last_seen
+        """, [user_id, email, datetime.now()])
+        cur.execute(
+            "SELECT count FROM api_usage WHERE user_id = %s AND date = %s",
+            [user_id, today]
+        )
+        row = cur.fetchone()
+        if row:
+            if row[0] >= DAILY_LIMIT:
+                cur.close(); conn.close()
+                raise HTTPException(status_code=429, detail={
+                    "error_type": "rate_limit_exceeded",
+                    "retryable": False,
+                    "message": f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!",
+                })
+            cur.execute(
+                "UPDATE api_usage SET count = count + 1 WHERE user_id = %s AND date = %s",
+                [user_id, today]
+            )
+        else:
+            cur.execute(
+                "INSERT INTO api_usage (user_id, date, count) VALUES (%s, %s, 1)",
+                [user_id, today]
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"⚠️ Usage tracking failed (non-fatal): {e}")
+
 
 # ---------- PYDANTIC MODELS ----------
 class FolderCreate(BaseModel):
@@ -330,6 +400,23 @@ def init_db():
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id   VARCHAR PRIMARY KEY,
+                email     VARCHAR,
+                last_seen TIMESTAMP
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS api_usage (
+                user_id VARCHAR NOT NULL,
+                date    VARCHAR NOT NULL,
+                count   INT DEFAULT 0,
+                PRIMARY KEY (user_id, date)
+            )
+        """)
+
         conn.commit()
         cur.close()
         conn.close()
@@ -499,6 +586,29 @@ async def health_check():
 
 
 # =============================================================================
+# USAGE ENDPOINT
+# =============================================================================
+
+@app.get("/usage")
+async def get_usage(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
+    today   = date.today().isoformat()
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT count FROM api_usage WHERE user_id = %s AND date = %s",
+            [user_id, today]
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
+    return {"used": row[0] if row else 0, "limit": DAILY_LIMIT, "date": today}
+
+
+# =============================================================================
 # EXTRACTION ENDPOINTS
 # =============================================================================
 
@@ -513,7 +623,8 @@ async def analyze_label(
             "message": "Gemini API not configured",
         })
 
-    user_id   = get_user_id(authorization)
+    user_id, email = get_user_info(authorization)
+    check_and_track(user_id, email)
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
 
@@ -572,7 +683,8 @@ async def analyze_labels(
             "message": "Maximum 10 images per batch",
         })
 
-    user_id = get_user_id(authorization)
+    user_id, email = get_user_info(authorization)
+    check_and_track(user_id, email)
 
     processed_images = []
     image_ids        = []

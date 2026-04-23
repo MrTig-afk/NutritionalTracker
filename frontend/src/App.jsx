@@ -238,8 +238,14 @@ async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
       if (response.ok) return response;
       const status = response.status;
       const isRetryable = status !== 429 && (status === 500 || status === 503 || status === 504);
-      const errorText = await response.text().catch(() => `HTTP ${status}`);
-      if (!isRetryable || attempt === maxRetries) throw new Error(`Pipeline Error: ${status} — ${errorText}`);
+      if (!isRetryable || attempt === maxRetries) {
+        if (status === 429) {
+          const body = await response.json().catch(() => null);
+          throw new Error(body?.message || "You've reached your daily scan limit. Come back tomorrow!");
+        }
+        const errorText = await response.text().catch(() => `HTTP ${status}`);
+        throw new Error(`Pipeline Error: ${status} — ${errorText}`);
+      }
       lastError = new Error(`Retryable error: ${status}`);
       await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000));
     } catch (err) {
@@ -1180,9 +1186,17 @@ function ScanTab({ onAddToLog }) {
   const [saveModal, setSaveModal] = useState(null);
   const [logName, setLogName] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const [usage, setUsage] = useState(null);
   const fileInputRef = useRef(null);
   const accumulatedOptimizedRef = useRef([]);
   const accumulatedImagesRef    = useRef([]);
+
+  const fetchUsage = useCallback(async () => {
+    try { setUsage(await apiFetch("/usage")); } catch (_) {}
+  }, []);
+
+  useEffect(() => { fetchUsage(); }, [fetchUsage]);
+  useEffect(() => { if (!loading && results) fetchUsage(); }, [loading, results, fetchUsage]);
 
   const stateRef = useRef({ images, optimizedFiles, results, activeIndex, activeTab });
   useEffect(() => { stateRef.current = { images, optimizedFiles, results, activeIndex, activeTab }; }, [images, optimizedFiles, results, activeIndex, activeTab]);
@@ -1327,6 +1341,13 @@ function ScanTab({ onAddToLog }) {
             {loading ? <Spin size={16} color="white" /> : results ? <Icon n="refresh" size={16} /> : <Icon n="bolt" size={16} />}
             {loading ? (loadingMsg || `Processing ${images.length} image${images.length !== 1 ? "s" : ""}...`) : results ? "Clear session" : `Analyze${images.length > 1 ? ` (${images.length})` : ""}`}
           </button>
+
+          {usage && (
+            <p style={{ textAlign: "center", fontSize: 11, fontWeight: 600, margin: 0,
+              color: usage.used >= usage.limit ? "var(--danger)" : "var(--muted)" }}>
+              {usage.used} / {usage.limit} scans today
+            </p>
+          )}
 
           {error && !loading && images.length > 0 && !results && (
             <button onClick={handleAnalyze} style={{ ...ghostBtn, width: "100%", borderColor: "var(--orange)", color: "var(--orange)" }}>
