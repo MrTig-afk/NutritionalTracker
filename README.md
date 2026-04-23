@@ -14,8 +14,9 @@ A full-stack nutrition tracking web app that uses AI to extract macros from food
 | UI | Material Symbols Outlined, Manrope, CSS custom properties |
 | Backend | FastAPI (Python), Uvicorn |
 | AI | Google Gemini 2.5 Flash (primary), Gemini 2.0 Flash (fallback) |
-| Database | PostgreSQL via Supabase |
+| Database | Neon (PostgreSQL) |
 | Auth | Supabase Auth — OTP email + Google OAuth, JWT verified server-side (PyJWT RS256/HS256) |
+| Database | Neon (PostgreSQL), accessed via psycopg2 |
 | Storage | AWS S3 — raw + processed image versions |
 | Deploy | Vercel (frontend), Render (backend) |
 
@@ -65,10 +66,10 @@ User (browser / phone)
    ├── optimize image (Pillow)
    ├── upload raw + processed to S3
    ├── call Gemini API → parse JSON
-   └── persist record to Supabase
+   └── persist record to Neon
         │
         ▼
-  Supabase (PostgreSQL)
+  Neon (PostgreSQL)
   tables: image_records · folders · folder_items
           daily_log · user_goals · users · api_usage
 ```
@@ -136,7 +137,7 @@ npm run dev
 
 **Backend**
 ```
-DATABASE_URL            Supabase PostgreSQL connection string
+DATABASE_URL            Neon PostgreSQL connection string
 GOOGLE_API_KEY          Gemini API key
 SUPABASE_URL            Supabase project URL
 SUPABASE_JWT_SECRET     JWT secret (HS256 token verification)
