@@ -336,15 +336,6 @@ def init_db():
         cur  = conn.cursor()
 
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS extractions (
-                id         VARCHAR PRIMARY KEY,
-                created_at TIMESTAMP,
-                s3_url     TEXT,
-                raw_json   JSONB
-            )
-        """)
-
-        cur.execute("""
             CREATE TABLE IF NOT EXISTS image_records (
                 image_id      VARCHAR PRIMARY KEY,
                 user_id       VARCHAR NOT NULL,

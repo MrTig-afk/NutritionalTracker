@@ -103,10 +103,15 @@ const PALETTE_CSS = `
   .ns-top-tabs   { display: none; }
   .ns-content    { padding-bottom: 96px; }
 
+  .ns-scan-grid    { grid-template-columns: 1fr; }
+  .ns-tracker-grid { display: flex; flex-direction: column; gap: 16px; }
+
   @media (min-width: 768px) {
-    .ns-bottom-nav { display: none; }
-    .ns-top-tabs   { display: flex; }
-    .ns-content    { max-width: 960px !important; padding-bottom: 32px; }
+    .ns-bottom-nav   { display: none; }
+    .ns-top-tabs     { display: flex; }
+    .ns-content      { max-width: 100% !important; padding-bottom: 32px; }
+    .ns-scan-grid    { grid-template-columns: 1fr 1fr !important; }
+    .ns-tracker-grid { display: grid !important; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   }
 `;
 
@@ -825,7 +830,9 @@ function TrackerTab({ refreshKey, onEditEntry }) {
   const totals = logData?.totals || { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="ns-tracker-grid">
+      {/* Left col — goals + summary */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Goals card */}
       <div style={card}>
         <div style={cardHeader}>
@@ -879,7 +886,10 @@ function TrackerTab({ refreshKey, onEditEntry }) {
         ))}
       </div>
 
-      {/* Log entries */}
+      </div>{/* end left col */}
+
+      {/* Right col — log entries */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={card}>
         <div style={{ ...cardHeader, background: "var(--off)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -926,6 +936,7 @@ function TrackerTab({ refreshKey, onEditEntry }) {
           ))
         )}
       </div>
+      </div>{/* end right col */}
     </div>
   );
 }
@@ -1272,7 +1283,7 @@ function ScanTab({ onAddToLog }) {
       {cropperFile && <ImageCropper file={cropperFile} onConfirm={handleCropConfirm} onCancel={handleCropCancel} />}
       {saveModal && <SaveToFolderModal result={saveModal.result} imageId={saveModal.imageId} onClose={() => setSaveModal(null)} onSaved={(name) => setLogName(name)} initialName={saveModal.name || ""} />}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }} className="lg:grid-cols-scan">
+      <div style={{ display: "grid", gap: 16, ...(!results && { maxWidth: 560, margin: "0 auto", width: "100%" }) }} className={results ? "ns-scan-grid" : ""}>
         {/* Upload / preview panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {images.length === 0 ? (
@@ -1379,7 +1390,6 @@ function ScanTab({ onAddToLog }) {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: "60px 0" }}>
               <Spin size={32} />
               <p style={{ fontSize: 13, color: "var(--teal)", fontWeight: 600 }}>{loadingMsg || "Running analysis..."}</p>
-              <p style={{ fontSize: 11, color: "var(--muted)" }}>Auto-retry · Timeout: {REQUEST_TIMEOUT_MS / 1000}s</p>
             </div>
           ) : results ? (
             <div style={{ ...card, padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -1448,14 +1458,7 @@ function ScanTab({ onAddToLog }) {
               <NutrientGrid key={activeIndex} data={currentResult?.[activeTab]} activeTab={activeTab} per100gData={currentResult?.per_100g} />
 
             </div>
-          ) : (
-            <div style={{ border: "2px dashed var(--border)", borderRadius: 20, background: "var(--white)", padding: "60px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, minHeight: 280 }}>
-              <Icon n="grid_view" size={36} style={{ color: "var(--border)" }} />
-              <p style={{ fontSize: 14, color: "var(--muted)", fontStyle: "italic" }}>
-                {images.length > 0 && !loading ? "Upload more images or hit Analyze" : "Upload a label to begin"}
-              </p>
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
     </>
@@ -1677,7 +1680,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div className="ns-content" style={{ flex: 1, maxWidth: 600, width: "100%", margin: "0 auto", padding: "20px 16px" }}>
+        <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", padding: "20px 32px" }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
             <ScanTab onAddToLog={handleAddToLog} />
           </div>
