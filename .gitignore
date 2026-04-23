@@ -24,3 +24,7 @@ dist/
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Personal notes
+schema_explained.md
+Resume.txt
