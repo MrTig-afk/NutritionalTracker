@@ -5,6 +5,7 @@ import uuid
 import asyncio
 import boto3
 import psycopg2
+import psycopg2.pool
 import psycopg2.extras
 import jwt as pyjwt
 from datetime import datetime, date
@@ -148,7 +149,7 @@ def check_and_track(user_id: str, email: str):
         row = cur.fetchone()
         if row:
             if row[0] >= DAILY_LIMIT:
-                cur.close(); conn.close()
+                cur.close(); release_db(conn)
                 raise HTTPException(status_code=429, detail={
                     "error_type": "rate_limit_exceeded",
                     "retryable": False,
@@ -165,7 +166,7 @@ def check_and_track(user_id: str, email: str):
             )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except HTTPException:
         raise
     except Exception as e:
@@ -320,13 +321,24 @@ def normalize_extracted_data(data: dict) -> dict:
 # DATABASE LAYER — PostgreSQL
 # =============================================================================
 
+_pool = None
+
+def get_pool():
+    global _pool
+    if _pool is None:
+        if not DATABASE_URL:
+            raise Exception("DATABASE_URL environment variable not set")
+        _pool = psycopg2.pool.SimpleConnectionPool(1, 5, DATABASE_URL)
+        logger.info("✅ Connection pool initialised (min=1, max=5)")
+    return _pool
+
 def get_db():
-    """Return a new psycopg2 connection. Caller must close it."""
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL environment variable not set")
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = get_pool().getconn()
     conn.autocommit = False
     return conn
+
+def release_db(conn):
+    get_pool().putconn(conn)
 
 
 def init_db():
@@ -410,7 +422,7 @@ def init_db():
 
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
         logger.info("✅ PostgreSQL database initialized (all tables)")
     except Exception as e:
         logger.error(f"❌ DB init failed: {e}")
@@ -593,7 +605,7 @@ async def get_usage(authorization: Optional[str] = Header(default=None)):
         )
         row = cur.fetchone()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"used": row[0] if row else 0, "limit": DAILY_LIMIT, "date": today}
@@ -651,7 +663,7 @@ async def analyze_label(
         )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         logger.warning(f"⚠️ DB insert failed (non-fatal): {e}")
 
@@ -725,7 +737,7 @@ async def analyze_labels(
             )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         logger.warning(f"⚠️ Batch DB insert failed (non-fatal): {e}")
 
@@ -752,7 +764,7 @@ async def create_folder(
         )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"folder_id": folder_id, "name": body.name}
@@ -770,7 +782,7 @@ async def list_folders(authorization: Optional[str] = Header(default=None)):
         )
         rows = cur.fetchall()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return [{"folder_id": r[0], "name": r[1]} for r in rows]
@@ -791,7 +803,7 @@ async def get_folder(
         )
         folder = cur.fetchone()
         if not folder:
-            cur.close(); conn.close()
+            cur.close(); release_db(conn)
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Folder not found"})
         cur.execute(
             "SELECT item_id, name, nutrition FROM folder_items WHERE folder_id = %s AND user_id = %s ORDER BY created_at DESC",
@@ -799,7 +811,7 @@ async def get_folder(
         )
         items = cur.fetchall()
         cur.close()
-        conn.close()
+        release_db(conn)
     except HTTPException:
         raise
     except Exception as e:
@@ -836,7 +848,7 @@ async def add_folder_item(
         )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"item_id": item_id, "name": body.name}
@@ -858,7 +870,7 @@ async def delete_folder_item(
         )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}
@@ -877,7 +889,7 @@ async def delete_folder(
         cur.execute("DELETE FROM folders WHERE folder_id = %s AND user_id = %s", [folder_id, user_id])
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}
@@ -911,7 +923,7 @@ async def set_goals(
             )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {
@@ -932,7 +944,7 @@ async def get_goals(authorization: Optional[str] = Header(default=None)):
         )
         row = cur.fetchone()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     if not row:
@@ -962,7 +974,7 @@ async def add_log_entry(
         )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"log_id": log_id, "date": today, "name": body.name, "servings": body.servings}
@@ -984,7 +996,7 @@ async def get_daily_log(
         )
         rows = cur.fetchall()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
 
@@ -1056,7 +1068,7 @@ async def update_log_entry(
             [log_id, user_id],
         )
         if not cur.fetchone():
-            cur.close(); conn.close()
+            cur.close(); release_db(conn)
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Log entry not found"})
         cur.execute(
             "UPDATE daily_log SET name=%s, servings=%s, nutrition=%s WHERE log_id=%s AND user_id=%s",
@@ -1064,7 +1076,7 @@ async def update_log_entry(
         )
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except HTTPException:
         raise
     except Exception as e:
@@ -1084,7 +1096,7 @@ async def delete_log_entry(
         cur.execute("DELETE FROM daily_log WHERE log_id = %s AND user_id = %s", [log_id, user_id])
         conn.commit()
         cur.close()
-        conn.close()
+        release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}
