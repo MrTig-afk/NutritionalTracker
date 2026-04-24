@@ -3,17 +3,20 @@ import io
 import json
 import uuid
 import asyncio
+import time
 import boto3
 import psycopg2
 import psycopg2.pool
 import psycopg2.extras
 import jwt as pyjwt
-from datetime import datetime, date
-from fastapi import FastAPI, UploadFile, File, HTTPException, Header
+from collections import defaultdict
+from datetime import datetime, date, timedelta
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
+from groq import Groq
 from dotenv import load_dotenv
 from typing import List, Optional
 import logging
@@ -58,6 +61,34 @@ if os.getenv("GOOGLE_API_KEY"):
     logger.info("✅ Gemini client initialized")
 else:
     logger.warning("⚠️ Gemini API key missing")
+
+groq_client = None
+if os.getenv("GROQ_API_KEY"):
+    groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    logger.info("✅ Groq client initialized")
+else:
+    logger.warning("⚠️ Groq API key missing — AI assistant disabled")
+
+# ---------- CHAT RATE LIMITER ----------
+# Sliding-window in-memory counters. Fine for single-process deployments.
+_user_chat_log: dict  = defaultdict(list)  # user_id -> [timestamps]
+_global_chat_log: list = []
+USER_CHAT_RPM   = 3
+GLOBAL_CHAT_RPM = 25
+
+def _allow_chat(user_id: str) -> bool:
+    now    = time.time()
+    cutoff = now - 60
+    _user_chat_log[user_id] = [t for t in _user_chat_log[user_id] if t > cutoff]
+    while _global_chat_log and _global_chat_log[0] < cutoff:
+        _global_chat_log.pop(0)
+    if len(_user_chat_log[user_id]) >= USER_CHAT_RPM:
+        return False
+    if len(_global_chat_log) >= GLOBAL_CHAT_RPM:
+        return False
+    _user_chat_log[user_id].append(now)
+    _global_chat_log.append(now)
+    return True
 
 # ---------- FASTAPI ----------
 app = FastAPI(title="NutriScan API", version="4.0")
@@ -193,6 +224,9 @@ class LogEntry(BaseModel):
     name: str
     servings: float
     nutrition: dict
+
+class ChatMessage(BaseModel):
+    message: str
 
 # ---------- PROMPTS ----------
 PROMPT_SINGLE = """Analyze this nutrition label image carefully.
@@ -1053,6 +1087,91 @@ async def get_daily_log(
     }
 
 
+@app.get("/log/calendar")
+async def get_log_calendar(
+    year: int,
+    month: int,
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id(authorization)
+    days_in_month = (date(year + (month // 12), (month % 12) + 1, 1) - timedelta(days=1)).day
+    first = f"{year}-{str(month).zfill(2)}-01"
+    last  = f"{year}-{str(month).zfill(2)}-{str(days_in_month).zfill(2)}"
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT date FROM daily_log WHERE user_id = %s AND date >= %s AND date <= %s ORDER BY date",
+            [user_id, first, last],
+        )
+        rows = cur.fetchall()
+        cur.close()
+        release_db(conn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
+    dates = [r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0]) for r in rows]
+    return {"dates": dates}
+
+
+@app.get("/log/trends")
+async def get_log_trends(
+    time_range: str = Query("weekly", alias="range"),
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id    = get_user_id(authorization)
+    days       = 30 if time_range == "monthly" else 7
+    end_date   = date.today()
+    start_date = end_date - timedelta(days=days - 1)
+
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT date, servings, nutrition FROM daily_log WHERE user_id = %s AND date >= %s AND date <= %s ORDER BY date, created_at",
+            [user_id, start_date.isoformat(), end_date.isoformat()],
+        )
+        rows = cur.fetchall()
+        cur.close()
+        release_db(conn)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
+
+    daily = {
+        (start_date + timedelta(i)).isoformat(): {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0, "fibre": 0.0}
+        for i in range(days)
+    }
+
+    for row in rows:
+        row_date, servings, nutrition_raw = row
+        date_key = row_date.isoformat() if hasattr(row_date, "isoformat") else str(row_date)
+        if date_key not in daily:
+            continue
+        nutrition = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
+
+        if nutrition.get("per_serving") and len(nutrition["per_serving"]) > 0:
+            per_serving = nutrition["per_serving"]
+        elif nutrition.get("per_100g") and len(nutrition["per_100g"]) > 0:
+            per_serving = nutrition["per_100g"]
+        else:
+            per_serving = nutrition
+
+        cal_val = _parse_num(per_serving.get("calories", 0))
+        if cal_val > KJ_HEURISTIC_THRESHOLD:
+            cal_val = round(cal_val / KJ_PER_KCAL, 1)
+
+        daily[date_key]["calories"] += cal_val * servings
+        daily[date_key]["protein"]  += _parse_num(per_serving.get("protein",       0)) * servings
+        daily[date_key]["carbs"]    += _parse_num(per_serving.get("carbohydrates", 0)) * servings
+        daily[date_key]["fat"]      += _parse_num(per_serving.get("fat",           0)) * servings
+        daily[date_key]["fibre"]    += _parse_num(per_serving.get("fibre",         0)) * servings
+
+    result = [
+        {"date": d, **{k: round(v, 1) for k, v in vals.items()}}
+        for d, vals in sorted(daily.items())
+    ]
+    return {"range": time_range, "data": result}
+
+
 @app.put("/log/{log_id}")
 async def update_log_entry(
     log_id: str,
@@ -1100,6 +1219,84 @@ async def delete_log_entry(
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
     return {"deleted": True}
+
+
+# =============================================================================
+# AI CHAT ENDPOINT
+# =============================================================================
+
+_CHAT_SYSTEM = (
+    "You are a concise nutrition assistant embedded in NutriScan. "
+    "Answer in 2-3 sentences maximum. Be specific and practical. "
+    "If the user's daily data is provided, use it to give personalised advice."
+)
+
+@app.post("/chat")
+async def chat(
+    body: ChatMessage,
+    authorization: Optional[str] = Header(default=None),
+):
+    if not groq_client:
+        raise HTTPException(status_code=503, detail={"error_type": "config_error", "message": "AI assistant not configured."})
+
+    user_id = get_user_id(authorization)
+
+    if not _allow_chat(user_id):
+        raise HTTPException(status_code=429, detail={"error_type": "rate_limited", "message": "Too many messages — wait a moment and try again."})
+
+    # Fetch today's context (goals + log totals). Non-fatal if it fails.
+    context = ""
+    try:
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute("SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = %s", [user_id])
+        goal_row = cur.fetchone()
+        cur.execute(
+            "SELECT servings, nutrition FROM daily_log WHERE user_id = %s AND date = %s",
+            [user_id, date.today().isoformat()],
+        )
+        log_rows = cur.fetchall()
+        cur.close()
+        release_db(conn)
+
+        totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
+        for servings, nutrition_raw in log_rows:
+            nutrition   = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
+            per_serving = (nutrition.get("per_serving") or {}) if nutrition.get("per_serving") else \
+                          (nutrition.get("per_100g") or nutrition)
+            cal_val = _parse_num(per_serving.get("calories", 0))
+            if cal_val > KJ_HEURISTIC_THRESHOLD:
+                cal_val = round(cal_val / KJ_PER_KCAL, 1)
+            totals["calories"] += cal_val                                          * servings
+            totals["protein"]  += _parse_num(per_serving.get("protein",       0)) * servings
+            totals["carbs"]    += _parse_num(per_serving.get("carbohydrates", 0)) * servings
+            totals["fat"]      += _parse_num(per_serving.get("fat",           0)) * servings
+
+        parts = []
+        if goal_row:
+            parts.append(f"Goals: {round(goal_row[0])}kcal / {round(goal_row[1])}g protein / {round(goal_row[2])}g carbs / {round(goal_row[3])}g fat.")
+        parts.append(f"Today so far: {round(totals['calories'])}kcal / {round(totals['protein'])}g protein / {round(totals['carbs'])}g carbs / {round(totals['fat'])}g fat.")
+        context = " ".join(parts)
+    except Exception:
+        pass
+
+    system = _CHAT_SYSTEM + (f"\n\nUser data: {context}" if context else "")
+    try:
+        response = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[
+                {"role": "system",  "content": system},
+                {"role": "user",    "content": body.message},
+            ],
+            max_tokens=220,
+            temperature=0.7,
+        )
+        return {"reply": response.choices[0].message.content}
+    except Exception as e:
+        err = str(e)
+        if "429" in err:
+            raise HTTPException(status_code=429, detail={"error_type": "rate_limited", "message": "Assistant is busy — try again in a moment."})
+        raise HTTPException(status_code=500, detail={"error_type": "ai_error", "message": "Assistant unavailable."})
 
 
 # =============================================================================
