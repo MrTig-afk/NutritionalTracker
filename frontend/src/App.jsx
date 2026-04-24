@@ -788,6 +788,153 @@ function MacroBar({ label, current, goal, color }) {
 }
 
 // =============================================================================
+// DATE PICKER
+// =============================================================================
+const MONTHS_LONG = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS_SHORT  = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+
+function DatePicker({ value, onChange, maxDate }) {
+  const [open,         setOpen]         = useState(false);
+  const [dropPos,      setDropPos]      = useState(null);
+  const [viewYear,     setViewYear]     = useState(() => Number(value.split("-")[0]));
+  const [viewMonth,    setViewMonth]    = useState(() => Number(value.split("-")[1]) - 1);
+  const [trackedDates, setTrackedDates] = useState(new Set());
+  const btnRef  = useRef(null);
+  const dropRef = useRef(null);
+
+  const handleToggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setDropPos({ top: r.bottom + 8, left: r.left });
+    }
+    setOpen(o => !o);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    apiFetch(`/log/calendar?year=${viewYear}&month=${viewMonth + 1}`)
+      .then(d => setTrackedDates(new Set(d.dates)))
+      .catch(() => {});
+  }, [open, viewYear, viewMonth]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = e => {
+      if (!btnRef.current?.contains(e.target) && !dropRef.current?.contains(e.target))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const goPrev = () => {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
+    else setViewMonth(m => m - 1);
+  };
+  const goNext = () => {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); }
+    else setViewMonth(m => m + 1);
+  };
+  const nextDisabled = (() => {
+    const [my, mm] = maxDate.split("-").map(Number);
+    return viewYear > my || (viewYear === my && viewMonth >= mm - 1);
+  })();
+
+  const daysInMonth  = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const startWeekday = new Date(viewYear, viewMonth, 1).getDay();
+  const cells = [...Array(startWeekday).fill(null),
+                 ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+
+  return (
+    <div style={{ display: "inline-block" }}>
+      <button ref={btnRef} onClick={handleToggle}
+        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700,
+          color: "var(--brown)", background: "none", border: "none", cursor: "pointer",
+          padding: "3px 6px", borderRadius: 8,
+          outline: open ? "2px solid var(--teal)" : "none", outlineOffset: 1 }}>
+        <Icon n="calendar_today" size={14} style={{ color: "var(--teal)" }} />
+        {formatDisplayDate(value)}
+        <Icon n="expand_more" size={13} style={{ color: "var(--muted)",
+          transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+      </button>
+
+      {open && dropPos && (
+        <div ref={dropRef} style={{
+          position: "fixed", top: dropPos.top, left: dropPos.left, zIndex: 1000,
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.14)",
+          padding: "14px 16px", width: 252,
+        }}>
+          {/* Month nav */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <button onClick={goPrev}
+              style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon n="chevron_left" size={14} />
+            </button>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+              {MONTHS_LONG[viewMonth]} {viewYear}
+            </span>
+            <button onClick={goNext} disabled={nextDisabled}
+              style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "none", cursor: nextDisabled ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: nextDisabled ? 0.3 : 1 }}>
+              <Icon n="chevron_right" size={14} />
+            </button>
+          </div>
+
+          {/* Weekday headers */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
+            {DAYS_SHORT.map(d => (
+              <div key={d} style={{ textAlign: "center", fontSize: 10, fontWeight: 700, color: "var(--muted)", padding: "2px 0" }}>{d}</div>
+            ))}
+          </div>
+
+          {/* Day grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+            {cells.map((day, idx) => {
+              if (!day) return <div key={`_${idx}`} />;
+              const iso        = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const isSelected = iso === value;
+              const isToday    = iso === maxDate;
+              const isFuture   = iso > maxDate;
+              const isTracked  = trackedDates.has(iso);
+              return (
+                <button key={iso} disabled={isFuture}
+                  onClick={() => { onChange(iso); setOpen(false); }}
+                  style={{
+                    width: "100%", border: "none", borderRadius: 8, padding: "4px 0",
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                    fontSize: 12, fontWeight: isSelected || isToday ? 700 : 400,
+                    cursor: isFuture ? "default" : "pointer",
+                    background:    isSelected ? "var(--teal)" : "transparent",
+                    color:         isSelected ? "white" : isFuture ? "var(--border)" : isToday ? "var(--teal)" : "var(--text)",
+                    outline:       isToday && !isSelected ? "1.5px solid var(--teal)" : "none",
+                    outlineOffset: -1,
+                  }}>
+                  <span>{day}</span>
+                  <div style={{
+                    width: 4, height: 4, borderRadius: "50%",
+                    background: isTracked
+                      ? (isSelected ? "rgba(255,255,255,0.85)" : "var(--teal)")
+                      : "transparent",
+                  }} />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick jump to today */}
+          {value !== maxDate && (
+            <button onClick={() => { onChange(maxDate); setOpen(false); }}
+              style={{ width: "100%", marginTop: 10, padding: "7px", background: "var(--teal-lt)", border: "1px solid var(--teal)", borderRadius: 10, fontSize: 12, fontWeight: 700, color: "var(--teal)", cursor: "pointer" }}>
+              Jump to Today
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
 // TRACKER TAB
 // =============================================================================
 function TrackerTab({ refreshKey, onEditEntry }) {
@@ -896,17 +1043,10 @@ function TrackerTab({ refreshKey, onEditEntry }) {
             <button onClick={() => setSelectedDate(d => addDays(d, -1))} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="chevron_left" size={13} />
             </button>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 6 }}>
-              <Icon n="calendar_today" size={14} style={{ color: "var(--teal)" }} /> {formatDisplayDate(selectedDate)}
-            </div>
+            <DatePicker value={selectedDate} onChange={setSelectedDate} maxDate={today} />
             <button onClick={() => setSelectedDate(d => addDays(d, 1))} disabled={selectedDate >= today} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedDate >= today ? 0.3 : 1 }}>
               <Icon n="chevron_right" size={13} />
             </button>
-            {selectedDate !== today && (
-              <button onClick={() => setSelectedDate(today)} style={{ fontSize: 10, padding: "3px 8px", background: "var(--teal-lt)", border: "1px solid var(--teal)", borderRadius: 6, color: "var(--teal)", cursor: "pointer", fontWeight: 600 }}>
-                Today
-              </button>
-            )}
           </div>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>{logData?.items?.length || 0} entries</span>
         </div>
@@ -937,6 +1077,205 @@ function TrackerTab({ refreshKey, onEditEntry }) {
         )}
       </div>
       </div>{/* end right col */}
+    </div>
+  );
+}
+
+// =============================================================================
+// TRENDS TAB
+// =============================================================================
+function MacroTrendChart({ data, macro, label, unit, color, range }) {
+  const [hovered, setHovered] = useState(null);
+  const values  = data.map(d => d[macro]);
+  const max     = Math.max(...values, 1);
+  const VW = 280, BARH = 90, LABELH = 18, TOP_PAD = 14;
+  const n       = data.length;
+  const gap     = n > 15 ? 1 : 2;
+  const barW    = (VW - gap * (n - 1)) / n;
+  const nonZero = values.filter(v => v > 0);
+  const avg     = nonZero.length
+    ? Math.round(nonZero.reduce((a, b) => a + b, 0) / nonZero.length)
+    : 0;
+  const gradId  = `grad-${macro}`;
+
+  return (
+    <div style={{ background: "var(--surface)", borderRadius: 16, overflow: "hidden",
+      boxShadow: "0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px var(--border)" }}>
+      <div style={{ height: 3, background: color }} />
+      <div style={{ padding: "14px 18px 16px" }}>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", color: "var(--muted)" }}>{label}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 2 }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color, lineHeight: 1 }}>{avg}</span>
+            <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>{unit}/day avg</span>
+          </div>
+        </div>
+
+        <div style={{ position: "relative" }}>
+          <svg width="100%" viewBox={`0 0 ${VW} ${TOP_PAD + BARH + LABELH}`}
+            style={{ overflow: "visible" }}
+            onMouseLeave={() => setHovered(null)}>
+            <defs>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   style={{ stopColor: color, stopOpacity: 0.88 }} />
+                <stop offset="100%" style={{ stopColor: color, stopOpacity: 0.28 }} />
+              </linearGradient>
+            </defs>
+
+            {/* Horizontal grid lines */}
+            {[0.25, 0.5, 0.75].map(pct => {
+              const gy = TOP_PAD + BARH - pct * BARH;
+              return <line key={pct} x1={0} y1={gy} x2={VW} y2={gy}
+                stroke="#C0CBCA" strokeWidth={0.5} strokeDasharray="3,3" />;
+            })}
+            {/* Baseline */}
+            <line x1={0} y1={TOP_PAD + BARH} x2={VW} y2={TOP_PAD + BARH} stroke="#C0CBCA" strokeWidth={1} />
+
+            {data.map((d, i) => {
+              const h          = Math.max(2, (d[macro] / max) * BARH);
+              const x          = i * (barW + gap);
+              const y          = TOP_PAD + BARH - h;
+              const dt         = new Date(d.date + "T12:00:00");
+              const isHovered  = hovered === i;
+              const showLabel  = range === "weekly" || i === 0 || i === Math.floor(n / 2) || i === n - 1;
+              const lbl        = range === "weekly"
+                ? ["Su","Mo","Tu","We","Th","Fr","Sa"][dt.getDay()]
+                : String(dt.getDate());
+              return (
+                <g key={d.date} style={{ cursor: d[macro] > 0 ? "pointer" : "default" }}
+                  onMouseEnter={() => d[macro] > 0 && setHovered(i)}>
+                  <rect x={x} y={y} width={barW} height={h} rx={2}
+                    fill={d[macro] > 0 ? `url(#${gradId})` : "#C0CBCA"}
+                    fillOpacity={d[macro] > 0 ? (isHovered ? 1 : 0.9) : 0.3}
+                    style={{ transition: "fill-opacity 0.1s" }}
+                  />
+                  {d[macro] > 0 && range === "weekly" && (
+                    <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize={8}
+                      style={{ fill: color }} fontWeight="700">
+                      {Math.round(d[macro])}
+                    </text>
+                  )}
+                  {showLabel && (
+                    <text x={x + barW / 2} y={TOP_PAD + BARH + 13} textAnchor="middle" fontSize={9}
+                      style={{ fill: isHovered ? color : "#888" }} fontWeight={isHovered ? "700" : "400"}>
+                      {lbl}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+
+          {hovered !== null && (() => {
+            const d      = data[hovered];
+            const dt     = new Date(d.date + "T12:00:00");
+            const dateStr = dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+            const pct    = (hovered + 0.5) / n;
+            return (
+              <div style={{
+                position: "absolute", top: 0,
+                left: `${pct * 100}%`,
+                transform: pct > 0.6 ? "translateX(-100%)" : "translateX(4px)",
+                background: "var(--text)", color: "white", borderRadius: 8,
+                padding: "5px 10px", fontSize: 11, fontWeight: 600,
+                pointerEvents: "none", whiteSpace: "nowrap",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.25)", zIndex: 10,
+              }}>
+                <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 10, marginBottom: 1 }}>{dateStr}</div>
+                <div>{Math.round(d[macro])} {unit}</div>
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TrendsTab() {
+  const [range,     setRange]     = useState("weekly");
+  const [trendData, setTrendData] = useState(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    apiFetch(`/log/trends?range=${range}`)
+      .then(d  => setTrendData(d.data))
+      .catch(e => setError(e.message || "Failed to load trends"))
+      .finally(()  => setLoading(false));
+  }, [range]);
+
+  const macros = [
+    { key: "calories", label: "Calories", unit: "kcal", color: "var(--orange)", colorLight: "var(--orange-lt)", icon: "local_fire_department" },
+    { key: "protein",  label: "Protein",  unit: "g",    color: "var(--teal)",   colorLight: "var(--teal-lt)",   icon: "fitness_center"        },
+    { key: "carbs",    label: "Carbs",    unit: "g",    color: "var(--purple)", colorLight: "#EEEBF8",           icon: "grain"                 },
+    { key: "fat",      label: "Fat",      unit: "g",    color: "var(--brown)",  colorLight: "var(--brown-lt)",   icon: "water_drop"            },
+  ];
+
+  const avgFor = key => {
+    if (!trendData) return 0;
+    const nz = trendData.map(d => d[key]).filter(v => v > 0);
+    return nz.length ? Math.round(nz.reduce((a, b) => a + b, 0) / nz.length) : 0;
+  };
+
+  return (
+    <div style={{ maxWidth: 960, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Nutrition Trends</h2>
+        <div style={{ display: "flex", gap: 6 }}>
+          {["weekly", "monthly"].map(r => (
+            <button key={r} onClick={() => setRange(r)}
+              style={{ padding: "6px 16px", borderRadius: 20, border: "1.5px solid var(--border)", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", transition: "all 0.15s",
+                background: range === r ? "var(--teal)" : "var(--surface)",
+                color:      range === r ? "white"       : "var(--muted)" }}>
+              {r === "weekly" ? "7 Days" : "30 Days"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin size={28} /></div>}
+      {error   && <p style={{ color: "var(--err)", textAlign: "center" }}>{error}</p>}
+
+      {trendData && !loading && (
+        <>
+          {/* Summary stat strip */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
+            {macros.map(m => (
+              <div key={m.key} style={{ background: m.colorLight, borderRadius: 14, padding: "12px 14px",
+                display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: m.color, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Icon n={m.icon} size={17} style={{ color: "white" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.4px" }}>{m.label}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text)", lineHeight: 1.15 }}>{avgFor(m.key)}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted)" }}>{m.unit}/day</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Charts */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+            {macros.map(m => (
+              <MacroTrendChart
+                key={m.key}
+                data={trendData}
+                macro={m.key}
+                label={m.label}
+                unit={m.unit}
+                color={m.color}
+                range={range}
+              />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1466,6 +1805,146 @@ function ScanTab({ onAddToLog }) {
 }
 
 // =============================================================================
+// AI CHAT ASSISTANT
+// =============================================================================
+function ChatAssistant() {
+  const [open,     setOpen]    = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input,    setInput]   = useState("");
+  const [loading,  setLoading] = useState(false);
+  const [error,    setError]   = useState(null);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, open]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput("");
+    setError(null);
+    setMessages(prev => [...prev, { role: "user", text }]);
+    setLoading(true);
+    try {
+      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text }) });
+      setMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
+    } catch (e) {
+      setError(e.message || "Something went wrong. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Floating trigger button */}
+      <button onClick={() => setOpen(o => !o)} style={{
+        position: "fixed", bottom: 88, right: 20, zIndex: 60,
+        width: 50, height: 50, borderRadius: "50%",
+        background: "var(--teal)", border: "none", cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 4px 20px rgba(0,109,119,0.45)",
+      }}>
+        <Icon n="nutrition" size={22} style={{ color: "white" }} />
+        <div style={{
+          position: "absolute", top: 0, right: 0,
+          width: 18, height: 18, borderRadius: "50%",
+          background: "var(--mint)", border: "2px solid white",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <Icon n="auto_awesome" size={10} style={{ color: "var(--teal-dk)" }} />
+        </div>
+      </button>
+
+      {/* Chat panel */}
+      {open && (
+        <div style={{
+          position: "fixed", bottom: 152, right: 20, zIndex: 60,
+          width: 328, height: 460,
+          background: "var(--surface)", borderRadius: 20,
+          border: "1px solid var(--border)",
+          boxShadow: "0 12px 48px rgba(0,0,0,0.18)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+        }}>
+          {/* Header */}
+          <div style={{ background: "var(--teal)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(174,246,199,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Icon n="nutrition" size={17} style={{ color: "var(--mint)" }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Nutrition Assistant</div>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.65)" }}>Knows your today's macros</div>
+            </div>
+            <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, borderRadius: 6, color: "rgba(255,255,255,0.75)" }}>
+              <Icon n="close" size={18} />
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* Session disclaimer — always visible */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: 10, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 20, padding: "3px 10px", letterSpacing: "0.2px" }}>
+                ✦ Fresh start every session — chats don't stick around
+              </span>
+            </div>
+            {messages.length === 0 && (
+              <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "center", lineHeight: 1.6, marginTop: 8 }}>
+                Ask me about your macros, food choices,<br />or how to hit your goals today.
+              </div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} style={{
+                alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                maxWidth: "86%",
+                background: m.role === "user" ? "var(--teal)" : "var(--bg)",
+                color: m.role === "user" ? "white" : "var(--text)",
+                borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                padding: "9px 13px",
+                fontSize: 13, lineHeight: 1.5,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.07)",
+              }}>
+                {m.text}
+              </div>
+            ))}
+            {loading && (
+              <div style={{ alignSelf: "flex-start", background: "var(--bg)", borderRadius: "16px 16px 16px 4px", padding: "10px 14px" }}>
+                <Spin size={14} />
+              </div>
+            )}
+            {error && (
+              <div style={{ fontSize: 11, color: "var(--danger)", textAlign: "center", padding: "4px 8px" }}>{error}</div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Input */}
+          <div style={{ padding: "10px 12px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, flexShrink: 0 }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+              placeholder="Ask about your nutrition…"
+              style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid var(--border)", fontSize: 13, background: "var(--surface)", color: "var(--text)", outline: "none" }}
+            />
+            <button onClick={send} disabled={!input.trim() || loading} style={{
+              width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+              background: input.trim() && !loading ? "var(--teal)" : "var(--border)",
+              border: "none", cursor: input.trim() && !loading ? "pointer" : "default",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "background 0.15s",
+            }}>
+              <Icon n="send" size={16} style={{ color: "white" }} />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// =============================================================================
 // LOGIN SCREEN
 // =============================================================================
 function LoginScreen() {
@@ -1611,6 +2090,7 @@ export default function App() {
     { id: "scan",    label: "Scan",    icon: "document_scanner" },
     { id: "library", label: "Library", icon: "folder"           },
     { id: "tracker", label: "Tracker", icon: "bar_chart"        },
+    { id: "trends",  label: "Trends",  icon: "show_chart"       },
   ];
 
   // Loading state
@@ -1670,9 +2150,9 @@ export default function App() {
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {avatarUrl
-              ? <img src={avatarUrl} alt="avatar" style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.5)" }} />
-              : <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(174,246,199,0.2)", border: "2px solid rgba(174,246,199,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "var(--mint)" }}>{userInitial}</div>
-            }
+              ? <img src={avatarUrl} alt="avatar" onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }} style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.5)" }} />
+              : null}
+            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(174,246,199,0.2)", border: "2px solid rgba(174,246,199,0.4)", display: avatarUrl ? "none" : "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "var(--mint)" }}>{userInitial}</div>
             <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 12, padding: "5px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer", fontWeight: 600 }}>
               Sign out
             </button>
@@ -1688,6 +2168,7 @@ export default function App() {
           <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
             <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
           </div>
+          {activeMainTab === "trends" && <TrendsTab />}
         </div>
 
         {/* Bottom Navigation — hidden on desktop via CSS */}
@@ -1706,6 +2187,8 @@ export default function App() {
           })}
         </div>
       </div>
+
+      <ChatAssistant />
     </>
   );
 }
