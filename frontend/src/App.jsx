@@ -804,8 +804,25 @@ function DatePicker({ value, onChange, maxDate }) {
 
   const handleToggle = () => {
     if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setDropPos({ top: r.bottom + 8, left: r.left });
+      const r        = btnRef.current.getBoundingClientRect();
+      const vw       = window.innerWidth;
+      const vh       = window.innerHeight;
+      const margin   = 8;
+      const calW     = Math.min(272, vw - margin * 2);
+      const calHEst  = 320;
+      const bottomNav = 72;
+
+      // Centre under the button, clamped to viewport
+      const idealLeft = r.left + r.width / 2 - calW / 2;
+      const left = Math.max(margin, Math.min(idealLeft, vw - calW - margin));
+
+      // Flip above if not enough space below (account for bottom nav bar)
+      const spaceBelow = vh - r.bottom - margin - bottomNav;
+      const top = spaceBelow >= calHEst
+        ? r.bottom + margin
+        : Math.max(margin, r.top - margin - calHEst);
+
+      setDropPos({ top, left, calW });
     }
     setOpen(o => !o);
   };
@@ -824,7 +841,11 @@ function DatePicker({ value, onChange, maxDate }) {
         setOpen(false);
     };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("touchstart", close, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
   }, [open]);
 
   const goPrev = () => {
@@ -859,12 +880,19 @@ function DatePicker({ value, onChange, maxDate }) {
       </button>
 
       {open && dropPos && (
-        <div ref={dropRef} style={{
-          position: "fixed", top: dropPos.top, left: dropPos.left, zIndex: 1000,
-          background: "var(--surface)", border: "1px solid var(--border)",
-          borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.14)",
-          padding: "14px 16px", width: 252,
-        }}>
+        <>
+          {/* Mobile backdrop — tap outside to close */}
+          <div onClick={() => setOpen(false)} style={{
+            position: "fixed", inset: 0, zIndex: 999,
+            background: "rgba(0,0,0,0.18)",
+            display: window.innerWidth < 600 ? "block" : "none",
+          }} />
+          <div ref={dropRef} className="calendar-drop" style={{
+            position: "fixed", top: dropPos.top, left: dropPos.left, zIndex: 1000,
+            background: "var(--surface)", border: "1px solid var(--border)",
+            borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.16)",
+            padding: "14px 16px", width: dropPos.calW,
+          }}>
           {/* Month nav */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <button onClick={goPrev}
@@ -900,7 +928,8 @@ function DatePicker({ value, onChange, maxDate }) {
                 <button key={iso} disabled={isFuture}
                   onClick={() => { onChange(iso); setOpen(false); }}
                   style={{
-                    width: "100%", border: "none", borderRadius: 8, padding: "4px 0",
+                    width: "100%", border: "none", borderRadius: 8,
+                    padding: "7px 0", minHeight: 36,
                     display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
                     fontSize: 12, fontWeight: isSelected || isToday ? 700 : 400,
                     cursor: isFuture ? "default" : "pointer",
@@ -929,6 +958,7 @@ function DatePicker({ value, onChange, maxDate }) {
             </button>
           )}
         </div>
+        </>
       )}
     </div>
   );
