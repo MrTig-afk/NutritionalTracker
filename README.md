@@ -6,6 +6,24 @@ A full-stack nutrition tracking web app that uses AI to extract macros from food
 
 ---
 
+## How to Use
+
+**1. Sign in** — use your email (magic link) or Google OAuth. No password needed.
+
+**2. Scan** — go to the Scan tab and upload a photo of any nutrition label. The AI extracts all macro data instantly. You can upload up to 10 images at once. Each account gets 10 free scans per day.
+
+**3. Log** — from scan results or your Library, tap Log to add a food to today's tracker. Choose how you want to log it — by serving, by weight, or enter values manually.
+
+**4. Track** — the Tracker tab shows today's macro totals (calories, protein, carbs, fat, fibre) vs your personal goals. Use the calendar to view any past day.
+
+**5. Library** — save scanned foods to named folders for quick re-logging without scanning again.
+
+**6. Trends** — view 7-day or 30-day macro charts to see patterns over time.
+
+**7. AI Assistant** — open the chat panel to ask nutrition questions. It knows your macros for today and answers in context.
+
+---
+
 ## Stack
 
 | Layer | Technology |
@@ -14,39 +32,10 @@ A full-stack nutrition tracking web app that uses AI to extract macros from food
 | UI | Material Symbols Outlined, Manrope, CSS custom properties |
 | Backend | FastAPI (Python), Uvicorn |
 | AI | Google Gemini 2.5 Flash (primary), Gemini 2.0 Flash (fallback) |
-| Database | Neon (PostgreSQL) |
-| Auth | Supabase Auth — OTP email + Google OAuth, JWT verified server-side (PyJWT RS256/HS256) |
 | Database | Neon (PostgreSQL), accessed via psycopg2 |
+| Auth | Supabase Auth — OTP email + Google OAuth, JWT verified server-side (PyJWT RS256/HS256) |
 | Storage | AWS S3 — raw + processed image versions |
 | Deploy | Vercel (frontend), Render (backend) |
-
----
-
-## Features
-
-**Scan**
-- Upload one or multiple nutrition label photos; AI extracts all macro data
-- Client-side crop, grayscale, and resize pipeline before upload
-- Batch mode — up to 10 images in a single API call
-- kJ → kcal auto-conversion; per-100g and per-serving data
-- Custom serving size calculator on results
-- 10 AI scans per user per day with a live usage counter
-
-**Library**
-- Save scanned items to named folders, persistent across sessions
-- Raw and processed images stored in S3
-
-**Tracker**
-- Log items from scan results or library with serving counts
-- Three logging modes: per serving, by weight (scales from per 100g), manual entry
-- Edit logged entries in place
-- Daily macro totals with progress bars vs personal goals
-- Goals: calories, protein, carbs, fat, fibre
-
-**Auth & Security**
-- Supabase magic link (OTP email) and Google OAuth sign-in
-- JWT verified server-side on every request; session expiry handled gracefully
-- Per-user rate limiting enforced at the API layer
 
 ---
 
@@ -80,15 +69,24 @@ User (browser / phone)
 
 ```
 NutritionDE/
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx       # entire UI — auth, scan, library, tracker
-│   │   ├── main.jsx
-│   │   └── index.css     # Tailwind v4 + design tokens
-│   └── index.html
 ├── backend/
 │   ├── main.py           # FastAPI app — all routes + business logic
 │   └── init_db.py
+├── frontend/
+│   └── src/
+│       ├── App.jsx              # Root: auth gate, tab shell, modal orchestration
+│       ├── styles.jsx           # CSS vars + shared style objects
+│       ├── lib/
+│       │   ├── api.js           # Supabase client, apiFetch, retry, runAnalysis
+│       │   └── nutrition.js     # Parse/normalize utils, date helpers, image pipeline
+│       ├── components/          # Shared UI (Icon, MacroBar, DatePicker, modals, etc.)
+│       └── tabs/
+│           ├── ScanTab.jsx
+│           ├── LibraryTab.jsx
+│           ├── TrackerTab.jsx
+│           └── TrendsTab.jsx
+├── docs/
+│   └── architecture.md   # Design decisions, state flow, route reference
 └── README.md
 ```
 
@@ -105,54 +103,15 @@ NutritionDE/
 | GET / POST | `/goals` | Get or set daily macro goals |
 | GET / POST | `/log` | Get daily log or add an entry |
 | PUT / DELETE | `/log/{id}` | Update or delete a log entry |
+| GET | `/log/calendar` | Dates with entries for a given month (calendar dots) |
+| GET | `/log/trends` | Aggregated weekly or monthly macro data |
+| POST | `/chat` | AI nutrition assistant (context-aware, uses today's log) |
 | GET / POST | `/folders` | List or create folders |
 | GET / DELETE | `/folders/{id}` | Get folder contents or delete folder |
 | POST | `/folders/{id}/items` | Add item to folder |
 | DELETE | `/folders/{id}/items/{item_id}` | Remove item from folder |
 
 All endpoints (except `/health`) require `Authorization: Bearer <supabase_jwt>`.
-
----
-
-## Local Development
-
-```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-# set: DATABASE_URL, GOOGLE_API_KEY, SUPABASE_URL, SUPABASE_JWT_SECRET
-uvicorn main:app --reload
-
-# Frontend
-cd frontend
-npm install
-# create .env with VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
-# set VITE_API_URL to point at production API to skip running backend locally
-npm run dev
-```
-
----
-
-## Environment Variables
-
-**Backend**
-```
-DATABASE_URL            Neon PostgreSQL connection string
-GOOGLE_API_KEY          Gemini API key
-SUPABASE_URL            Supabase project URL
-SUPABASE_JWT_SECRET     JWT secret (HS256 token verification)
-AWS_ACCESS_KEY_ID       S3 credentials (optional)
-AWS_SECRET_ACCESS_KEY
-S3_BUCKET_NAME
-AWS_REGION
-```
-
-**Frontend**
-```
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
-VITE_API_URL            Optional — override API base URL
-```
 
 ---
 
