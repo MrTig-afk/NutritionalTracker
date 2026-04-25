@@ -32,7 +32,7 @@ export default function App() {
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
   const [chatOpen, setChatOpen]           = useState(false);
-  const [updateReady, setUpdateReady]     = useState(false);
+  const [updateReady, setUpdateReady]     = useState(() => !!window.__swUpdateReady);
   const [showIOSBanner, setShowIOSBanner] = useState(
     () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
   );
@@ -113,7 +113,7 @@ export default function App() {
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(174,246,199,0.18)", border: "1.5px solid rgba(174,246,199,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
             </div>
-            <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan ✦</span>
             {updateReady && (
               <button onClick={() => window.location.reload()} style={{ background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: "0.2px" }}>
                 Update
