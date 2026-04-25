@@ -7,11 +7,13 @@ export default function ChatAssistant({ open, onOpenChange }) {
   const [input,    setInput]   = useState("");
   const [loading,  setLoading] = useState(false);
   const [error,    setError]   = useState(null);
-  const bottomRef = useRef(null);
+  const scrollRef = useRef(null);
 
   useEffect(() => {
-    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, open]);
+    if (open && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages.length, open]);
 
   const send = async () => {
     const text = input.trim();
@@ -54,7 +56,7 @@ export default function ChatAssistant({ open, onOpenChange }) {
         </button>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
           <span style={{ fontSize: 10, color: "var(--muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 20, padding: "3px 10px", letterSpacing: "0.2px" }}>
             ✦ Fresh start every session — chats don't stick around
@@ -87,7 +89,6 @@ export default function ChatAssistant({ open, onOpenChange }) {
         {error && (
           <div style={{ fontSize: 11, color: "var(--danger)", textAlign: "center", padding: "4px 8px" }}>{error}</div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       <div style={{ padding: "10px 12px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, flexShrink: 0 }}>
