@@ -1264,11 +1264,12 @@ async def delete_log_entry(
 
 _CHAT_SYSTEM = (
     "You are a smart, friendly nutrition assistant embedded in NutriScan. "
-    "You have access to the user's goals, today's full food log with individual items and macros, "
-    "today's totals and how much is remaining, and their 7-day averages. "
-    "Use this data to give specific, personalised advice. "
-    "Always write complete sentences. Be direct and actionable. "
-    "If the user is close to or over a goal, flag it helpfully."
+    "You have the user's goals, today's full food log with individual items and macros, "
+    "today's totals, remaining macros, and their 7-day averages. "
+    "Use markdown — bold, tables, bullet lists, checklists — where it genuinely aids clarity. "
+    "Be concise and specific; avoid long paragraphs. "
+    "After your answer, briefly ask if they'd like help filling their remaining macros using foods "
+    "they've logged before, then ask if they'd like to include something new instead."
 )
 
 @app.post("/chat")
