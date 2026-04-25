@@ -3,7 +3,9 @@ import { apiFetch } from "../lib/api";
 import { Icon, Spin } from "./Icon";
 
 export default function ChatAssistant({ open, onOpenChange }) {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState([
+    { role: "assistant", text: "Hey! What would you like to know about your nutrition today?", greeting: true }
+  ]);
   const [input,    setInput]   = useState("");
   const [loading,  setLoading] = useState(false);
   const [error,    setError]   = useState(null);
@@ -23,7 +25,7 @@ export default function ChatAssistant({ open, onOpenChange }) {
     setMessages(prev => [...prev, { role: "user", text }]);
     setLoading(true);
     try {
-      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages }) });
+      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages.filter(m => !m.greeting) }) });
       setMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
@@ -62,11 +64,7 @@ export default function ChatAssistant({ open, onOpenChange }) {
             ✦ Fresh start every session — chats don't stick around
           </span>
         </div>
-        {messages.length === 0 && (
-          <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "center", lineHeight: 1.6, marginTop: 8 }}>
-            Ask me about your macros, food choices,<br />or how to hit your goals today.
-          </div>
-        )}
+
         {messages.map((m, i) => (
           <div key={i} style={{
             alignSelf: m.role === "user" ? "flex-end" : "flex-start",
