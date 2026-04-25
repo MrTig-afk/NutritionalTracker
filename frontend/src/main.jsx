@@ -15,4 +15,12 @@ if ('serviceWorker' in navigator) {
       navigator.serviceWorker.ready.then(reg => reg.update()).catch(() => {});
     }
   });
+
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
+  });
 }

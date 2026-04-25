@@ -106,7 +106,7 @@ export default function App() {
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(174,246,199,0.18)", border: "1.5px solid rgba(174,246,199,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
             </div>
-            <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan v2</span>
+            <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan ✦</span>
           </div>
 
           <div className="ns-top-tabs" style={{ alignItems: "center", gap: 4 }}>
