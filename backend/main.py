@@ -366,10 +366,29 @@ def get_pool():
         logger.info("✅ Connection pool initialised (min=1, max=5)")
     return _pool
 
+def _reset_pool():
+    global _pool
+    if _pool:
+        try:
+            _pool.closeall()
+        except Exception:
+            pass
+    _pool = None
+    return get_pool()
+
 def get_db():
-    conn = get_pool().getconn()
-    conn.autocommit = False
-    return conn
+    global _pool
+    try:
+        conn = get_pool().getconn()
+        conn.cursor().execute("SELECT 1")
+        conn.autocommit = False
+        return conn
+    except Exception:
+        logger.warning("⚠️ Pool stale — resetting connection pool (Neon cold start?)")
+        _reset_pool()
+        conn = _pool.getconn()
+        conn.autocommit = False
+        return conn
 
 def release_db(conn):
     get_pool().putconn(conn)
