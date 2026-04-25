@@ -144,12 +144,12 @@ export default function App() {
         </div>
 
         {/* Bottom Navigation */}
-        <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", height: 72, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
           {TABS.map(tab => {
             const active = activeMainTab === tab.id;
             return (
               <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: "8px 0", color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: "12px 0", color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
                 <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
                   <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
                 </div>
