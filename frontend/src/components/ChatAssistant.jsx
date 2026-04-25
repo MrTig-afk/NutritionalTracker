@@ -34,7 +34,7 @@ export default function ChatAssistant() {
   return (
     <>
       <button onClick={() => setOpen(o => !o)} style={{
-        position: "fixed", bottom: 88, right: 20, zIndex: 60,
+        position: "fixed", bottom: "calc(90px + env(safe-area-inset-bottom, 0px))", right: 20, zIndex: 60,
         width: 50, height: 50, borderRadius: "50%",
         background: "var(--teal)", border: "none", cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -53,7 +53,7 @@ export default function ChatAssistant() {
 
       {open && (
         <div style={{
-          position: "fixed", bottom: 152, right: 20, zIndex: 60,
+          position: "fixed", bottom: "calc(154px + env(safe-area-inset-bottom, 0px))", right: 20, zIndex: 60,
           width: 328, height: 460,
           background: "var(--surface)", borderRadius: 20,
           border: "1px solid var(--border)",
