@@ -133,7 +133,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", paddingTop: 20, paddingLeft: 32, paddingRight: 32 }}>
+        <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", paddingTop: 20 }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
             <ScanTab onAddToLog={handleAddToLog} />
           </div>

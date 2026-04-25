@@ -49,11 +49,12 @@ export const PALETTE_CSS = `
 
   .ns-scan-grid    { grid-template-columns: 1fr; }
   .ns-tracker-grid { display: flex; flex-direction: column; gap: 16px; }
+  .ns-content      { padding-left: 20px; padding-right: 20px; }
 
   @media (min-width: 768px) {
     .ns-bottom-nav   { display: none; }
     .ns-top-tabs     { display: flex; }
-    .ns-content      { max-width: 100% !important; padding-bottom: 32px; }
+    .ns-content      { max-width: 100% !important; padding-bottom: 32px; padding-left: 32px; padding-right: 32px; }
     .ns-scan-grid    { grid-template-columns: 1fr 1fr !important; }
     .ns-tracker-grid { display: grid !important; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
   }
