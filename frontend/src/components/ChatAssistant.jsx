@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../lib/api";
 import { Icon, Spin } from "./Icon";
 
-export default function ChatAssistant() {
+export default function ChatAssistant({ hidden }) {
   const [open,     setOpen]    = useState(false);
   const [messages, setMessages] = useState([]);
   const [input,    setInput]   = useState("");
@@ -30,6 +30,8 @@ export default function ChatAssistant() {
       setLoading(false);
     }
   };
+
+  if (hidden) return null;
 
   return (
     <>

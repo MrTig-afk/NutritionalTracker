@@ -45,7 +45,7 @@ export const PALETTE_CSS = `
   /* Responsive nav */
   .ns-bottom-nav { display: flex; }
   .ns-top-tabs   { display: none; }
-  .ns-content    { padding-bottom: 96px; }
+  .ns-content    { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
 
   .ns-scan-grid    { grid-template-columns: 1fr; }
   .ns-tracker-grid { display: flex; flex-direction: column; gap: 16px; }

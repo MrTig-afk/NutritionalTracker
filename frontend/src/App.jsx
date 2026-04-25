@@ -31,6 +31,7 @@ export default function App() {
   const [logRefreshKey, setLogRefreshKey] = useState(0);
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
+  const [scanBusy, setScanBusy]           = useState(false);
   const [showIOSBanner, setShowIOSBanner] = useState(
     () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
   );
@@ -134,7 +135,7 @@ export default function App() {
         {/* Content */}
         <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", padding: "20px 32px" }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
-            <ScanTab onAddToLog={handleAddToLog} />
+            <ScanTab onAddToLog={handleAddToLog} onBusyChange={setScanBusy} />
           </div>
           {activeMainTab === "library" && <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} />}
           <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
@@ -160,7 +161,7 @@ export default function App() {
         </div>
       </div>
 
-      <ChatAssistant />
+      <ChatAssistant hidden={!!(addToLogItem || editLogItem || scanBusy)} />
     </>
   );
 }
