@@ -106,7 +106,11 @@ export default function ScanTab({ onAddToLog }) {
       {cropperFile && <ImageCropper file={cropperFile} onConfirm={handleCropConfirm} onCancel={handleCropCancel} />}
       {saveModal && <SaveToFolderModal result={saveModal.result} imageId={saveModal.imageId} onClose={() => setSaveModal(null)} onSaved={(name) => setLogName(name)} initialName={saveModal.name || ""} />}
 
-      <div style={{ display: "grid", gap: 16, ...(!results && { maxWidth: 560, margin: "0 auto", width: "100%" }) }} className={results ? "ns-scan-grid" : ""}>
+      <div style={
+        !images.length && !results
+          ? { display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "stretch", minHeight: "62vh", width: "100%", maxWidth: 560, margin: "0 auto", gap: 16 }
+          : { display: "grid", gap: 16, ...(!results && { maxWidth: 560, margin: "0 auto", width: "100%" }) }
+      } className={results ? "ns-scan-grid" : ""}>
         {/* Upload / preview panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {images.length === 0 ? (
