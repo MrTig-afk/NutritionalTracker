@@ -2,6 +2,19 @@ import React, { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../lib/api";
 import { Icon, Spin } from "./Icon";
 
+function renderMarkdown(text) {
+  return text.split("\n").map((line, li) => {
+    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**"))
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
+      if (part.startsWith("*") && part.endsWith("*"))
+        return <em key={i}>{part.slice(1, -1)}</em>;
+      return part;
+    });
+    return <span key={li}>{parts}{li < text.split("\n").length - 1 && <br />}</span>;
+  });
+}
+
 export default function ChatAssistant({ open, onOpenChange }) {
   const [messages, setMessages] = useState([
     { role: "assistant", text: "Hey! What would you like to know about your nutrition today?", greeting: true }
@@ -76,7 +89,7 @@ export default function ChatAssistant({ open, onOpenChange }) {
             fontSize: 13, lineHeight: 1.5,
             boxShadow: "0 1px 3px rgba(0,0,0,0.07)",
           }}>
-            {m.text}
+            {m.role === "assistant" ? renderMarkdown(m.text) : m.text}
           </div>
         ))}
         {loading && (

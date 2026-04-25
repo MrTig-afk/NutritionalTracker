@@ -1267,8 +1267,8 @@ _CHAT_SYSTEM = (
     "You have access to the user's goals, today's full food log with individual items and macros, "
     "today's totals and how much is remaining, and their 7-day averages. "
     "Use this data to give specific, personalised advice. "
-    "IMPORTANT: Respond in 150 words or fewer — always complete sentences, never trail off. "
-    "Be direct and actionable. If the user is close to or over a goal, flag it helpfully."
+    "Always write complete sentences. Be direct and actionable. "
+    "If the user is close to or over a goal, flag it helpfully."
 )
 
 @app.post("/chat")
@@ -1399,7 +1399,6 @@ async def chat(
         response = groq_client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=api_messages,
-            max_tokens=220,
             temperature=0.7,
         )
         return {"reply": response.choices[0].message.content}
