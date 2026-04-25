@@ -2,14 +2,14 @@ const MAX_IMAGE_PX = 1024;
 const JPEG_QUALITY = 0.85;
 
 export const NUTRIENT_META = {
-  calories:      { label: "Calories",       unit: "kcal", color: "var(--orange)"  },
-  fat:           { label: "Total Fat",       unit: "g",    color: "var(--brown)"   },
-  saturated_fat: { label: "Saturated Fat",   unit: "g",    color: "var(--text)"    },
-  carbohydrates: { label: "Carbohydrates",   unit: "g",    color: "var(--purple)"  },
-  sugars:        { label: "of which Sugars", unit: "g",    color: "var(--text)"    },
-  fibre:         { label: "Dietary Fibre",   unit: "g",    color: "var(--text)"    },
-  protein:       { label: "Protein",         unit: "g",    color: "var(--teal)"    },
-  sodium:        { label: "Sodium",          unit: "g",    color: "var(--text)"    },
+  calories:      { label: "Calories",       unit: "kcal", color: "var(--text)" },
+  fat:           { label: "Total Fat",       unit: "g",    color: "var(--text)" },
+  saturated_fat: { label: "Saturated Fat",   unit: "g",    color: "var(--text)" },
+  carbohydrates: { label: "Carbohydrates",   unit: "g",    color: "var(--text)" },
+  sugars:        { label: "of which Sugars", unit: "g",    color: "var(--text)" },
+  fibre:         { label: "Dietary Fibre",   unit: "g",    color: "var(--text)" },
+  protein:       { label: "Protein",         unit: "g",    color: "var(--text)" },
+  sodium:        { label: "Sodium",          unit: "g",    color: "var(--text)" },
 };
 
 export function getFallbackMeta(key) {
