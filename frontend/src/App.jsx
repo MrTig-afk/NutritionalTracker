@@ -99,7 +99,7 @@ export default function App() {
         )}
 
         {/* Top App Bar */}
-        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", paddingTop: "calc(12px + env(safe-area-inset-top, 0px))", paddingBottom: "12px", paddingLeft: "20px", paddingRight: "20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(174,246,199,0.18)", border: "1.5px solid rgba(174,246,199,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
