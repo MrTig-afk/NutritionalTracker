@@ -90,7 +90,7 @@ export default function App() {
           <div style={{ background: "#004E56", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, zIndex: 39 }}>
             <Icon n="ios_share" size={18} style={{ color: "var(--mint)", flexShrink: 0 }} />
             <span style={{ flex: 1, fontSize: 13, color: "var(--mint)", lineHeight: 1.4 }}>
-              To install NutriScan: open in <strong>Safari</strong> → tap Share → <strong>Add to Home Screen</strong>
+              Tap <strong>Share</strong> → <strong>Add to Home Screen</strong> to install NutriScan
             </span>
             <button onClick={dismissIOSBanner} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "rgba(174,246,199,0.6)", flexShrink: 0 }}>
               <Icon n="close" size={18} />
