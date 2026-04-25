@@ -7,7 +7,7 @@ import ImageCropper from "../components/ImageCropper";
 import SaveToFolderModal from "../components/SaveToFolderModal";
 import NutrientGrid from "../components/NutrientGrid";
 
-export default function ScanTab({ onAddToLog, onBusyChange }) {
+export default function ScanTab({ onAddToLog }) {
   const [images, setImages] = useState([]);
   const [optimizedFiles, setOptimizedFiles] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -32,7 +32,6 @@ export default function ScanTab({ onAddToLog, onBusyChange }) {
 
   useEffect(() => { fetchUsage(); }, [fetchUsage]);
   useEffect(() => { if (!loading && results) fetchUsage(); }, [loading, results, fetchUsage]);
-  useEffect(() => { onBusyChange?.(loading || !!saveModal || !!cropperFile); }, [loading, saveModal, cropperFile, onBusyChange]);
 
   const stateRef = useRef({ images, optimizedFiles, results, activeIndex, activeTab });
   useEffect(() => { stateRef.current = { images, optimizedFiles, results, activeIndex, activeTab }; }, [images, optimizedFiles, results, activeIndex, activeTab]);
