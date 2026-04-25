@@ -858,7 +858,7 @@ async def get_folder(
             {
                 "item_id":   row[0],
                 "name":      row[1],
-                "nutrition": row[2] if isinstance(row[2], dict) else json.loads(row[2]),
+                "nutrition": row[2] if isinstance(row[2], dict) else (json.loads(row[2]) if row[2] is not None else {}),
             }
             for row in items
         ],
@@ -1039,6 +1039,8 @@ async def get_daily_log(
 
     for row in rows:
         log_id, name, servings, nutrition_raw = row
+        if nutrition_raw is None:
+            continue
         nutrition = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
 
         if nutrition.get("per_serving") and len(nutrition["per_serving"]) > 0:
@@ -1145,6 +1147,8 @@ async def get_log_trends(
         row_date, servings, nutrition_raw = row
         date_key = row_date.isoformat() if hasattr(row_date, "isoformat") else str(row_date)
         if date_key not in daily:
+            continue
+        if nutrition_raw is None:
             continue
         nutrition = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
 
