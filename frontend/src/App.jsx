@@ -54,6 +54,7 @@ export default function App() {
 
   const handleTabChange = useCallback((tabId) => {
     setActiveMainTab(tabId);
+    setChatOpen(false);
     if (tabId === "library") setLibraryMountKey(k => k + 1);
   }, []);
 
