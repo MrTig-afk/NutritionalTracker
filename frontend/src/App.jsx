@@ -18,6 +18,12 @@ const TABS = [
   { id: "trends",  label: "Trends",  icon: "show_chart"       },
 ];
 
+const isIOSNotInstalled = () => {
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true;
+  return isIOS && !isStandalone;
+};
+
 export default function App() {
   const [session, setSession]             = useState(undefined);
   const [activeMainTab, setActiveMainTab] = useState("scan");
@@ -25,6 +31,9 @@ export default function App() {
   const [logRefreshKey, setLogRefreshKey] = useState(0);
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
+  const [showIOSBanner, setShowIOSBanner] = useState(
+    () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
+  );
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -36,6 +45,11 @@ export default function App() {
   const handleAddToLog  = useCallback((item) => { setAddToLogItem(item); }, []);
   const handleLogAdded  = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
   const handleEditEntry = useCallback((entry) => { setEditLogItem(entry); }, []);
+
+  const dismissIOSBanner = () => {
+    localStorage.setItem("ios-banner-dismissed", "1");
+    setShowIOSBanner(false);
+  };
 
   const handleTabChange = useCallback((tabId) => {
     setActiveMainTab(tabId);
@@ -71,6 +85,18 @@ export default function App() {
       <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex", flexDirection: "column" }}>
         {addToLogItem && <AddToLogModal item={addToLogItem} onClose={() => setAddToLogItem(null)} onAdded={handleLogAdded} />}
         {editLogItem  && <EditLogModal  entry={editLogItem}  onClose={() => setEditLogItem(null)}  onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
+
+        {showIOSBanner && (
+          <div style={{ background: "#004E56", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, zIndex: 39 }}>
+            <Icon n="ios_share" size={18} style={{ color: "var(--mint)", flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 13, color: "var(--mint)", lineHeight: 1.4 }}>
+              To install NutriScan: open in <strong>Safari</strong> → tap Share → <strong>Add to Home Screen</strong>
+            </span>
+            <button onClick={dismissIOSBanner} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "rgba(174,246,199,0.6)", flexShrink: 0 }}>
+              <Icon n="close" size={18} />
+            </button>
+          </div>
+        )}
 
         {/* Top App Bar */}
         <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
