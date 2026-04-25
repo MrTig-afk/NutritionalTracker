@@ -12,7 +12,7 @@ export default defineConfig({
         name: 'NutriScan',
         short_name: 'NutriScan',
         description: 'AI-powered nutrition label scanner and macro tracker',
-        theme_color: '#863bff',
+        theme_color: '#006D77',
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'portrait',
@@ -38,6 +38,7 @@ export default defineConfig({
       },
       workbox: {
         skipWaiting: true,
+        clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
