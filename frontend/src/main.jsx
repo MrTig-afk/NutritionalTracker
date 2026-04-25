@@ -21,6 +21,9 @@ if ('serviceWorker' in navigator) {
       if (document.visibilityState === 'visible') reg.update().catch(() => {});
     });
 
+    // Check for updates every 60 seconds while app is open
+    setInterval(() => reg.update().catch(() => {}), 60 * 1000);
+
     reg.addEventListener('updatefound', () => {
       const newSW = reg.installing;
       newSW.addEventListener('statechange', () => {
