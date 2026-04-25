@@ -225,8 +225,13 @@ class LogEntry(BaseModel):
     servings: float
     nutrition: dict
 
+class ChatHistoryItem(BaseModel):
+    role: str
+    text: str
+
 class ChatMessage(BaseModel):
     message: str
+    history: list[ChatHistoryItem] = []
 
 # ---------- PROMPTS ----------
 PROMPT_SINGLE = """Analyze this nutrition label image carefully.
@@ -1258,9 +1263,12 @@ async def delete_log_entry(
 # =============================================================================
 
 _CHAT_SYSTEM = (
-    "You are a concise nutrition assistant embedded in NutriScan. "
-    "Answer in 2-3 sentences maximum. Be specific and practical. "
-    "If the user's daily data is provided, use it to give personalised advice."
+    "You are a smart, friendly nutrition assistant embedded in NutriScan. "
+    "You have access to the user's goals, today's full food log with individual items and macros, "
+    "today's totals and how much is remaining, and their 7-day averages. "
+    "Use this data to give specific, personalised advice. Keep responses to 2-4 sentences — "
+    "concise and actionable. If the user is close to or over a goal, flag it helpfully. "
+    "If asked about specific foods, give realistic estimates."
 )
 
 @app.post("/chat")
@@ -1276,51 +1284,122 @@ async def chat(
     if not _allow_chat(user_id):
         raise HTTPException(status_code=429, detail={"error_type": "rate_limited", "message": "Too many messages — wait a moment and try again."})
 
-    # Fetch today's context (goals + log totals). Non-fatal if it fails.
+    # Fetch enriched context. Non-fatal if it fails.
     context = ""
     try:
+        today_str  = date.today().isoformat()
+        start_7    = (date.today() - timedelta(days=6)).isoformat()
         conn = get_db()
         cur  = conn.cursor()
+
         cur.execute("SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = %s", [user_id])
         goal_row = cur.fetchone()
+
         cur.execute(
-            "SELECT servings, nutrition FROM daily_log WHERE user_id = %s AND date = %s",
-            [user_id, date.today().isoformat()],
+            "SELECT name, servings, nutrition FROM daily_log WHERE user_id = %s AND date = %s ORDER BY created_at",
+            [user_id, today_str],
         )
         log_rows = cur.fetchall()
+
+        cur.execute(
+            "SELECT date, servings, nutrition FROM daily_log WHERE user_id = %s AND date >= %s AND date <= %s ORDER BY date",
+            [user_id, start_7, today_str],
+        )
+        trend_rows = cur.fetchall()
+
         cur.close()
         release_db(conn)
 
-        totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
-        for servings, nutrition_raw in log_rows:
-            nutrition   = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
-            per_serving = (nutrition.get("per_serving") or {}) if nutrition.get("per_serving") else \
-                          (nutrition.get("per_100g") or nutrition)
-            cal_val = _parse_num(per_serving.get("calories", 0))
-            if cal_val > KJ_HEURISTIC_THRESHOLD:
-                cal_val = round(cal_val / KJ_PER_KCAL, 1)
-            totals["calories"] += cal_val                                          * servings
-            totals["protein"]  += _parse_num(per_serving.get("protein",       0)) * servings
-            totals["carbs"]    += _parse_num(per_serving.get("carbohydrates", 0)) * servings
-            totals["fat"]      += _parse_num(per_serving.get("fat",           0)) * servings
+        def _per_serving(nutrition_raw):
+            n = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
+            if n.get("per_serving") and len(n["per_serving"]) > 0:
+                return n["per_serving"]
+            if n.get("per_100g") and len(n["per_100g"]) > 0:
+                return n["per_100g"]
+            return n
+
+        def _cal(ps, servings):
+            v = _parse_num(ps.get("calories", 0)) * servings
+            return round(v / KJ_PER_KCAL, 1) if v > KJ_HEURISTIC_THRESHOLD else round(v, 1)
 
         parts = []
+
         if goal_row:
-            parts.append(f"Goals: {round(goal_row[0])}kcal / {round(goal_row[1])}g protein / {round(goal_row[2])}g carbs / {round(goal_row[3])}g fat.")
-        parts.append(f"Today so far: {round(totals['calories'])}kcal / {round(totals['protein'])}g protein / {round(totals['carbs'])}g carbs / {round(totals['fat'])}g fat.")
+            parts.append(
+                f"Goals: {round(goal_row[0])}kcal / {round(goal_row[1])}g protein / "
+                f"{round(goal_row[2])}g carbs / {round(goal_row[3])}g fat."
+            )
+
+        totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
+        if log_rows:
+            entries = []
+            for name, servings, nutrition_raw in log_rows:
+                if nutrition_raw is None:
+                    continue
+                ps = _per_serving(nutrition_raw)
+                cal  = _cal(ps, servings)
+                prot = round(_parse_num(ps.get("protein",       0)) * servings, 1)
+                carb = round(_parse_num(ps.get("carbohydrates", 0)) * servings, 1)
+                fat_ = round(_parse_num(ps.get("fat",           0)) * servings, 1)
+                totals["calories"] += cal
+                totals["protein"]  += prot
+                totals["carbs"]    += carb
+                totals["fat"]      += fat_
+                entries.append(f"{name or 'Item'} (×{servings}s): {cal}kcal P{prot}g C{carb}g F{fat_}g")
+            parts.append(f"Today's log: {'; '.join(entries)}.")
+
+        parts.append(
+            f"Today totals: {round(totals['calories'])}kcal / {round(totals['protein'])}g P / "
+            f"{round(totals['carbs'])}g C / {round(totals['fat'])}g F."
+        )
+        if goal_row:
+            parts.append(
+                f"Remaining today: {round(goal_row[0] - totals['calories'])}kcal / "
+                f"{round(goal_row[1] - totals['protein'])}g P / "
+                f"{round(goal_row[2] - totals['carbs'])}g C / "
+                f"{round(goal_row[3] - totals['fat'])}g F."
+            )
+
+        if trend_rows:
+            daily_7: dict = {}
+            for row_date, servings, nutrition_raw in trend_rows:
+                dk = row_date.isoformat() if hasattr(row_date, "isoformat") else str(row_date)
+                if dk not in daily_7:
+                    daily_7[dk] = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
+                if nutrition_raw is None:
+                    continue
+                ps = _per_serving(nutrition_raw)
+                daily_7[dk]["calories"] += _cal(ps, servings)
+                daily_7[dk]["protein"]  += _parse_num(ps.get("protein",       0)) * servings
+                daily_7[dk]["carbs"]    += _parse_num(ps.get("carbohydrates", 0)) * servings
+                daily_7[dk]["fat"]      += _parse_num(ps.get("fat",           0)) * servings
+            days_with_data = [v for v in daily_7.values() if v["calories"] > 0]
+            if days_with_data:
+                n = len(days_with_data)
+                parts.append(
+                    f"7-day avg ({n} days logged): "
+                    f"{round(sum(d['calories'] for d in days_with_data)/n)}kcal / "
+                    f"{round(sum(d['protein']  for d in days_with_data)/n)}g P / "
+                    f"{round(sum(d['carbs']    for d in days_with_data)/n)}g C / "
+                    f"{round(sum(d['fat']      for d in days_with_data)/n)}g F."
+                )
+
         context = " ".join(parts)
     except Exception:
         pass
 
     system = _CHAT_SYSTEM + (f"\n\nUser data: {context}" if context else "")
+
+    api_messages = [{"role": "system", "content": system}]
+    for h in body.history[-12:]:
+        api_messages.append({"role": h.role, "content": h.text})
+    api_messages.append({"role": "user", "content": body.message})
+
     try:
         response = groq_client.chat.completions.create(
             model="openai/gpt-oss-120b",
-            messages=[
-                {"role": "system",  "content": system},
-                {"role": "user",    "content": body.message},
-            ],
-            max_tokens=220,
+            messages=api_messages,
+            max_tokens=400,
             temperature=0.7,
         )
         return {"reply": response.choices[0].message.content}

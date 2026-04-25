@@ -21,7 +21,7 @@ export default function ChatAssistant({ open, onOpenChange }) {
     setMessages(prev => [...prev, { role: "user", text }]);
     setLoading(true);
     try {
-      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text }) });
+      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages }) });
       setMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
@@ -47,7 +47,7 @@ export default function ChatAssistant({ open, onOpenChange }) {
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Nutrition Assistant</div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.65)" }}>Knows your today's macros</div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.65)" }}>Knows your log, goals & 7-day trends</div>
         </div>
         <button onClick={() => onOpenChange(false)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, borderRadius: 6, color: "rgba(255,255,255,0.75)" }}>
           <Icon n="close" size={18} />
