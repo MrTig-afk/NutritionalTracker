@@ -1,6 +1,6 @@
 # NutriScan
 
-A full-stack nutrition tracking web app that uses AI to extract macros from food label photos. Point your camera at any nutrition label — NutriScan parses it, lets you log it, and tracks your daily intake.
+A full-stack nutrition tracking PWA that uses AI to extract macros from food label photos. Point your camera at any nutrition label — NutriScan parses it, lets you log it, and tracks your daily intake. Installable on iOS and Android, works offline after first load.
 
 **Live:** [nutritional-tracker-delta.vercel.app](https://nutritional-tracker-delta.vercel.app)
 
@@ -18,9 +18,11 @@ A full-stack nutrition tracking web app that uses AI to extract macros from food
 
 **5. Library** — save scanned foods to named folders for quick re-logging without scanning again.
 
-**6. Trends** — view 7-day or 30-day macro charts to see patterns over time.
+**6. Trends** — view a daily breakdown table of the last 7 days with per-macro columns and average summary cards.
 
-**7. AI Assistant** — open the chat panel to ask nutrition questions. It knows your macros for today and answers in context.
+**7. AI Assistant** — open the chat panel to ask nutrition questions. It knows your today's full food log, remaining macros, and 7-day averages — multi-turn conversation, context-aware answers.
+
+**8. Install as PWA** — on iOS: Share → Add to Home Screen. On Android: browser install prompt. Auto-updates silently and shows an "Update" pill when a new version is ready.
 
 ---
 
@@ -28,10 +30,12 @@ A full-stack nutrition tracking web app that uses AI to extract macros from food
 
 | Layer | Tech | Notes |
 |---|---|---|
-| Frontend | ![React](https://img.shields.io/badge/React_18-20232A?style=flat&logo=react&logoColor=61DAFB) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v4-06B6D4?style=flat&logo=tailwindcss&logoColor=white) | React 18, Vite, Tailwind CSS v4 |
-| UI | ![Material Symbols](https://img.shields.io/badge/Material_Symbols-4285F4?style=flat&logo=google&logoColor=white) ![CSS](https://img.shields.io/badge/CSS3-1572B6?style=flat&logo=css3&logoColor=white) | Material Symbols Outlined, Manrope, CSS custom properties |
+| Frontend | ![React](https://img.shields.io/badge/React_19-20232A?style=flat&logo=react&logoColor=61DAFB) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white) | React 19, Vite, CSS custom properties |
+| PWA | ![PWA](https://img.shields.io/badge/PWA-5A0FC8?style=flat&logo=pwa&logoColor=white) | vite-plugin-pwa, Workbox, service worker auto-update |
+| UI | ![Material Symbols](https://img.shields.io/badge/Material_Symbols-4285F4?style=flat&logo=google&logoColor=white) | Material Symbols Outlined, Manrope font |
 | Backend | ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white) ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) | FastAPI (Python), Uvicorn |
-| AI | ![Gemini](https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white) | Gemini 2.5 Flash (primary), 2.0 Flash (fallback) |
+| AI — Vision | ![Gemini](https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white) | Gemini 2.5 Flash (primary), 2.0 Flash (fallback) |
+| AI — Chat | ![Groq](https://img.shields.io/badge/Groq-F55036?style=flat&logo=groq&logoColor=white) | Groq (openai/gpt-oss-120b), multi-turn, context-aware |
 | Database | ![Neon](https://img.shields.io/badge/Neon_PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white) | Neon (PostgreSQL), psycopg2 |
 | Auth | ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat&logo=supabase&logoColor=white) | OTP email + Google OAuth, JWT verified server-side (PyJWT RS256/HS256) |
 | Storage | ![AWS S3](https://img.shields.io/badge/AWS_S3-FF9900?style=flat&logo=amazons3&logoColor=white) | Raw + processed image versions |
@@ -55,6 +59,7 @@ User (browser / phone)
    ├── optimize image (Pillow)
    ├── upload raw + processed to S3
    ├── call Gemini API → parse JSON
+   ├── call Groq API → chat with log context
    └── persist record to Neon
         │
         ▼
@@ -79,7 +84,7 @@ NutritionDE/
 │       ├── lib/
 │       │   ├── api.js           # Supabase client, apiFetch, retry, runAnalysis
 │       │   └── nutrition.js     # Parse/normalize utils, date helpers, image pipeline
-│       ├── components/          # Shared UI (Icon, MacroBar, DatePicker, modals, etc.)
+│       ├── components/          # Shared UI (Icon, MacroBar, DatePicker, modals, chat, etc.)
 │       └── tabs/
 │           ├── ScanTab.jsx
 │           ├── LibraryTab.jsx
@@ -104,8 +109,8 @@ NutritionDE/
 | GET / POST | `/log` | Get daily log or add an entry |
 | PUT / DELETE | `/log/{id}` | Update or delete a log entry |
 | GET | `/log/calendar` | Dates with entries for a given month (calendar dots) |
-| GET | `/log/trends` | Aggregated weekly or monthly macro data |
-| POST | `/chat` | AI nutrition assistant (context-aware, uses today's log) |
+| GET | `/log/trends` | Aggregated daily macro data for trends view |
+| POST | `/chat` | AI nutrition assistant (multi-turn, knows full log + 7-day trends) |
 | GET / POST | `/folders` | List or create folders |
 | GET / DELETE | `/folders/{id}` | Get folder contents or delete folder |
 | POST | `/folders/{id}/items` | Add item to folder |
