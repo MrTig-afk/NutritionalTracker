@@ -10,13 +10,22 @@ createRoot(document.getElementById('root')).render(
 )
 
 if ('serviceWorker' in navigator) {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      navigator.serviceWorker.ready.then(reg => reg.update()).catch(() => {});
-    }
-  });
-
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
+  const notifyUpdate = () => {
+    window.__swUpdateReady = true;
     window.dispatchEvent(new CustomEvent('sw-update-ready'));
-  });
+  };
+
+  navigator.serviceWorker.ready.then(reg => {
+    // Check for update whenever app becomes visible
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+
+    reg.addEventListener('updatefound', () => {
+      const newSW = reg.installing;
+      newSW.addEventListener('statechange', () => {
+        if (newSW.state === 'activated') notifyUpdate();
+      });
+    });
+  }).catch(() => {});
 }
