@@ -2,17 +2,105 @@ import React, { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../lib/api";
 import { Icon, Spin } from "./Icon";
 
+function renderInline(text, key) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g);
+  return (
+    <span key={key}>
+      {parts.map((p, i) => {
+        if (p.startsWith("**") && p.endsWith("**")) return <strong key={i}>{p.slice(2, -2)}</strong>;
+        if (p.startsWith("*")  && p.endsWith("*"))  return <em key={i}>{p.slice(1, -1)}</em>;
+        if (p.startsWith("`")  && p.endsWith("`"))
+          return <code key={i} style={{ background: "var(--off2)", borderRadius: 4, padding: "1px 5px", fontSize: "0.85em", fontFamily: "monospace" }}>{p.slice(1, -1)}</code>;
+        return p;
+      })}
+    </span>
+  );
+}
+
 function renderMarkdown(text) {
-  return text.split("\n").map((line, li) => {
-    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, i) => {
-      if (part.startsWith("**") && part.endsWith("**"))
-        return <strong key={i}>{part.slice(2, -2)}</strong>;
-      if (part.startsWith("*") && part.endsWith("*"))
-        return <em key={i}>{part.slice(1, -1)}</em>;
-      return part;
-    });
-    return <span key={li}>{parts}{li < text.split("\n").length - 1 && <br />}</span>;
-  });
+  const lines = text.split("\n");
+  const out = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim() === "") { i++; continue; }
+
+    // Heading
+    if (line.startsWith("### ")) { out.push(<div key={i} style={{ fontSize: 13, fontWeight: 800, margin: "6px 0 2px" }}>{renderInline(line.slice(4))}</div>); i++; continue; }
+    if (line.startsWith("## "))  { out.push(<div key={i} style={{ fontSize: 14, fontWeight: 800, margin: "6px 0 2px" }}>{renderInline(line.slice(3))}</div>); i++; continue; }
+    if (line.startsWith("# "))   { out.push(<div key={i} style={{ fontSize: 15, fontWeight: 800, margin: "6px 0 2px" }}>{renderInline(line.slice(2))}</div>); i++; continue; }
+
+    // Table
+    if (line.startsWith("|")) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) { tableLines.push(lines[i]); i++; }
+      const rows = tableLines.filter(l => !/^\|[-:\s|]+\|$/.test(l.trim()));
+      out.push(
+        <div key={i} style={{ overflowX: "auto", margin: "6px 0" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>
+            <tbody>
+              {rows.map((row, ri) => {
+                const cells = row.split("|").slice(1, -1).map(c => c.trim());
+                return (
+                  <tr key={ri}>
+                    {cells.map((cell, ci) =>
+                      ri === 0
+                        ? <th key={ci} style={{ border: "1px solid var(--border)", padding: "4px 8px", background: "var(--off)", fontWeight: 700, textAlign: "left" }}>{renderInline(cell)}</th>
+                        : <td key={ci} style={{ border: "1px solid var(--border)", padding: "4px 8px" }}>{renderInline(cell)}</td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // Bullet / checklist
+    if (/^[-*] /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[-*] /.test(lines[i])) {
+        const raw = lines[i].replace(/^[-*] /, "");
+        const checked   = raw.startsWith("[x] ") || raw.startsWith("[X] ");
+        const hasBox    = checked || raw.startsWith("[ ] ");
+        items.push({ text: raw.replace(/^\[[ xX]\] /, ""), checked, hasBox });
+        i++;
+      }
+      out.push(
+        <ul key={i} style={{ margin: "4px 0", paddingLeft: hasBox => hasBox ? 0 : 16 }}>
+          {items.map((item, ii) => (
+            <li key={ii} style={{ listStyle: item.hasBox ? "none" : "disc", marginBottom: 3, display: "flex", alignItems: "flex-start", gap: 6 }}>
+              {item.hasBox && <span style={{ flexShrink: 0 }}>{item.checked ? "✅" : "☐"}</span>}
+              {renderInline(item.text)}
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    // Numbered list
+    if (/^\d+\. /.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+\. /.test(lines[i])) { items.push(lines[i].replace(/^\d+\. /, "")); i++; }
+      out.push(
+        <ol key={i} style={{ margin: "4px 0", paddingLeft: 18 }}>
+          {items.map((item, ii) => <li key={ii} style={{ marginBottom: 3 }}>{renderInline(item)}</li>)}
+        </ol>
+      );
+      continue;
+    }
+
+    // Paragraph
+    out.push(<p key={i} style={{ margin: "3px 0", lineHeight: 1.5 }}>{renderInline(line)}</p>);
+    i++;
+  }
+
+  return out;
 }
 
 export default function ChatAssistant({ open, onOpenChange }) {
