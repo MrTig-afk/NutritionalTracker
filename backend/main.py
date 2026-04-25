@@ -632,9 +632,18 @@ def parse_gemini_json(raw_text: str):
 @app.api_route("/", methods=["GET", "HEAD"])
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
+    db_ok = False
+    try:
+        conn = get_db()
+        conn.cursor().execute("SELECT 1")
+        release_db(conn)
+        db_ok = True
+    except Exception:
+        pass
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
+        "db": "ok" if db_ok else "unavailable",
         "s3_configured": s3_client is not None,
         "gemini_configured": gemini_client is not None,
         "version": "3.2",
