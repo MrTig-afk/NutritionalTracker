@@ -4,12 +4,12 @@ const JPEG_QUALITY = 0.85;
 export const NUTRIENT_META = {
   calories:      { label: "Calories",       unit: "kcal", color: "var(--orange)"  },
   fat:           { label: "Total Fat",       unit: "g",    color: "var(--brown)"   },
-  saturated_fat: { label: "Saturated Fat",   unit: "g",    color: "var(--danger)"  },
+  saturated_fat: { label: "Saturated Fat",   unit: "g",    color: "var(--text)"    },
   carbohydrates: { label: "Carbohydrates",   unit: "g",    color: "var(--purple)"  },
-  sugars:        { label: "of which Sugars", unit: "g",    color: "var(--purple)"  },
-  fibre:         { label: "Dietary Fibre",   unit: "g",    color: "var(--mint-dk)" },
+  sugars:        { label: "of which Sugars", unit: "g",    color: "var(--text)"    },
+  fibre:         { label: "Dietary Fibre",   unit: "g",    color: "var(--text)"    },
   protein:       { label: "Protein",         unit: "g",    color: "var(--teal)"    },
-  sodium:        { label: "Sodium",          unit: "g",    color: "var(--muted)"   },
+  sodium:        { label: "Sodium",          unit: "g",    color: "var(--text)"    },
 };
 
 export function getFallbackMeta(key) {
