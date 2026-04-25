@@ -26,16 +26,16 @@ A full-stack nutrition tracking web app that uses AI to extract macros from food
 
 ## Stack
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, Vite, Tailwind CSS v4 |
-| UI | Material Symbols Outlined, Manrope, CSS custom properties |
-| Backend | FastAPI (Python), Uvicorn |
-| AI | Google Gemini 2.5 Flash (primary), Gemini 2.0 Flash (fallback) |
-| Database | Neon (PostgreSQL), accessed via psycopg2 |
-| Auth | Supabase Auth — OTP email + Google OAuth, JWT verified server-side (PyJWT RS256/HS256) |
-| Storage | AWS S3 — raw + processed image versions |
-| Deploy | Vercel (frontend), Render (backend) |
+| Layer | Tech | Notes |
+|---|---|---|
+| Frontend | ![React](https://img.shields.io/badge/React_18-20232A?style=flat&logo=react&logoColor=61DAFB) ![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white) ![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v4-06B6D4?style=flat&logo=tailwindcss&logoColor=white) | React 18, Vite, Tailwind CSS v4 |
+| UI | ![Material Symbols](https://img.shields.io/badge/Material_Symbols-4285F4?style=flat&logo=google&logoColor=white) ![CSS](https://img.shields.io/badge/CSS3-1572B6?style=flat&logo=css3&logoColor=white) | Material Symbols Outlined, Manrope, CSS custom properties |
+| Backend | ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=fastapi&logoColor=white) ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) | FastAPI (Python), Uvicorn |
+| AI | ![Gemini](https://img.shields.io/badge/Google_Gemini-4285F4?style=flat&logo=google&logoColor=white) | Gemini 2.5 Flash (primary), 2.0 Flash (fallback) |
+| Database | ![Neon](https://img.shields.io/badge/Neon_PostgreSQL-4169E1?style=flat&logo=postgresql&logoColor=white) | Neon (PostgreSQL), psycopg2 |
+| Auth | ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?style=flat&logo=supabase&logoColor=white) | OTP email + Google OAuth, JWT verified server-side (PyJWT RS256/HS256) |
+| Storage | ![AWS S3](https://img.shields.io/badge/AWS_S3-FF9900?style=flat&logo=amazons3&logoColor=white) | Raw + processed image versions |
+| Deploy | ![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat&logo=vercel&logoColor=white) ![Render](https://img.shields.io/badge/Render-46E3B7?style=flat&logo=render&logoColor=white) | Vercel (frontend), Render (backend) |
 
 ---
 
