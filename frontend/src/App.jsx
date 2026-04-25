@@ -149,7 +149,7 @@ export default function App() {
             const active = activeMainTab === tab.id;
             return (
               <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: "12px 0", color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                style={{ flex: 1, height: 60, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
                 <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
                   <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
                 </div>
