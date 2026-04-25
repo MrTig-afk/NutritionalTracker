@@ -31,7 +31,7 @@ export default function App() {
   const [logRefreshKey, setLogRefreshKey] = useState(0);
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
-  const [scanBusy, setScanBusy]           = useState(false);
+  const [chatOpen, setChatOpen]           = useState(false);
   const [showIOSBanner, setShowIOSBanner] = useState(
     () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
   );
@@ -133,9 +133,9 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", padding: "20px 32px" }}>
+        <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", paddingTop: 20, paddingLeft: 32, paddingRight: 32 }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
-            <ScanTab onAddToLog={handleAddToLog} onBusyChange={setScanBusy} />
+            <ScanTab onAddToLog={handleAddToLog} />
           </div>
           {activeMainTab === "library" && <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} />}
           <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
@@ -158,10 +158,17 @@ export default function App() {
               </button>
             );
           })}
+          <button onClick={() => setChatOpen(o => !o)}
+            style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: chatOpen ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+            <div style={{ width: 56, height: 28, borderRadius: 14, background: chatOpen ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
+              <Icon n="nutrition" size={22} style={{ color: chatOpen ? "var(--teal)" : "var(--muted)", fontVariationSettings: chatOpen ? "'FILL' 1" : "'FILL' 0" }} />
+            </div>
+            <span style={{ fontSize: 11, fontWeight: chatOpen ? 700 : 500, letterSpacing: "0.2px" }}>AI</span>
+          </button>
         </div>
       </div>
 
-      <ChatAssistant hidden={!!(addToLogItem || editLogItem || scanBusy)} />
+      <ChatAssistant open={chatOpen} onOpenChange={setChatOpen} />
     </>
   );
 }
