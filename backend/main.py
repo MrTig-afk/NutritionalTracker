@@ -1399,7 +1399,7 @@ async def chat(
         response = groq_client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=api_messages,
-            max_tokens=400,
+            max_tokens=220,
             temperature=0.7,
         )
         return {"reply": response.choices[0].message.content}
