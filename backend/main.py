@@ -1267,8 +1267,7 @@ _CHAT_SYSTEM = (
     "You have access to the user's goals, today's full food log with individual items and macros, "
     "today's totals and how much is remaining, and their 7-day averages. "
     "Use this data to give specific, personalised advice. "
-    "IMPORTANT: You have a strict token limit — always write complete sentences and finish your thought "
-    "before the limit hits. Keep responses to 2 short sentences maximum. Never trail off mid-sentence. "
+    "IMPORTANT: Respond in 50 words or fewer — always complete sentences, never trail off. "
     "Be direct and actionable. If the user is close to or over a goal, flag it helpfully."
 )
 
