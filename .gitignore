@@ -8,6 +8,7 @@ __pycache__/
 CLAUDE.md
 GEMINI.md
 RESUME.txt
+db_schema_explained.txt
 .project_initialized
 .cursor/
 .mcp.json
