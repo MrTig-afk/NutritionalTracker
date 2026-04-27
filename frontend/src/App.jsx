@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import { supabase } from "./lib/api";
 import { PALETTE_CSS } from "./styles";
 import { Icon, Spin } from "./components/Icon";
@@ -257,6 +258,7 @@ export default function App() {
       )}
 
       <ChatAssistant open={chatOpen} onOpenChange={setChatOpen} />
+      <Analytics />
     </>
   );
 }
