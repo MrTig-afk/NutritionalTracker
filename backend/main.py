@@ -316,6 +316,7 @@ class LogEntry(BaseModel):
     name: str
     servings: float
     nutrition: dict
+    log_date: Optional[str] = None
 
 class ChatHistoryItem(BaseModel):
     role: str
@@ -1172,7 +1173,7 @@ async def add_log_entry(
 ):
     user_id = get_user_id(authorization)
     log_id  = str(uuid.uuid4())
-    today   = date.today().isoformat()
+    today   = body.log_date or date.today().isoformat()
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -1519,9 +1520,9 @@ async def delete_meal_template_item(template_id: str, item_id: str, authorizatio
 
 
 @app.post("/meal-templates/{template_id}/log")
-async def log_meal_template(template_id: str, authorization: Optional[str] = Header(default=None)):
+async def log_meal_template(template_id: str, log_date: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
-    today   = date.today().isoformat()
+    today   = log_date or date.today().isoformat()
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("SELECT template_id FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
