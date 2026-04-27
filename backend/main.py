@@ -109,7 +109,7 @@ app = FastAPI(title="NutriScan API", version="4.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://nutritionaltracker.onrender.com",
+        "https://nutritional-tracker-delta.vercel.app",
         "http://localhost:5173",
         "http://localhost:4173",
     ],
