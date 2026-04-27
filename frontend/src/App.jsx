@@ -14,9 +14,11 @@ import TrendsTab from "./tabs/TrendsTab";
 const CHANGELOG = [
   "Meal Templates — save a set of foods and log them in one tap (Library tab)",
   "Push Notifications — get notified when you hit your daily calorie goal",
-  "Scan & chat rate-limit alerts sent to developer via ntfy.sh",
-  "Security: CORS locked to production domain, chat message size capped",
-  "PWA update flow: you now control when updates apply",
+  "PWA update flow: you now control when updates apply, with this changelog",
+  "Fix: nutrition values no longer show doubled units (e.g. 12.5gg → 12.5g)",
+  "Fix: food logged after midnight now goes to the correct local date",
+  "Fix: scan counter resets at your local midnight, not UTC",
+  "Upload from Photos or Files — not just camera",
 ];
 
 const TABS = [
