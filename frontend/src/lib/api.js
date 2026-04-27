@@ -78,11 +78,14 @@ export async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, s
   try {
     const { data: { session } } = await supabase.auth.getSession();
     const authHeader = session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {};
+    const d = new Date();
+    const clientDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const dateHeader = { "X-Client-Date": clientDate };
     const formData = new FormData();
     if (optimizedFiles.length === 1) {
       formData.append("file", optimizedFiles[0]);
       setLoadingMsg("Analyzing label...");
-      const response = await fetchWithRetry(`${API_URL}/analyze-label`, { method: "POST", body: formData, headers: authHeader });
+      const response = await fetchWithRetry(`${API_URL}/analyze-label`, { method: "POST", body: formData, headers: { ...authHeader, ...dateHeader } });
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
@@ -91,7 +94,7 @@ export async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, s
     } else {
       optimizedFiles.forEach(f => formData.append("files", f));
       setLoadingMsg(`Analyzing ${optimizedFiles.length} labels...`);
-      const response = await fetchWithRetry(`${API_URL}/analyze-labels`, { method: "POST", body: formData, headers: authHeader });
+      const response = await fetchWithRetry(`${API_URL}/analyze-labels`, { method: "POST", body: formData, headers: { ...authHeader, ...dateHeader } });
       const data = await response.json();
       const arr = (Array.isArray(data) ? data : [data]).map(normalizeResult);
       setResults(arr);
