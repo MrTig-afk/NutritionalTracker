@@ -82,6 +82,24 @@ if os.getenv("GROQ_API_KEY"):
 else:
     logger.warning("⚠️ Groq API key missing — AI assistant disabled")
 
+# ---------- SCAN DEDUP CACHE ----------
+# Prevents frontend retries from incrementing the scan counter multiple times.
+_scan_id_cache: dict = {}  # "{user_id}:{scan_id}" -> timestamp
+_SCAN_ID_TTL = 300  # 5 minutes
+
+def _is_duplicate_scan(user_id: str, scan_id: str) -> bool:
+    if not scan_id:
+        return False
+    now = time.time()
+    key = f"{user_id}:{scan_id}"
+    expired = [k for k, t in list(_scan_id_cache.items()) if now - t > _SCAN_ID_TTL]
+    for k in expired:
+        _scan_id_cache.pop(k, None)
+    if key in _scan_id_cache:
+        return True
+    _scan_id_cache[key] = now
+    return False
+
 # ---------- CHAT RATE LIMITER ----------
 # Sliding-window in-memory counters. Fine for single-process deployments.
 _user_chat_log: dict  = defaultdict(list)  # user_id -> [timestamps]
@@ -179,9 +197,10 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
 
 
-def check_and_track(user_id: str, email: str, client_date: str = None):
+def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: str = None):
     """Upsert user email and enforce daily rate limit."""
     today = client_date or date.today().isoformat()
+    duplicate = _is_duplicate_scan(user_id, scan_id)
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -205,15 +224,17 @@ def check_and_track(user_id: str, email: str, client_date: str = None):
                     "retryable": False,
                     "message": f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!",
                 })
-            cur.execute(
-                "UPDATE api_usage SET count = count + 1 WHERE user_id = %s AND date = %s",
-                [user_id, today]
-            )
+            if not duplicate:
+                cur.execute(
+                    "UPDATE api_usage SET count = count + 1 WHERE user_id = %s AND date = %s",
+                    [user_id, today]
+                )
         else:
-            cur.execute(
-                "INSERT INTO api_usage (user_id, date, count) VALUES (%s, %s, 1)",
-                [user_id, today]
-            )
+            if not duplicate:
+                cur.execute(
+                    "INSERT INTO api_usage (user_id, date, count) VALUES (%s, %s, 1)",
+                    [user_id, today]
+                )
         conn.commit()
         cur.close()
         release_db(conn)
@@ -738,6 +759,7 @@ async def call_gemini_with_retry(contents: list, label: str = "") -> str:
             await asyncio.sleep(delays[attempt])
 
     logger.warning(f"   🔄 [{label}] Falling back to {FALLBACK_MODEL}")
+    send_ntfy_alert("🔄 Gemini Fallback", f"Primary model failed for {label}, using {FALLBACK_MODEL}")
     try:
         loop = asyncio.get_event_loop()
         response = await asyncio.wait_for(
@@ -829,6 +851,7 @@ async def analyze_label(
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(default=None),
     x_client_date: Optional[str] = Header(default=None),
+    x_scan_id: Optional[str] = Header(default=None),
 ):
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
@@ -837,7 +860,7 @@ async def analyze_label(
         })
 
     user_id, email = get_user_info(authorization)
-    check_and_track(user_id, email, client_date=x_client_date)
+    check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
 
@@ -885,6 +908,7 @@ async def analyze_labels(
     files: List[UploadFile] = File(...),
     authorization: Optional[str] = Header(default=None),
     x_client_date: Optional[str] = Header(default=None),
+    x_scan_id: Optional[str] = Header(default=None),
 ):
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
@@ -898,7 +922,7 @@ async def analyze_labels(
         })
 
     user_id, email = get_user_info(authorization)
-    check_and_track(user_id, email, client_date=x_client_date)
+    check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)
 
     processed_images = []
     image_ids        = []

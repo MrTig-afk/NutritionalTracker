@@ -12,11 +12,8 @@ import TrackerTab from "./tabs/TrackerTab";
 import TrendsTab from "./tabs/TrendsTab";
 
 const CHANGELOG = [
-  "Fix: nutrition values no longer show doubled units (e.g. 12.5gg → 12.5g)",
-  "Fix: food logged after midnight now saves to your local date, not server UTC",
-  "Fix: scan counter resets at your local midnight, not UTC",
-  "Upload from Photos or Files app — not just camera",
-  "What's New modal now shows after update, so you see the actual new changes",
+  "Fix: retrying a scan no longer counts as multiple scans against your daily limit",
+  "What's New now shows after the update applies, so you see the correct changes",
 ];
 
 const TABS = [
