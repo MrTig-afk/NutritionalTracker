@@ -1,0 +1,4 @@
+[
+  "Fix: retrying a scan no longer counts as multiple scans against your daily limit",
+  "Vercel Analytics added — visitor and usage tracking"
+]
