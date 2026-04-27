@@ -16,20 +16,18 @@ if ('serviceWorker' in navigator) {
   };
 
   navigator.serviceWorker.ready.then(reg => {
-    // If a SW is already waiting on load (e.g. user returned to app), show prompt immediately
-    if (reg.waiting && navigator.serviceWorker.controller) notifyUpdate();
-
+    // Check for update whenever app becomes visible
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') reg.update().catch(() => {});
     });
 
+    // Check for updates every 60 seconds while app is open
     setInterval(() => reg.update().catch(() => {}), 60 * 1000);
 
     reg.addEventListener('updatefound', () => {
       const newSW = reg.installing;
       newSW.addEventListener('statechange', () => {
-        // Fire when new SW is installed and waiting — old SW still controls the page
-        if (newSW.state === 'installed' && navigator.serviceWorker.controller) notifyUpdate();
+        if (newSW.state === 'activated') notifyUpdate();
       });
     });
   }).catch(() => {});
