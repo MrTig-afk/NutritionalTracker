@@ -8,3 +8,4 @@ psycopg2-binary
 pyjwt[crypto]
 python-multipart
 groq
+pywebpush
