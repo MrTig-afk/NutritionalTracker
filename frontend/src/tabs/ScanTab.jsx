@@ -27,7 +27,9 @@ export default function ScanTab({ onAddToLog }) {
   const accumulatedImagesRef    = useRef([]);
 
   const fetchUsage = useCallback(async () => {
-    try { setUsage(await apiFetch("/usage")); } catch (_) {}
+    const d = new Date();
+    const cd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    try { setUsage(await apiFetch(`/usage?client_date=${cd}`)); } catch (_) {}
   }, []);
 
   useEffect(() => { fetchUsage(); }, [fetchUsage]);
@@ -116,7 +118,7 @@ export default function ScanTab({ onAddToLog }) {
           {images.length === 0 ? (
             <div style={{ border: "2px dashed var(--border)", borderRadius: 20, background: "var(--white)", padding: "48px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, cursor: "pointer" }}
               onClick={() => fileInputRef.current?.click()}>
-              <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
+              <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple />
               <div style={{ width: 52, height: 52, borderRadius: 14, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Icon n="upload" size={22} style={{ color: "var(--teal)" }} />
               </div>
@@ -165,7 +167,7 @@ export default function ScanTab({ onAddToLog }) {
                   </div>
                 )}
               </div>
-              <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple capture="environment" />
+              <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple />
               <p style={{ fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
                 {images.length} image{images.length !== 1 ? "s" : ""} queued
                 {allOptimized && !loading && !results && <span style={{ color: "var(--teal)", marginLeft: 6 }}>· optimized ✓</span>}

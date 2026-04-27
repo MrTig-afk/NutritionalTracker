@@ -179,9 +179,9 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
 
 
-def check_and_track(user_id: str, email: str):
+def check_and_track(user_id: str, email: str, client_date: str = None):
     """Upsert user email and enforce daily rate limit."""
-    today = date.today().isoformat()
+    today = client_date or date.today().isoformat()
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -802,9 +802,9 @@ async def health_check():
 # =============================================================================
 
 @app.get("/usage")
-async def get_usage(authorization: Optional[str] = Header(default=None)):
+async def get_usage(authorization: Optional[str] = Header(default=None), client_date: Optional[str] = None):
     user_id = get_user_id(authorization)
-    today   = date.today().isoformat()
+    today   = client_date or date.today().isoformat()
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -828,6 +828,7 @@ async def get_usage(authorization: Optional[str] = Header(default=None)):
 async def analyze_label(
     file: UploadFile = File(...),
     authorization: Optional[str] = Header(default=None),
+    x_client_date: Optional[str] = Header(default=None),
 ):
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
@@ -836,7 +837,7 @@ async def analyze_label(
         })
 
     user_id, email = get_user_info(authorization)
-    check_and_track(user_id, email)
+    check_and_track(user_id, email, client_date=x_client_date)
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
 
@@ -883,6 +884,7 @@ async def analyze_label(
 async def analyze_labels(
     files: List[UploadFile] = File(...),
     authorization: Optional[str] = Header(default=None),
+    x_client_date: Optional[str] = Header(default=None),
 ):
     if not gemini_client:
         raise HTTPException(status_code=503, detail={
@@ -896,7 +898,7 @@ async def analyze_labels(
         })
 
     user_id, email = get_user_info(authorization)
-    check_and_track(user_id, email)
+    check_and_track(user_id, email, client_date=x_client_date)
 
     processed_images = []
     image_ids        = []
