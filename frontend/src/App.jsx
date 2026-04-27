@@ -11,14 +11,6 @@ import LibraryTab from "./tabs/LibraryTab";
 import TrackerTab from "./tabs/TrackerTab";
 import TrendsTab from "./tabs/TrendsTab";
 
-const CHANGELOG = [
-  "Meal Templates — save a set of foods and log them in one tap (Library tab)",
-  "Push Notifications — get notified when you hit your daily calorie goal",
-  "Scan & chat rate-limit alerts sent to developer via ntfy.sh",
-  "Security: CORS locked to production domain, chat message size capped",
-  "PWA update flow: you now control when updates apply",
-];
-
 const TABS = [
   { id: "scan",    label: "Scan",    icon: "document_scanner" },
   { id: "library", label: "Library", icon: "folder"           },
@@ -41,7 +33,6 @@ export default function App() {
   const [editLogItem, setEditLogItem]     = useState(null);
   const [chatOpen, setChatOpen]           = useState(false);
   const [updateReady, setUpdateReady]     = useState(() => !!window.__swUpdateReady);
-  const [showChangelog, setShowChangelog] = useState(false);
   const [showIOSBanner, setShowIOSBanner] = useState(
     () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
   );
@@ -62,13 +53,6 @@ export default function App() {
   const handleAddToLog  = useCallback((item) => { setAddToLogItem(item); }, []);
   const handleLogAdded  = useCallback(() => { setLogRefreshKey(k => k + 1); }, []);
   const handleEditEntry = useCallback((entry) => { setEditLogItem(entry); }, []);
-
-  const handleUpdate = () => {
-    navigator.serviceWorker.ready.then(reg => {
-      if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      window.location.reload();
-    });
-  };
 
   const dismissIOSBanner = () => {
     localStorage.setItem("ios-banner-dismissed", "1");
@@ -131,7 +115,7 @@ export default function App() {
             </div>
             <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan</span>
             {updateReady && (
-              <button onClick={() => setShowChangelog(true)} style={{ background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: "0.2px" }}>
+              <button onClick={() => window.location.reload()} style={{ background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: "0.2px" }}>
                 Update
               </button>
             )}
@@ -196,40 +180,6 @@ export default function App() {
           </button>
         </div>
       </div>
-
-      {showChangelog && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "0 20px" }}>
-          <div style={{ background: "var(--surface)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon n="system_update" size={18} style={{ color: "var(--teal)" }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)" }}>Update Available</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>What's new in this version</div>
-              </div>
-            </div>
-            <ul style={{ margin: "16px 0", padding: "0 0 0 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-              {CHANGELOG.map((item, i) => (
-                <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{item}</li>
-              ))}
-            </ul>
-            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-              <button onClick={() => setShowChangelog(false)}
-                style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px solid var(--border)", background: "none", fontSize: 13, fontWeight: 600, color: "var(--muted)", cursor: "pointer" }}>
-                Later
-              </button>
-              <button onClick={handleUpdate}
-                style={{ flex: 2, padding: "10px", borderRadius: 12, border: "none", background: "var(--teal)", fontSize: 13, fontWeight: 700, color: "#fff", cursor: "pointer" }}>
-                Update Now
-              </button>
-            </div>
-            <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.5 }}>
-              Choosing Later keeps your current version. The update will apply automatically the next time you close and reopen the app.
-            </p>
-          </div>
-        </div>
-      )}
 
       <ChatAssistant open={chatOpen} onOpenChange={setChatOpen} />
     </>

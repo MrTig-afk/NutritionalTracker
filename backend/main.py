@@ -21,16 +21,8 @@ from dotenv import load_dotenv
 from typing import List, Optional
 import logging
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 import re
-import threading
-import urllib.request
-
-try:
-    from pywebpush import webpush, WebPushException
-    _webpush_ok = True
-except ImportError:
-    _webpush_ok = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,11 +38,6 @@ JPEG_QUALITY   = 60
 GEMINI_TIMEOUT = 45
 MAX_RETRIES    = 2
 DAILY_LIMIT    = 10
-
-NTFY_TOPIC       = os.getenv("NTFY_TOPIC", "")
-VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").replace("\\n", "\n")
-VAPID_PUBLIC_KEY  = os.getenv("VAPID_PUBLIC_KEY", "")
-VAPID_CLAIM       = os.getenv("VAPID_CLAIM", "mailto:theimpracticalguy007@gmail.com")
 
 logger.info(f"📦 DATABASE_URL configured: {bool(DATABASE_URL)}")
 
@@ -108,11 +95,7 @@ app = FastAPI(title="NutriScan API", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://nutritionaltracker.onrender.com",
-        "http://localhost:5173",
-        "http://localhost:4173",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -198,8 +181,6 @@ def check_and_track(user_id: str, email: str):
         if row:
             if row[0] >= DAILY_LIMIT:
                 cur.close(); release_db(conn)
-                send_ntfy_alert("📊 Scan Limit Hit", f"User {user_id[:8]} hit the {DAILY_LIMIT}/day scan limit")
-                send_push_to_user(user_id, "📊 Scan Limit Reached", f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!")
                 raise HTTPException(status_code=429, detail={
                     "error_type": "rate_limit_exceeded",
                     "retryable": False,
@@ -221,79 +202,6 @@ def check_and_track(user_id: str, email: str):
         raise
     except Exception as e:
         logger.warning(f"⚠️ Usage tracking failed (non-fatal): {e}")
-
-
-# ---------- ALERT HELPERS ----------
-
-def send_ntfy_alert(title: str, message: str, priority: int = 3):
-    if not NTFY_TOPIC:
-        return
-    def _send():
-        try:
-            data = json.dumps({"topic": NTFY_TOPIC, "title": title, "message": message, "priority": priority}).encode()
-            req = urllib.request.Request(
-                "https://ntfy.sh",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception as e:
-            logger.debug(f"ntfy send failed: {e}")
-    threading.Thread(target=_send, daemon=True).start()
-
-
-def send_push_to_user(user_id: str, title: str, body: str):
-    if not (_webpush_ok and VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY):
-        return
-    def _send():
-        try:
-            conn = get_db()
-            cur  = conn.cursor()
-            cur.execute("SELECT subscription_json FROM push_subscriptions WHERE user_id = %s", [user_id])
-            rows = cur.fetchall()
-            cur.close()
-            release_db(conn)
-            for row in rows:
-                sub = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-                webpush(
-                    subscription_info=sub,
-                    data=json.dumps({"title": title, "body": body}),
-                    vapid_private_key=VAPID_PRIVATE_KEY,
-                    vapid_claims={"sub": VAPID_CLAIM},
-                )
-        except Exception as e:
-            logger.debug(f"Push send failed: {e}")
-    threading.Thread(target=_send, daemon=True).start()
-
-
-def _get_entry_calories(nutrition_raw, servings: float) -> float:
-    if not nutrition_raw:
-        return 0.0
-    n = nutrition_raw if isinstance(nutrition_raw, dict) else json.loads(nutrition_raw)
-    ps = n.get("per_serving") or n.get("per_100g") or n
-    raw = _parse_num(ps.get("calories", 0)) * servings
-    return round(raw / KJ_PER_KCAL, 1) if raw > KJ_HEURISTIC_THRESHOLD else round(raw, 1)
-
-
-def _check_goal_and_push(user_id: str, today: str):
-    try:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute("SELECT calories FROM user_goals WHERE user_id = %s", [user_id])
-        goal_row = cur.fetchone()
-        if not goal_row or not goal_row[0]:
-            cur.close(); release_db(conn); return
-        goal_cal = goal_row[0]
-        cur.execute("SELECT servings, nutrition FROM daily_log WHERE user_id = %s AND date = %s", [user_id, today])
-        rows = cur.fetchall()
-        cur.close()
-        release_db(conn)
-        total = sum(_get_entry_calories(r[1], r[0]) for r in rows)
-        if total >= goal_cal:
-            send_push_to_user(user_id, "🎯 Daily Goal Hit!", f"You've reached {round(total)} kcal — goal was {round(goal_cal)} kcal!")
-    except Exception as e:
-        logger.debug(f"Goal push check failed: {e}")
 
 
 # ---------- PYDANTIC MODELS ----------
@@ -322,21 +230,8 @@ class ChatHistoryItem(BaseModel):
     text: str
 
 class ChatMessage(BaseModel):
-    message: str = Field(..., max_length=2000)
+    message: str
     history: list[ChatHistoryItem] = []
-
-class MealTemplateCreate(BaseModel):
-    name: str
-
-class MealTemplateItemCreate(BaseModel):
-    name: str
-    nutrition: dict
-    servings: float = 1.0
-
-class PushSubscriptionCreate(BaseModel):
-    endpoint: str
-    expirationTime: Optional[int] = None
-    keys: dict
 
 # ---------- PROMPTS ----------
 PROMPT_SINGLE = """Analyze this nutrition label image carefully.
@@ -494,7 +389,7 @@ def get_db():
         conn.autocommit = False
         return conn
     except Exception:
-        logger.debug("Pool stale — resetting (Neon cold start)")
+        logger.warning("⚠️ Pool stale — resetting connection pool (Neon cold start?)")
         _reset_pool()
         conn = _pool.getconn()
         conn.autocommit = False
@@ -583,38 +478,6 @@ def init_db():
             )
         """)
 
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS meal_templates (
-                template_id VARCHAR PRIMARY KEY,
-                user_id     VARCHAR NOT NULL,
-                name        VARCHAR NOT NULL,
-                created_at  TIMESTAMP
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS meal_template_items (
-                item_id     VARCHAR PRIMARY KEY,
-                template_id VARCHAR NOT NULL,
-                user_id     VARCHAR NOT NULL,
-                name        VARCHAR NOT NULL,
-                nutrition   JSONB,
-                servings    DOUBLE PRECISION DEFAULT 1,
-                created_at  TIMESTAMP
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS push_subscriptions (
-                sub_id            VARCHAR PRIMARY KEY,
-                user_id           VARCHAR NOT NULL,
-                endpoint          TEXT NOT NULL,
-                subscription_json JSONB,
-                created_at        TIMESTAMP,
-                UNIQUE (user_id, endpoint)
-            )
-        """)
-
         conn.commit()
         cur.close()
         release_db(conn)
@@ -626,11 +489,7 @@ def init_db():
 
 @app.on_event("startup")
 def startup():
-    try:
-        init_db()
-    except Exception as e:
-        send_ntfy_alert("🔴 NutriScan Startup Failed", f"DB init error: {e}", priority=5)
-        raise
+    init_db()
     logger.info("\n📋 Registered Routes:")
     for route in app.routes:
         logger.info(f"   {getattr(route, 'methods', {'GET'})} {route.path}")
@@ -1185,7 +1044,6 @@ async def add_log_entry(
         release_db(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    threading.Thread(target=_check_goal_and_push, args=(user_id, today), daemon=True).start()
     return {"log_id": log_id, "date": today, "name": body.name, "servings": body.servings}
 
 
@@ -1401,196 +1259,6 @@ async def delete_log_entry(
 
 
 # =============================================================================
-# MEAL TEMPLATE ENDPOINTS
-# =============================================================================
-
-@app.post("/meal-templates")
-async def create_meal_template(body: MealTemplateCreate, authorization: Optional[str] = Header(default=None)):
-    user_id     = get_user_id(authorization)
-    template_id = str(uuid.uuid4())
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO meal_templates (template_id, user_id, name, created_at) VALUES (%s, %s, %s, %s)",
-            [template_id, user_id, body.name, datetime.now()],
-        )
-        conn.commit(); cur.close(); release_db(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"template_id": template_id, "name": body.name, "item_count": 0}
-
-
-@app.get("/meal-templates")
-async def list_meal_templates(authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute(
-            """SELECT mt.template_id, mt.name, COUNT(mti.item_id)
-               FROM meal_templates mt
-               LEFT JOIN meal_template_items mti ON mt.template_id = mti.template_id
-               WHERE mt.user_id = %s
-               GROUP BY mt.template_id, mt.name, mt.created_at
-               ORDER BY mt.created_at DESC""",
-            [user_id],
-        )
-        rows = cur.fetchall(); cur.close(); release_db(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return [{"template_id": r[0], "name": r[1], "item_count": r[2]} for r in rows]
-
-
-@app.get("/meal-templates/{template_id}")
-async def get_meal_template(template_id: str, authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("SELECT template_id, name FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
-        tmpl = cur.fetchone()
-        if not tmpl:
-            cur.close(); release_db(conn)
-            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
-        cur.execute(
-            "SELECT item_id, name, nutrition, servings FROM meal_template_items WHERE template_id = %s ORDER BY created_at",
-            [template_id],
-        )
-        items = cur.fetchall(); cur.close(); release_db(conn)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {
-        "template_id": tmpl[0],
-        "name": tmpl[1],
-        "items": [
-            {"item_id": r[0], "name": r[1],
-             "nutrition": r[2] if isinstance(r[2], dict) else (json.loads(r[2]) if r[2] else {}),
-             "servings": r[3]}
-            for r in items
-        ],
-    }
-
-
-@app.delete("/meal-templates/{template_id}")
-async def delete_meal_template(template_id: str, authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("DELETE FROM meal_template_items WHERE template_id = %s", [template_id])
-        cur.execute("DELETE FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
-        conn.commit(); cur.close(); release_db(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"deleted": True}
-
-
-@app.post("/meal-templates/{template_id}/items")
-async def add_meal_template_item(template_id: str, body: MealTemplateItemCreate, authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("SELECT template_id FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
-        if not cur.fetchone():
-            cur.close(); release_db(conn)
-            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
-        item_id = str(uuid.uuid4())
-        cur.execute(
-            "INSERT INTO meal_template_items (item_id, template_id, user_id, name, nutrition, servings, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            [item_id, template_id, user_id, body.name, json.dumps(body.nutrition), body.servings, datetime.now()],
-        )
-        conn.commit(); cur.close(); release_db(conn)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"item_id": item_id, "name": body.name, "servings": body.servings}
-
-
-@app.delete("/meal-templates/{template_id}/items/{item_id}")
-async def delete_meal_template_item(template_id: str, item_id: str, authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("DELETE FROM meal_template_items WHERE item_id = %s AND template_id = %s AND user_id = %s", [item_id, template_id, user_id])
-        conn.commit(); cur.close(); release_db(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"deleted": True}
-
-
-@app.post("/meal-templates/{template_id}/log")
-async def log_meal_template(template_id: str, authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    today   = date.today().isoformat()
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("SELECT template_id FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
-        if not cur.fetchone():
-            cur.close(); release_db(conn)
-            raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
-        cur.execute("SELECT name, nutrition, servings FROM meal_template_items WHERE template_id = %s", [template_id])
-        items = cur.fetchall()
-        if not items:
-            cur.close(); release_db(conn)
-            return {"logged": 0}
-        for name, nutrition, servings in items:
-            log_id     = str(uuid.uuid4())
-            nutri_json = json.dumps(nutrition) if isinstance(nutrition, dict) else (nutrition or "{}")
-            cur.execute(
-                "INSERT INTO daily_log (log_id, user_id, date, name, servings, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                [log_id, user_id, today, name, servings, nutri_json, datetime.now()],
-            )
-        conn.commit(); cur.close(); release_db(conn)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    threading.Thread(target=_check_goal_and_push, args=(user_id, today), daemon=True).start()
-    return {"logged": len(items)}
-
-
-# =============================================================================
-# PUSH NOTIFICATION ENDPOINTS
-# =============================================================================
-
-@app.get("/push/vapid-key")
-async def get_vapid_public_key():
-    if not VAPID_PUBLIC_KEY:
-        raise HTTPException(status_code=503, detail={"error_type": "config_error", "message": "Push not configured."})
-    return {"public_key": VAPID_PUBLIC_KEY}
-
-
-@app.post("/push/subscribe")
-async def push_subscribe(body: PushSubscriptionCreate, authorization: Optional[str] = Header(default=None)):
-    user_id  = get_user_id(authorization)
-    sub_id   = str(uuid.uuid4())
-    sub_json = {"endpoint": body.endpoint, "expirationTime": body.expirationTime, "keys": body.keys}
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO push_subscriptions (sub_id, user_id, endpoint, subscription_json, created_at)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (user_id, endpoint) DO UPDATE SET subscription_json = EXCLUDED.subscription_json
-        """, [sub_id, user_id, body.endpoint, json.dumps(sub_json), datetime.now()])
-        conn.commit(); cur.close(); release_db(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"subscribed": True}
-
-
-@app.delete("/push/unsubscribe")
-async def push_unsubscribe(authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
-    try:
-        conn = get_db(); cur = conn.cursor()
-        cur.execute("DELETE FROM push_subscriptions WHERE user_id = %s", [user_id])
-        conn.commit(); cur.close(); release_db(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail={"error_type": "db_error", "message": str(e)})
-    return {"unsubscribed": True}
-
-
-# =============================================================================
 # AI CHAT ENDPOINT
 # =============================================================================
 
@@ -1739,7 +1407,6 @@ async def chat(
     except Exception as e:
         err = str(e)
         if "429" in err:
-            send_ntfy_alert("⚠️ Groq Rate Limited", "Groq returned 429 — chat temporarily unavailable")
             raise HTTPException(status_code=429, detail={"error_type": "rate_limited", "message": "Assistant is busy — try again in a moment."})
         raise HTTPException(status_code=500, detail={"error_type": "ai_error", "message": "Assistant unavailable."})
 
