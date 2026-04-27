@@ -49,7 +49,7 @@ export default function NutrientGrid({ data, activeTab, per100gData }) {
             <div key={key} style={{ background: adjusted ? "var(--teal-lt)" : "var(--white)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
               <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", lineHeight: 1.3 }}>{meta.label}</div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
-                <span style={{ fontSize: 20, fontWeight: 800, color: meta.color, lineHeight: 1.1 }}>{display}</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: meta.color, lineHeight: 1.1 }}>{typeof display === "string" ? (parseNumeric(display) ?? display) : display}</span>
                 {meta.unit && <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{meta.unit}</span>}
                 {adjusted && <span style={{ fontSize: 10, color: "var(--teal)", marginLeft: 2 }}>adj.</span>}
               </div>

@@ -155,7 +155,9 @@ export default function LibraryTab({ onAddToLog }) {
   const logTemplate = async (templateId) => {
     setLoggingTmpl(templateId);
     try {
-      const res = await apiFetch(`/meal-templates/${templateId}/log`, { method: "POST" });
+      const d = new Date();
+      const log_date = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      const res = await apiFetch(`/meal-templates/${templateId}/log?log_date=${log_date}`, { method: "POST" });
       if (res.logged > 0) onAddToLog(null);
     } catch (e) { console.error(e); }
     finally { setLoggingTmpl(null); }

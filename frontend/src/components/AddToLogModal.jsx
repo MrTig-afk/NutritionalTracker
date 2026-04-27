@@ -49,12 +49,14 @@ export default function AddToLogModal({ item, onClose, onAdded }) {
 
   const canSave = mode === "serving" ? servingsNum > 0 : mode === "grams" ? gramsNum > 0 : manualCal !== "" || manualProt !== "" || manualCarb !== "" || manualFat !== "";
 
+  const localDate = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+
   const save = async () => {
     if (!canSave) return; setSaving(true);
     try {
       const submitServings = mode === "serving" ? servingsNum : 1;
       const submitName = manualName.trim() || item.name;
-      await apiFetch("/log", { method: "POST", body: JSON.stringify({ name: submitName, servings: submitServings, nutrition: buildSubmitNutrition() }) });
+      await apiFetch("/log", { method: "POST", body: JSON.stringify({ name: submitName, servings: submitServings, nutrition: buildSubmitNutrition(), log_date: localDate() }) });
       setStatus({ type: "ok", msg: "Added to today's log!" }); onAdded(); setTimeout(() => { onClose(); }, 900);
     } catch (e) { setStatus({ type: "error", msg: e.message }); }
     finally { setSaving(false); }
