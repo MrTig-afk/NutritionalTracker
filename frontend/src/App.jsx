@@ -12,13 +12,11 @@ import TrackerTab from "./tabs/TrackerTab";
 import TrendsTab from "./tabs/TrendsTab";
 
 const CHANGELOG = [
-  "Meal Templates — save a set of foods and log them in one tap (Library tab)",
-  "Push Notifications — get notified when you hit your daily calorie goal",
-  "PWA update flow: you now control when updates apply, with this changelog",
   "Fix: nutrition values no longer show doubled units (e.g. 12.5gg → 12.5g)",
-  "Fix: food logged after midnight now goes to the correct local date",
+  "Fix: food logged after midnight now saves to your local date, not server UTC",
   "Fix: scan counter resets at your local midnight, not UTC",
-  "Upload from Photos or Files — not just camera",
+  "Upload from Photos or Files app — not just camera",
+  "What's New modal now shows after update, so you see the actual new changes",
 ];
 
 const TABS = [
@@ -42,8 +40,15 @@ export default function App() {
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
   const [chatOpen, setChatOpen]           = useState(false);
-  const [updateReady, setUpdateReady]     = useState(() => !!window.__swUpdateReady);
-  const [showChangelog, setShowChangelog] = useState(false);
+  const [updateReady, setUpdateReady]       = useState(() => !!window.__swUpdateReady);
+  const [showUpdatePrompt, setShowUpdatePrompt] = useState(false);
+  const [showChangelog, setShowChangelog]   = useState(() => {
+    if (localStorage.getItem("changelog-pending")) {
+      localStorage.removeItem("changelog-pending");
+      return true;
+    }
+    return false;
+  });
   const [showIOSBanner, setShowIOSBanner] = useState(
     () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
   );
@@ -66,6 +71,7 @@ export default function App() {
   const handleEditEntry = useCallback((entry) => { setEditLogItem(entry); }, []);
 
   const handleUpdate = () => {
+    localStorage.setItem("changelog-pending", "1");
     navigator.serviceWorker.ready.then(reg => {
       if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
       window.location.reload();
@@ -133,7 +139,7 @@ export default function App() {
             </div>
             <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan</span>
             {updateReady && (
-              <button onClick={() => setShowChangelog(true)} style={{ background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: "0.2px" }}>
+              <button onClick={() => setShowUpdatePrompt(true)} style={{ background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: "0.2px" }}>
                 Update
               </button>
             )}
@@ -199,25 +205,20 @@ export default function App() {
         </div>
       </div>
 
-      {showChangelog && (
+      {showUpdatePrompt && (
         <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "0 20px" }}>
           <div style={{ background: "var(--surface)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Icon n="system_update" size={18} style={{ color: "var(--teal)" }} />
               </div>
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)" }}>Update Available</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>What's new in this version</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>New fixes and improvements are ready</div>
               </div>
             </div>
-            <ul style={{ margin: "16px 0", padding: "0 0 0 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-              {CHANGELOG.map((item, i) => (
-                <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{item}</li>
-              ))}
-            </ul>
-            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-              <button onClick={() => setShowChangelog(false)}
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button onClick={() => setShowUpdatePrompt(false)}
                 style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1px solid var(--border)", background: "none", fontSize: 13, fontWeight: 600, color: "var(--muted)", cursor: "pointer" }}>
                 Later
               </button>
@@ -227,8 +228,33 @@ export default function App() {
               </button>
             </div>
             <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.5 }}>
-              Choosing Later keeps your current version. The update will apply automatically the next time you close and reopen the app.
+              Choosing Later keeps your current version until you close and reopen the app.
             </p>
+          </div>
+        </div>
+      )}
+
+      {showChangelog && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: "0 20px" }}>
+          <div style={{ background: "var(--surface)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Icon n="new_releases" size={18} style={{ color: "var(--teal)" }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)" }}>What's New</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>Just updated — here's what changed</div>
+              </div>
+            </div>
+            <ul style={{ margin: "16px 0", padding: "0 0 0 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+              {CHANGELOG.map((item, i) => (
+                <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{item}</li>
+              ))}
+            </ul>
+            <button onClick={() => setShowChangelog(false)}
+              style={{ width: "100%", padding: "10px", borderRadius: 12, border: "none", background: "var(--teal)", fontSize: 13, fontWeight: 700, color: "#fff", cursor: "pointer", marginTop: 8 }}>
+              Got it
+            </button>
           </div>
         </div>
       )}
