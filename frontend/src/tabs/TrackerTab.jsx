@@ -6,6 +6,14 @@ import { Icon, Spin } from "../components/Icon";
 import MacroBar from "../components/MacroBar";
 import DatePicker from "../components/DatePicker";
 
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+function urlB64ToUint8Array(b64) {
+  const pad = "=".repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
 export default function TrackerTab({ refreshKey, onEditEntry }) {
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -17,6 +25,50 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [loading, setLoading] = useState(true);
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+
+  const [notifPermission, setNotifPermission] = useState("default");
+  const [notifSubscribed, setNotifSubscribed] = useState(false);
+  const [notifLoading, setNotifLoading]       = useState(false);
+
+  useEffect(() => {
+    if ("Notification" in window) setNotifPermission(Notification.permission);
+    if ("serviceWorker" in navigator)
+      navigator.serviceWorker.ready.then(reg =>
+        reg.pushManager.getSubscription().then(sub => setNotifSubscribed(!!sub))
+      );
+  }, []);
+
+  const enableNotifications = async () => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      alert("Push notifications not supported in this browser."); return;
+    }
+    setNotifLoading(true);
+    try {
+      const perm = await Notification.requestPermission();
+      setNotifPermission(perm);
+      if (perm !== "granted") return;
+      const reg = await navigator.serviceWorker.ready;
+      const keyRes = await apiFetch("/push/vapid-key").catch(() => null);
+      const publicKey = keyRes?.public_key || VAPID_PUBLIC_KEY;
+      if (!publicKey) { alert("Push not configured on server yet."); return; }
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(publicKey) });
+      await apiFetch("/push/subscribe", { method: "POST", body: JSON.stringify(sub) });
+      setNotifSubscribed(true);
+    } catch (e) { console.error("Notification setup failed:", e); }
+    finally { setNotifLoading(false); }
+  };
+
+  const disableNotifications = async () => {
+    setNotifLoading(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) await sub.unsubscribe();
+      await apiFetch("/push/unsubscribe", { method: "DELETE" });
+      setNotifSubscribed(false);
+    } catch (e) { console.error("Unsubscribe failed:", e); }
+    finally { setNotifLoading(false); }
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -99,6 +151,19 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
           </div>
         ))}
       </div>
+      {/* Notifications */}
+      {notifPermission !== "denied" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "var(--off)", border: "1px solid var(--border)", borderRadius: 12 }}>
+          <Icon n={notifSubscribed ? "notifications_active" : "notifications"} size={16} style={{ color: "var(--teal)", flexShrink: 0 }} />
+          <span style={{ flex: 1, fontSize: 12, color: "var(--muted)" }}>
+            {notifSubscribed ? "Goal notifications on" : "Enable goal notifications"}
+          </span>
+          <button onClick={notifSubscribed ? disableNotifications : enableNotifications} disabled={notifLoading}
+            style={{ padding: "5px 12px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "none", cursor: "pointer", opacity: notifLoading ? 0.5 : 1, background: notifSubscribed ? "var(--border)" : "var(--teal)", color: notifSubscribed ? "var(--muted)" : "#fff" }}>
+            {notifLoading ? <Spin size={11} /> : notifSubscribed ? "Off" : "On"}
+          </button>
+        </div>
+      )}
       </div>
 
       {/* Right col — log entries */}
