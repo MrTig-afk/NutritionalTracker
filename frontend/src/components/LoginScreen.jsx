@@ -1,18 +1,35 @@
 import React, { useState } from "react";
-import { supabase } from "../lib/api";
+import { supabase, API_URL } from "../lib/api";
 import { Icon, Spin } from "./Icon";
 
 export default function LoginScreen() {
-  const [email, setEmail]     = useState("");
-  const [sending, setSending] = useState(false);
-  const [sent, setSent]       = useState(false);
-  const [error, setError]     = useState(null);
+  const [email, setEmail]                   = useState("");
+  const [sending, setSending]               = useState(false);
+  const [sent, setSent]                     = useState(false);
+  const [error, setError]                   = useState(null);
+  const [googleConflict, setGoogleConflict] = useState(false);
+
+  const signInWithGoogle = () =>
+    supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
 
   const handleSubmit = async () => {
     if (!email.trim()) return;
-    setSending(true); setError(null);
+    const normalizedEmail = email.trim().toLowerCase();
+    setSending(true); setError(null); setGoogleConflict(false);
     try {
-      const { error: otpError } = await supabase.auth.signInWithOtp({ email: email.trim() });
+      try {
+        const res = await fetch(`${API_URL}/check-provider?email=${encodeURIComponent(normalizedEmail)}`);
+        if (res.ok) {
+          const { has_google } = await res.json();
+          if (has_google) {
+            setGoogleConflict(true);
+            signInWithGoogle();
+            return;
+          }
+        }
+      } catch (_) {}
+
+      const { error: otpError } = await supabase.auth.signInWithOtp({ email: normalizedEmail });
       if (otpError) throw new Error(otpError.message);
       setSent(true);
     } catch (e) {
@@ -59,6 +76,13 @@ export default function LoginScreen() {
                 />
               </div>
 
+              {googleConflict && (
+                <div style={{ background: "var(--teal-lt, #E0F4F5)", border: "1px solid var(--teal)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--teal)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Icon n="info" size={16} style={{ color: "var(--teal)", flexShrink: 0 }} />
+                  An account with this email already exists. Redirecting you to sign in with Google…
+                </div>
+              )}
+
               {error && (
                 <div style={{ background: "var(--danger-lt, #FFDAD6)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
                   {error}
@@ -80,7 +104,7 @@ export default function LoginScreen() {
               </div>
 
               <button
-                onClick={() => supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })}
+                onClick={signInWithGoogle}
                 style={{ width: "100%", padding: "13px", background: "var(--surface)", color: "var(--text)", border: "1.5px solid var(--border)", borderRadius: 14, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
                   <path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18z"/>
