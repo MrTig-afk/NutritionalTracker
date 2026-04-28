@@ -828,7 +828,7 @@ async def health_check():
 async def check_provider(email: str = Query(...)):
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     if not key:
-        return JSONResponse({"has_google": False})
+        return JSONResponse({"has_google": False, "debug": "no key"})
     try:
         import urllib.parse
         url = f"{SUPABASE_URL}/auth/v1/admin/users?filter={urllib.parse.quote(email)}&page=1&per_page=10"
@@ -838,13 +838,17 @@ async def check_provider(email: str = Query(...)):
         })
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
-            for user in data.get("users", []):
+            users = data.get("users", [])
+            if not users:
+                return JSONResponse({"has_google": False, "debug": "no users returned"})
+            for user in users:
                 if user.get("email", "").lower() == email.lower():
                     providers = user.get("app_metadata", {}).get("providers", [])
-                    return JSONResponse({"has_google": "google" in providers})
+                    return JSONResponse({"has_google": "google" in providers, "providers": providers})
+            return JSONResponse({"has_google": False, "debug": "email not matched", "emails_returned": [u.get("email") for u in users]})
     except Exception as e:
         logger.warning(f"check-provider: {e}")
-    return JSONResponse({"has_google": False})
+        return JSONResponse({"has_google": False, "debug": str(e)})
 
 
 @app.get("/usage")
