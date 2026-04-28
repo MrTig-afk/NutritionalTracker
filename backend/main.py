@@ -35,7 +35,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # ---------- CONFIG ----------
 DATABASE_URL   = os.getenv("DATABASE_URL")  # Set to Supabase connection string
@@ -137,8 +137,9 @@ app.add_middleware(
 )
 
 # ---------- SUPABASE AUTH ----------
-SUPABASE_URL        = os.getenv("SUPABASE_URL", "https://zdmsfftfqnajanpbvcgn.supabase.co")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+SUPABASE_URL              = os.getenv("SUPABASE_URL", "https://zdmsfftfqnajanpbvcgn.supabase.co")
+SUPABASE_JWT_SECRET       = os.getenv("SUPABASE_JWT_SECRET")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 _jwks_client = pyjwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True)
 
@@ -822,6 +823,29 @@ async def health_check():
 # =============================================================================
 # USAGE ENDPOINT
 # =============================================================================
+
+@app.get("/check-provider")
+async def check_provider(email: str = Query(...)):
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not key:
+        return JSONResponse({"has_google": False})
+    try:
+        import urllib.parse
+        url = f"{SUPABASE_URL}/auth/v1/admin/users?filter={urllib.parse.quote(email)}&page=1&per_page=10"
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {key}",
+            "apikey": key,
+        })
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            for user in data.get("users", []):
+                if user.get("email", "").lower() == email.lower():
+                    providers = user.get("app_metadata", {}).get("providers", [])
+                    return JSONResponse({"has_google": "google" in providers})
+    except Exception as e:
+        logger.warning(f"check-provider: {e}")
+    return JSONResponse({"has_google": False})
+
 
 @app.get("/usage")
 async def get_usage(authorization: Optional[str] = Header(default=None), client_date: Optional[str] = None):
