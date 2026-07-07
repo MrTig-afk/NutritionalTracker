@@ -93,16 +93,6 @@ users · api_usage · image_records · folders · folder_items
 daily_log · user_goals · meal_templates · meal_template_items · push_subscriptions
 ```
 
-**External services**
-
-| Service | Role |
-|---|---|
-| Supabase | Auth (magic link + Google OAuth), JWKS endpoint |
-| AWS S3 | Raw + processed label images |
-| Gemini 2.5 Flash | Nutrition label extraction (2.0 Flash fallback) |
-| Groq | AI chat assistant (openai/gpt-oss-120b) |
-| pywebpush / VAPID | User push notifications — goal hit, scan limit |
-| ntfy.sh | Developer alerts — API quota hits, startup failures |
 
 ---
 
