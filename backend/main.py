@@ -582,8 +582,11 @@ def get_db(user_id: Optional[str] = None):
     global _pool
     try:
         conn = get_pool().getconn()
-        conn.cursor().execute("SELECT 1")
+        # autocommit must be set BEFORE the liveness probe: the probe opens a
+        # transaction, and psycopg2 refuses autocommit changes mid-transaction —
+        # the old order made every call take the reset path (full pool churn).
         conn.autocommit = False
+        conn.cursor().execute("SELECT 1")
     except Exception:
         logger.debug("Pool stale — resetting (Neon cold start)")
         _reset_pool()
@@ -740,6 +743,55 @@ def init_db():
         raise
 
 
+# ---------- MEAL REMINDER SCHEDULER ----------
+# Daily push reminders to log meals. Runs in a daemon thread; each slot skips
+# users who already have at least `threshold` log entries for the local day.
+# Cross-user reads are allowed by the RLS `system_read` policy, which matches
+# app.user_id = '__system__' (a real Supabase JWT sub is always a UUID, so a
+# user can never occupy this value). Read-only: writes stay user-isolated.
+MEAL_REMINDERS_ENABLED  = os.getenv("MEAL_REMINDERS_ENABLED", "1") == "1"
+REMINDER_UTC_OFFSET_MIN = int(os.getenv("REMINDER_UTC_OFFSET_MIN", "330"))  # default IST (+05:30)
+_MEAL_REMINDERS = [
+    (9 * 60,  1, "🍳 Good morning!",      "Time to log your first meal of the day."),
+    (14 * 60, 2, "🥗 Afternoon check-in", "Don't forget to log your second meal."),
+    (21 * 60, 3, "🌙 Evening reminder",   "Log today's meals before you wind down."),
+]
+_reminder_sent: dict = {}  # slot minutes -> local date iso already sent
+
+def _run_meal_reminder(threshold: int, title: str, body: str, today: str):
+    conn = get_db("__system__")
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT p.user_id
+        FROM push_subscriptions p
+        LEFT JOIN daily_log d ON d.user_id = p.user_id AND d.date = %s
+        GROUP BY p.user_id
+        HAVING count(d.log_id) < %s
+    """, [today, threshold])
+    users = [r[0] for r in cur.fetchall()]
+    cur.close()
+    release_db(conn)
+    for uid in users:
+        send_push_to_user(uid, title, body)
+    logger.info(f"⏰ Meal reminder ({title}) queued for {len(users)} user(s)")
+
+def _meal_reminder_loop():
+    while True:
+        try:
+            local   = datetime.utcnow() + timedelta(minutes=REMINDER_UTC_OFFSET_MIN)
+            now_min = local.hour * 60 + local.minute
+            today   = local.date().isoformat()
+            for slot, threshold, title, body in _MEAL_REMINDERS:
+                # 2-min window so a late tick still fires, but a mid-day
+                # restart doesn't re-send old slots.
+                if 0 <= now_min - slot <= 2 and _reminder_sent.get(slot) != today:
+                    _reminder_sent[slot] = today
+                    _run_meal_reminder(threshold, title, body, today)
+        except Exception as e:
+            logger.warning(f"Meal reminder loop error: {e}")
+        time.sleep(60)
+
+
 @app.on_event("startup")
 def startup():
     try:
@@ -749,6 +801,9 @@ def startup():
         # the Render deploy log is the reliable record for startup failures.
         notify_admin("startup_failed", "🔴 NutriScan Startup Failed", f"DB init error: {e}")
         raise
+    if MEAL_REMINDERS_ENABLED and _webpush_ok and VAPID_PRIVATE_KEY:
+        threading.Thread(target=_meal_reminder_loop, daemon=True).start()
+        logger.info("⏰ Meal reminder scheduler started")
     logger.info("\n📋 Registered Routes:")
     for route in app.routes:
         logger.info(f"   {getattr(route, 'methods', {'GET'})} {route.path}")
