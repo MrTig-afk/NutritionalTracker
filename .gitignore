@@ -3,6 +3,13 @@ __pycache__/
 .env
 *.pyc
 
+# Secrets / keys (e.g. VAPID push keypair)
+*.pem
+*.key
+
+# vite-plugin-pwa dev output
+frontend/dev-dist/
+
 .claude/
 .gemini/
 CLAUDE.md
