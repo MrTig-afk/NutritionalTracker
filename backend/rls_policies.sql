@@ -67,6 +67,24 @@ BEGIN
   END LOOP;
 END $$;
 
+-- ---------- 3) System read access for scheduled jobs ----------
+-- The meal-reminder scheduler runs with app.user_id = '__system__' (a real
+-- Supabase JWT sub is always a UUID, so no user can occupy this value) and
+-- needs cross-user READ on exactly these two tables. Policies are OR'd, so
+-- this adds to user_isolation without widening writes (SELECT only).
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['push_subscriptions', 'daily_log']
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS system_read ON %I;', t);
+    EXECUTE format($f$
+      CREATE POLICY system_read ON %I FOR SELECT
+        USING (current_setting('app.user_id', true) = '__system__');
+    $f$, t);
+  END LOOP;
+END $$;
+
 -- Verify:
 --   SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public';
 --   -- as nutriscan_app, with no GUC set, this must return 0:
@@ -79,6 +97,7 @@ END $$;
 --       'meal_template_items','push_subscriptions']
 --     LOOP
 --       EXECUTE format('DROP POLICY IF EXISTS user_isolation ON %I;', t);
+--       EXECUTE format('DROP POLICY IF EXISTS system_read ON %I;', t);
 --       EXECUTE format('ALTER TABLE %I NO FORCE ROW LEVEL SECURITY;', t);
 --       EXECUTE format('ALTER TABLE %I DISABLE  ROW LEVEL SECURITY;', t);
 --     END LOOP;
