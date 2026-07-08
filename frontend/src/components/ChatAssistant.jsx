@@ -122,14 +122,22 @@ export default function ChatAssistant({ open, onOpenChange }) {
     const v = window.visualViewport;
     const update = () => {
       const keyboardUp = window.innerHeight - v.height > 80;
+      if (keyboardUp && (window.scrollY !== 0 || v.offsetTop > 0)) {
+        // iOS pans the page to "reveal" the focused input, dragging every
+        // fixed element (and the app behind us) off-screen. Our panel already
+        // fits above the keyboard, so pin the page back down.
+        window.scrollTo(0, 0);
+      }
       setVv(keyboardUp ? { height: v.height, offsetTop: v.offsetTop } : null);
     };
     update();
     v.addEventListener("resize", update);
     v.addEventListener("scroll", update);
+    window.addEventListener("scroll", update);
     return () => {
       v.removeEventListener("resize", update);
       v.removeEventListener("scroll", update);
+      window.removeEventListener("scroll", update);
       setVv(null);
     };
   }, [open]);
