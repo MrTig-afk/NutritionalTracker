@@ -12,7 +12,15 @@ export default function LoginScreen() {
   const [verifying, setVerifying]           = useState(false);
 
   const signInWithGoogle = () =>
-    supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
+    supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        // Always show Google's account picker instead of silently reusing
+        // the last-used account.
+        queryParams: { prompt: "select_account" },
+      },
+    });
 
   const handleSubmit = async () => {
     if (!email.trim()) return;
