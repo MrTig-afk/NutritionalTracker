@@ -1647,11 +1647,17 @@ async def get_log_calendar(
 @app.get("/log/trends")
 async def get_log_trends(
     time_range: str = Query("weekly", alias="range"),
+    client_date: Optional[str] = None,
     authorization: Optional[str] = Header(default=None),
 ):
     user_id    = get_user_id(authorization)
     days       = 30 if time_range == "monthly" else 7
-    end_date   = date.today()
+    # Use the client's local date when provided — the server runs in UTC and
+    # would otherwise miss "today" for users ahead of UTC (e.g. Sydney).
+    try:
+        end_date = date.fromisoformat(client_date) if client_date else date.today()
+    except ValueError:
+        end_date = date.today()
     start_date = end_date - timedelta(days=days - 1)
 
     try:

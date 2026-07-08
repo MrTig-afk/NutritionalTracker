@@ -1,4 +1,5 @@
 [
+  { "v": 16, "text": "Tracker always shows the right day, and Trends uses your local date" },
   { "v": 15, "text": "Log Meal now confirms with 'Logged!' and the Tracker updates instantly" },
   { "v": 14, "text": "Pick multiple foods at once when building a meal template" },
   { "v": 13, "text": "Tab bar no longer floats mid-screen while typing" },

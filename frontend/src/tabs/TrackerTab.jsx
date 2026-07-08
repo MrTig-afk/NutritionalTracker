@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/api";
 import { addDays } from "../lib/nutrition";
 import { card, cardHeader, inputStyle, labelStyle, primaryBtn } from "../styles";
@@ -17,6 +17,24 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [loading, setLoading] = useState(true);
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+
+  // The app can stay open across midnight (installed PWA). If the user was
+  // viewing "today", roll the view forward when the date changes so new logs
+  // don't land on a date the Tracker isn't showing.
+  const todayRef = useRef(today);
+  useEffect(() => {
+    const syncToday = () => {
+      const d = new Date();
+      const t = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (t !== todayRef.current) {
+        setSelectedDate(prev => (prev === todayRef.current ? t : prev));
+        todayRef.current = t;
+      }
+    };
+    document.addEventListener("visibilitychange", syncToday);
+    syncToday();
+    return () => document.removeEventListener("visibilitychange", syncToday);
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
