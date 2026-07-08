@@ -1,44 +1,37 @@
-venv/
-__pycache__/
-.env
-*.pyc
+# ──────────────────────────────────────────────────────────────
+# Default-deny .gitignore
+# Ignore everything, then re-allow ONLY what builds/runs the app.
+# Anything new at the root (scratch scripts, notes, AI configs,
+# CLAUDE.md, RESUME.txt, .claude/, .gemini/, etc.) is ignored
+# automatically — no need to list it.
+# ──────────────────────────────────────────────────────────────
 
-# Secrets / keys (e.g. VAPID push keypair)
-*.pem
-*.key
+# 1) Deny every top-level entry...
+/*
 
-# vite-plugin-pwa dev output
-frontend/dev-dist/
+# 2) ...then re-allow the runtime surface.
+!/.gitignore
+!/README.md
+!/backend/
+!/frontend/
 
-.claude/
-.gemini/
-CLAUDE.md
-GEMINI.md
-RESUME.txt
-db_schema_explained.txt
-.project_initialized
-.cursor/
-.mcp.json
-.opencode.json
-.claude/settings.json
-.claude/settings.local.json
-# Added by code-review-graph
-.code-review-graph/
+# 3) Inside the allowed dirs, still keep secrets, deps and build output out.
+#    (.env.example is intentionally NOT matched by **/.env, so it stays tracked.)
+**/.env
+**/*.local
+**/node_modules/
+**/dist/
+**/dev-dist/
+**/__pycache__/
+**/*.pyc
+**/*.pem
+**/*.key
+**/venv/
+**/*.duckdb
+**/*.sqlite
+**/*.sqlite3
 
-# Local databases
-*.duckdb
-
-# AI tool configs (local only)
-.cursorrules
-.windsurfrules
-.kiro/
-AGENTS.md
-
-# Build-in-public LinkedIn drafts (local only)
-linkedin/
-
-# Marketing drafts (local only)
-promo/
-
-# Local design/marketing assets (not for the repo)
+# 4) Local-only design/marketing material, ignored wherever it appears.
 assets/
+promo/
+linkedin/
