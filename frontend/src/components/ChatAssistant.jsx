@@ -167,22 +167,29 @@ export default function ChatAssistant({ open, onOpenChange }) {
 
   if (!open) return null;
 
+  // Mobile: the chat is its own full screen (opaque, nothing visible behind),
+  // ending just above the bottom nav. Desktop keeps the floating card.
   // Keyboard up: pin the panel inside the visible viewport (header stays on
-  // screen, input sits right above the keyboard). Otherwise: normal docked look.
+  // screen, input sits right above the keyboard).
+  const isDesktop = window.innerWidth >= 768;
   const panelPos = vv
-    ? { top: vv.offsetTop + 8, bottom: "auto", height: vv.height - 16 }
-    : { bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", height: "min(460px, calc(100dvh - 140px))" };
+    ? (isDesktop
+        ? { top: vv.offsetTop + 8, bottom: "auto", height: vv.height - 16, left: 16, right: 16, borderRadius: 20 }
+        : { top: vv.offsetTop, bottom: "auto", height: vv.height, left: 0, right: 0, borderRadius: 0 })
+    : (isDesktop
+        ? { bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", height: "min(460px, calc(100dvh - 140px))", left: 16, right: 16, borderRadius: 20 }
+        : { top: 0, bottom: "calc(74px + env(safe-area-inset-bottom, 0px))", left: 0, right: 0, borderRadius: 0 });
 
   return (
     <div style={{
-      position: "fixed", right: 16, left: 16, zIndex: 60,
+      position: "fixed", zIndex: 60,
       ...panelPos,
-      background: "var(--surface)", borderRadius: 20,
-      border: "1px solid var(--border)",
-      boxShadow: "0 12px 48px rgba(0,0,0,0.18)",
+      background: "var(--surface)",
+      border: isDesktop ? "1px solid var(--border)" : "none",
+      boxShadow: isDesktop ? "0 12px 48px rgba(0,0,0,0.18)" : "none",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      <div style={{ background: "var(--teal)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+      <div style={{ background: "var(--teal)", padding: isDesktop ? "12px 16px" : "calc(12px + env(safe-area-inset-top, 0px)) 16px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <div style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(174,246,199,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon n="nutrition" size={17} style={{ color: "var(--mint)" }} />
         </div>

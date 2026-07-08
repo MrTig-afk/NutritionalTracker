@@ -11,11 +11,29 @@ const LINKS = {
 };
 
 const NOTIF_TYPES = [
-  { key: "meal_morning",   label: "Morning reminder",   desc: "9am — log your first meal" },
-  { key: "meal_afternoon", label: "Afternoon reminder", desc: "2pm — log your second meal" },
-  { key: "meal_evening",   label: "Evening reminder",   desc: "9pm — finish logging your day" },
+  { key: "meal_morning",   label: "Morning reminder",   desc: "Log your first meal",     hasTime: true },
+  { key: "meal_afternoon", label: "Afternoon reminder", desc: "Log your second meal",    hasTime: true },
+  { key: "meal_evening",   label: "Evening reminder",   desc: "Finish logging your day", hasTime: true },
   { key: "weekly_summary", label: "Weekly summary",     desc: "Sunday evening recap of your week" },
 ];
+
+// 12-hour display ("9:00 AM") <-> canonical 24h storage ("09:00")
+const to12h = (hhmm) => {
+  const [h, m] = String(hhmm).split(":").map(Number);
+  if (Number.isNaN(h)) return "";
+  const ap = h >= 12 ? "PM" : "AM";
+  return `${h % 12 || 12}:${String(m || 0).padStart(2, "0")} ${ap}`;
+};
+const parse12h = (text) => {
+  const m = String(text).trim().toUpperCase().match(/^(\d{1,2})(?:[:.](\d{2}))?\s*(AM|PM)$/);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = m[2] ? parseInt(m[2], 10) : 0;
+  if (h < 1 || h > 12 || min > 59) return null;
+  if (m[3] === "PM" && h !== 12) h += 12;
+  if (m[3] === "AM" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+};
 
 const LinkedInLogo = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
@@ -57,10 +75,17 @@ export default function SettingsTab() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [error, setError]             = useState(null);
+  const [timeDrafts, setTimeDrafts]   = useState({});
+  const [timeErrors, setTimeErrors]   = useState({});
 
   useEffect(() => {
     getSubscribed().then(setSubscribed).catch(() => {});
-    apiFetch("/settings/notifications").then(r => setPrefs(r.prefs)).catch(() => setPrefs({}));
+    apiFetch("/settings/notifications").then(r => {
+      setPrefs(r.prefs);
+      const drafts = {};
+      NOTIF_TYPES.filter(t => t.hasTime).forEach(t => { drafts[t.key] = to12h(r.prefs[`${t.key}_time`]); });
+      setTimeDrafts(drafts);
+    }).catch(() => setPrefs({}));
   }, []);
 
   const toggleMaster = async () => {
@@ -83,6 +108,23 @@ export default function SettingsTab() {
     setPrefs(next);
     apiFetch("/settings/notifications", { method: "PUT", body: JSON.stringify({ prefs: next }) })
       .catch(() => setPrefs(prefs)); // revert on failure
+  };
+
+  const commitTime = (key) => {
+    const timeKey   = `${key}_time`;
+    const canonical = parse12h(timeDrafts[key]);
+    if (!canonical) {
+      setTimeErrors(e => ({ ...e, [key]: true }));
+      setTimeDrafts(d => ({ ...d, [key]: to12h(prefs[timeKey]) })); // revert
+      return;
+    }
+    setTimeErrors(e => ({ ...e, [key]: false }));
+    setTimeDrafts(d => ({ ...d, [key]: to12h(canonical) }));
+    if (canonical === prefs[timeKey]) return;
+    const next = { ...prefs, [timeKey]: canonical };
+    setPrefs(next);
+    apiFetch("/settings/notifications", { method: "PUT", body: JSON.stringify({ prefs: next }) })
+      .catch(() => { setPrefs(prefs); setTimeDrafts(d => ({ ...d, [key]: to12h(prefs[timeKey]) })); });
   };
 
   const deleteAccount = async () => {
@@ -147,13 +189,31 @@ export default function SettingsTab() {
         </div>
 
         {NOTIF_TYPES.map(t => (
-          <div key={t.key} style={rowStyle}>
-            <div style={{ flex: 1 }}>
+          <div key={t.key} style={{ ...rowStyle, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 150 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: subscribed ? "var(--text)" : "var(--muted)" }}>{t.label}</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{t.desc}</div>
+              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                {t.hasTime && prefs?.[t.key] ? `Reminds you at ${to12h(prefs[`${t.key}_time`])} — ${t.desc.toLowerCase()}` : t.desc}
+              </div>
             </div>
             {prefs === null ? <Spin size={14} /> : (
               <Toggle on={!!prefs[t.key]} onChange={() => togglePref(t.key)} disabled={!subscribed} />
+            )}
+            {t.hasTime && prefs?.[t.key] && subscribed && (
+              <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>Time:</span>
+                <input
+                  value={timeDrafts[t.key] ?? ""}
+                  onChange={e => setTimeDrafts(d => ({ ...d, [t.key]: e.target.value }))}
+                  onBlur={() => commitTime(t.key)}
+                  onKeyDown={e => e.key === "Enter" && e.target.blur()}
+                  placeholder="9:00 AM"
+                  style={{ width: 110, padding: "6px 10px", fontSize: 16, borderRadius: 8, background: "var(--off)", color: "var(--text)", border: `1.5px solid ${timeErrors[t.key] ? "var(--danger)" : "var(--border)"}` }}
+                />
+                {timeErrors[t.key] && (
+                  <span style={{ fontSize: 11, color: "var(--danger)" }}>Use a time like 9:00 AM</span>
+                )}
+              </div>
             )}
           </div>
         ))}
