@@ -232,7 +232,7 @@ export default function App() {
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
             <ScanTab onAddToLog={handleAddToLog} />
           </div>
-          {activeMainTab === "library" && <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} />}
+          {activeMainTab === "library" && <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} onLogAdded={handleLogAdded} />}
           <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
             <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
           </div>
