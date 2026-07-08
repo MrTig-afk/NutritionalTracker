@@ -110,13 +110,35 @@ export default function ChatAssistant({ open, onOpenChange }) {
   const [input,    setInput]   = useState("");
   const [loading,  setLoading] = useState(false);
   const [error,    setError]   = useState(null);
+  const [vv,       setVv]      = useState(null); // visual viewport while keyboard is up
   const scrollRef = useRef(null);
+
+  // iOS doesn't resize the page for the on-screen keyboard — it pans the
+  // visual viewport, dragging fixed elements (and our header) off-screen.
+  // Track the visual viewport and, while the keyboard is up, fit the panel
+  // exactly inside the visible area.
+  useEffect(() => {
+    if (!open || !window.visualViewport) return;
+    const v = window.visualViewport;
+    const update = () => {
+      const keyboardUp = window.innerHeight - v.height > 80;
+      setVv(keyboardUp ? { height: v.height, offsetTop: v.offsetTop } : null);
+    };
+    update();
+    v.addEventListener("resize", update);
+    v.addEventListener("scroll", update);
+    return () => {
+      v.removeEventListener("resize", update);
+      v.removeEventListener("scroll", update);
+      setVv(null);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (open && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages.length, open]);
+  }, [messages.length, open, vv]);
 
   const send = async () => {
     const text = input.trim();
@@ -137,10 +159,16 @@ export default function ChatAssistant({ open, onOpenChange }) {
 
   if (!open) return null;
 
+  // Keyboard up: pin the panel inside the visible viewport (header stays on
+  // screen, input sits right above the keyboard). Otherwise: normal docked look.
+  const panelPos = vv
+    ? { top: vv.offsetTop + 8, bottom: "auto", height: vv.height - 16 }
+    : { bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", height: "min(460px, calc(100dvh - 140px))" };
+
   return (
     <div style={{
-      position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", right: 16, left: 16, zIndex: 60,
-      height: 460,
+      position: "fixed", right: 16, left: 16, zIndex: 60,
+      ...panelPos,
       background: "var(--surface)", borderRadius: 20,
       border: "1px solid var(--border)",
       boxShadow: "0 12px 48px rgba(0,0,0,0.18)",
