@@ -11,7 +11,9 @@ export default function TrendsTab() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    apiFetch(`/log/trends?range=${range}`)
+    const d = new Date();
+    const clientDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    apiFetch(`/log/trends?range=${range}&client_date=${clientDate}`)
       .then(d  => setTrendData(d.data))
       .catch(e => setError(e.message || "Failed to load trends"))
       .finally(()  => setLoading(false));
