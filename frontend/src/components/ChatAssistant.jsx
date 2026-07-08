@@ -103,7 +103,7 @@ function renderMarkdown(text) {
   return out;
 }
 
-export default function ChatAssistant({ open, onOpenChange }) {
+export default function ChatAssistant({ open }) {
   const [messages, setMessages] = useState([
     { role: "assistant", text: "Hey! What would you like to know about your nutrition today?", greeting: true }
   ]);
@@ -167,26 +167,22 @@ export default function ChatAssistant({ open, onOpenChange }) {
 
   if (!open) return null;
 
-  // Mobile: the chat is its own full screen (opaque, nothing visible behind),
-  // ending just above the bottom nav. Desktop keeps the floating card.
-  // Keyboard up: pin the panel inside the visible viewport (header stays on
-  // screen, input sits right above the keyboard).
+  // The chat is a full tab screen everywhere — no floating card, nothing
+  // visible behind it. Mobile: full screen ending above the bottom nav.
+  // Desktop: fills everything below the top bar. Keyboard up: fit the whole
+  // panel inside the visible viewport so header and input stay on screen.
   const isDesktop = window.innerWidth >= 768;
   const panelPos = vv
-    ? (isDesktop
-        ? { top: vv.offsetTop + 8, bottom: "auto", height: vv.height - 16, left: 16, right: 16, borderRadius: 20 }
-        : { top: vv.offsetTop, bottom: "auto", height: vv.height, left: 0, right: 0, borderRadius: 0 })
+    ? { top: vv.offsetTop, bottom: "auto", height: vv.height, left: 0, right: 0 }
     : (isDesktop
-        ? { bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", height: "min(460px, calc(100dvh - 140px))", left: 16, right: 16, borderRadius: 20 }
-        : { top: 0, bottom: "calc(74px + env(safe-area-inset-bottom, 0px))", left: 0, right: 0, borderRadius: 0 });
+        ? { top: 60, bottom: 0, left: 0, right: 0 }
+        : { top: 0, bottom: "calc(74px + env(safe-area-inset-bottom, 0px))", left: 0, right: 0 });
 
   return (
     <div style={{
       position: "fixed", zIndex: 60,
       ...panelPos,
       background: "var(--surface)",
-      border: isDesktop ? "1px solid var(--border)" : "none",
-      boxShadow: isDesktop ? "0 12px 48px rgba(0,0,0,0.18)" : "none",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
       <div style={{ background: "var(--teal)", padding: isDesktop ? "12px 16px" : "calc(12px + env(safe-area-inset-top, 0px)) 16px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -197,9 +193,6 @@ export default function ChatAssistant({ open, onOpenChange }) {
           <div style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Nutrition Assistant</div>
           <div style={{ fontSize: 10, color: "rgba(255,255,255,0.65)" }}>Knows your log, goals & 7-day trends</div>
         </div>
-        <button onClick={() => onOpenChange(false)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 4, borderRadius: 6, color: "rgba(255,255,255,0.75)" }}>
-          <Icon n="close" size={18} />
-        </button>
       </div>
 
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 10 }}>

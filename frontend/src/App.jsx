@@ -19,6 +19,7 @@ const TABS = [
   { id: "library",  label: "Library",  icon: "folder"           },
   { id: "tracker",  label: "Tracker",  icon: "bar_chart"        },
   { id: "trends",   label: "Trends",   icon: "show_chart"       },
+  { id: "ai",       label: "AI",       icon: "nutrition"        },
   { id: "settings", label: "Settings", icon: "settings"         },
 ];
 
@@ -35,7 +36,6 @@ export default function App() {
   const [logRefreshKey, setLogRefreshKey] = useState(0);
   const [libraryMountKey, setLibraryMountKey] = useState(0);
   const [editLogItem, setEditLogItem]     = useState(null);
-  const [chatOpen, setChatOpen]           = useState(false);
   const [updateReady, setUpdateReady]   = useState(() => !!window.__swUpdateReady);
   const [showChangelog, setShowChangelog] = useState(false);
   const [upcomingChangelog, setUpcomingChangelog] = useState([]);
@@ -116,7 +116,6 @@ export default function App() {
 
   const handleTabChange = useCallback((tabId) => {
     setActiveMainTab(tabId);
-    setChatOpen(false);
     if (tabId === "library") setLibraryMountKey(k => k + 1);
   }, []);
 
@@ -229,36 +228,20 @@ export default function App() {
           {activeMainTab === "settings" && <SettingsTab />}
         </div>
 
-        {/* Bottom Navigation — order: tabs, AI, Settings. While the chat
-            overlay is open only AI highlights, so two items never light up. */}
+        {/* Bottom Navigation — AI is a normal tab like everything else */}
         <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", paddingTop: 6, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          {(() => {
-            const navBtn = (tab) => {
-              const active = activeMainTab === tab.id && !chatOpen;
-              return (
-                <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                  style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
-                  <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
-                    <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: "0.2px" }}>{tab.label}</span>
-                </button>
-              );
-            };
+          {TABS.map(tab => {
+            const active = activeMainTab === tab.id;
             return (
-              <>
-                {TABS.filter(t => t.id !== "settings").map(navBtn)}
-                <button onClick={() => setChatOpen(o => !o)}
-                  style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: chatOpen ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
-                  <div style={{ width: 56, height: 28, borderRadius: 14, background: chatOpen ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
-                    <Icon n="nutrition" size={22} style={{ color: chatOpen ? "var(--teal)" : "var(--muted)", fontVariationSettings: chatOpen ? "'FILL' 1" : "'FILL' 0" }} />
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: chatOpen ? 700 : 500, letterSpacing: "0.2px" }}>AI</span>
-                </button>
-                {navBtn(TABS.find(t => t.id === "settings"))}
-              </>
+              <button key={tab.id} onClick={() => handleTabChange(tab.id)}
+                style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
+                  <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: "0.2px" }}>{tab.label}</span>
+              </button>
             );
-          })()}
+          })}
         </div>
       </div>
 
@@ -299,7 +282,8 @@ export default function App() {
         </div>
       )}
 
-      <ChatAssistant open={chatOpen} onOpenChange={setChatOpen} />
+      {/* Kept mounted so the conversation survives tab switches */}
+      <ChatAssistant open={activeMainTab === "ai"} />
       <Analytics />
     </>
   );

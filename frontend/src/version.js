@@ -3,4 +3,4 @@
 // pending update adds relative to the build the user is currently running.
 // RELEASE RULE: every user-visible release bumps this by 1 and prepends
 // entries with the new number to public/changelog.v2.json, in the same commit.
-export const CHANGELOG_VERSION = 9;
+export const CHANGELOG_VERSION = 10;
