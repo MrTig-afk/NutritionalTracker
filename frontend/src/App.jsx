@@ -47,6 +47,18 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Boot fallback: never leave the user on the spinner. If the auth server is
+  // slow/unreachable, fall through to the login screen after 6s.
+  useEffect(() => {
+    let cancelled = false;
+    const settle = (value) => { if (!cancelled) setSession(s => (s === undefined ? value : s)); };
+    const timer = setTimeout(() => settle(null), 6000);
+    supabase.auth.getSession()
+      .then(({ data }) => settle(data?.session ?? null))
+      .catch(() => settle(null));
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, []);
+
   useEffect(() => {
     const handler = () => {
       setUpdateReady(true);
@@ -69,6 +81,13 @@ export default function App() {
       window.location.reload();
     });
   };
+
+  // If an update is ready while we're still stuck on the boot spinner, the
+  // running build is likely broken — apply the new one immediately (there is
+  // no in-app state to lose before login).
+  useEffect(() => {
+    if (updateReady && session === undefined) handleUpdate();
+  }, [updateReady, session]);
 
   const dismissIOSBanner = () => {
     localStorage.setItem("ios-banner-dismissed", "1");
@@ -96,6 +115,12 @@ export default function App() {
     return (
       <>
         <style>{PALETTE_CSS}</style>
+        {updateReady && (
+          <button onClick={handleUpdate}
+            style={{ position: "fixed", top: "calc(12px + env(safe-area-inset-top, 0px))", left: "50%", transform: "translateX(-50%)", zIndex: 100, background: "var(--teal)", color: "white", border: "none", borderRadius: 20, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(0,109,119,0.4)" }}>
+            Update available — tap to refresh
+          </button>
+        )}
         <LoginScreen />
       </>
     );

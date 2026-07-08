@@ -8,6 +8,8 @@ export default function LoginScreen() {
   const [sent, setSent]                     = useState(false);
   const [error, setError]                   = useState(null);
   const [googleConflict, setGoogleConflict] = useState(false);
+  const [code, setCode]                     = useState("");
+  const [verifying, setVerifying]           = useState(false);
 
   const signInWithGoogle = () =>
     supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } });
@@ -18,7 +20,7 @@ export default function LoginScreen() {
     setSending(true); setError(null); setGoogleConflict(false);
     try {
       try {
-        const res = await fetch(`${API_URL}/check-provider?email=${encodeURIComponent(normalizedEmail)}`);
+        const res = await fetch(`${API_URL}/check-provider?email=${encodeURIComponent(normalizedEmail)}`, { signal: AbortSignal.timeout(5000) });
         if (res.ok) {
           const { has_google } = await res.json();
           if (has_google) {
@@ -35,6 +37,24 @@ export default function LoginScreen() {
     } catch (e) {
       setError(e.message);
     } finally { setSending(false); }
+  };
+
+  // Verify the emailed 6-digit code in place — no redirect, so the session is
+  // created in this exact context (installed PWA or any browser).
+  const handleVerifyCode = async () => {
+    const token = code.trim();
+    if (token.length < 6) return;
+    setVerifying(true); setError(null);
+    try {
+      const { error: vErr } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(), token, type: "email",
+      });
+      if (vErr) throw new Error(vErr.message);
+      // Success: onAuthStateChange in App.jsx takes over.
+    } catch (e) {
+      setError(e.message);
+      setVerifying(false);
+    }
   };
 
   const inputStyle = {
@@ -60,7 +80,7 @@ export default function LoginScreen() {
             <>
               <div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Welcome back</div>
-                <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 5, lineHeight: 1.5 }}>Enter your email to receive a sign-in link.</div>
+                <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 5, lineHeight: 1.5 }}>Enter your email to receive a sign-in code.</div>
               </div>
 
               <div>
@@ -94,7 +114,7 @@ export default function LoginScreen() {
                 disabled={sending || !email.trim()}
                 style={{ width: "100%", padding: "14px", background: "var(--teal)", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 700, cursor: sending || !email.trim() ? "not-allowed" : "pointer", opacity: sending || !email.trim() ? 0.55 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: "0.2px" }}>
                 {sending ? <Spin size={18} color="white" /> : <Icon n="send" size={18} style={{ color: "white" }} />}
-                {sending ? "Sending…" : "Send Sign-in Link"}
+                {sending ? "Sending…" : "Send Sign-in Code"}
               </button>
 
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -122,9 +142,38 @@ export default function LoginScreen() {
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Check your inbox</div>
               <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 10, lineHeight: 1.7 }}>
-                We sent a sign-in link to<br /><strong style={{ color: "var(--text)" }}>{email}</strong>
+                We sent a sign-in email to<br /><strong style={{ color: "var(--text)" }}>{email}</strong><br />
+                Enter the 6-digit code from it below — or tap the link in the email.
               </div>
-              <button onClick={() => { setSent(false); setEmail(""); }} style={{ marginTop: 20, fontSize: 13, color: "var(--teal)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline" }}>
+
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={e => e.key === "Enter" && handleVerifyCode()}
+                placeholder="000000"
+                autoFocus
+                style={{ ...inputStyle, marginTop: 18, textAlign: "center", fontSize: 22, fontWeight: 700, letterSpacing: "8px" }}
+              />
+
+              {error && (
+                <div style={{ background: "var(--danger-lt, #FFDAD6)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)", marginTop: 12, textAlign: "left" }}>
+                  {error}
+                </div>
+              )}
+
+              <button
+                onClick={handleVerifyCode}
+                disabled={verifying || code.trim().length < 6}
+                style={{ width: "100%", marginTop: 14, padding: "14px", background: "var(--teal)", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 700, cursor: verifying || code.trim().length < 6 ? "not-allowed" : "pointer", opacity: verifying || code.trim().length < 6 ? 0.55 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                {verifying ? <Spin size={18} color="white" /> : <Icon n="login" size={18} style={{ color: "white" }} />}
+                {verifying ? "Verifying…" : "Sign In"}
+              </button>
+
+              <button onClick={() => { setSent(false); setEmail(""); setCode(""); setError(null); }} style={{ marginTop: 16, fontSize: 13, color: "var(--teal)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline" }}>
                 Use a different email
               </button>
             </div>
