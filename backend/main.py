@@ -206,7 +206,7 @@ app.add_middleware(
 )
 
 # ---------- SUPABASE AUTH ----------
-SUPABASE_URL              = os.getenv("SUPABASE_URL", "https://zdmsfftfqnajanpbvcgn.supabase.co")
+SUPABASE_URL              = os.getenv("SUPABASE_URL", "https://kqgckmvwedkuoboftduu.supabase.co")
 SUPABASE_JWT_SECRET       = os.getenv("SUPABASE_JWT_SECRET")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
