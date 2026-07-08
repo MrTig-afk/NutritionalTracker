@@ -1,4 +1,5 @@
 [
+  { "v": 13, "text": "Tab bar no longer floats mid-screen while typing" },
   { "v": 12, "text": "Fresh dark mode look — brighter accents, cleaner header" },
   { "v": 12, "text": "Header, banners and chat no longer blend together" },
   { "v": 11, "text": "Top bar stays visible in the AI chat tab" },
