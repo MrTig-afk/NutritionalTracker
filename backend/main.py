@@ -758,6 +758,28 @@ _MEAL_REMINDERS = [
 ]
 _reminder_sent: dict = {}  # slot minutes -> local date iso already sent
 
+# Supabase free tier pauses projects after ~7 days without API activity, which
+# takes its domain offline and breaks all logins. One authenticated API call a
+# day keeps the project active. Runs at 12:00 local inside the scheduler loop.
+_SUPABASE_KEEPALIVE_SLOT = 12 * 60
+_supabase_keepalive_sent: dict = {}
+
+def _supabase_keepalive():
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not key:
+        return
+    try:
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=1",
+            headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        )
+        urllib.request.urlopen(req, timeout=15)
+        logger.info("💓 Supabase keepalive OK")
+    except Exception as e:
+        logger.warning(f"Supabase keepalive failed: {e}")
+        notify_admin("supabase_keepalive", "🔴 Supabase unreachable",
+                     "Daily keepalive failed — the project may be paused. Logins will break; restore it at supabase.com/dashboard.")
+
 def _run_meal_reminder(threshold: int, title: str, body: str, today: str):
     conn = get_db("__system__")
     cur  = conn.cursor()
@@ -787,6 +809,9 @@ def _meal_reminder_loop():
                 if 0 <= now_min - slot <= 2 and _reminder_sent.get(slot) != today:
                     _reminder_sent[slot] = today
                     _run_meal_reminder(threshold, title, body, today)
+            if 0 <= now_min - _SUPABASE_KEEPALIVE_SLOT <= 2 and _supabase_keepalive_sent.get("d") != today:
+                _supabase_keepalive_sent["d"] = today
+                _supabase_keepalive()
         except Exception as e:
             logger.warning(f"Meal reminder loop error: {e}")
         time.sleep(60)
