@@ -237,6 +237,9 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                   <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                     <Icon n="add" size={11} /> Log
                   </button>
+                  <button onClick={() => deleteItem(item.folderId, item.item_id)} disabled={deletingItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                    {deletingItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
+                  </button>
                 </div>
               ))}</div>;
         })()
