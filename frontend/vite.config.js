@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  // Drop console/debugger from production bundles (keep console.error).
+  esbuild: { drop: ['debugger'], pure: ['console.log', 'console.debug', 'console.info'] },
   plugins: [
     react(),
     VitePWA({

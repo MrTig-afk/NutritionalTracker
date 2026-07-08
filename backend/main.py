@@ -46,6 +46,7 @@ DATABASE_URL   = os.getenv("DATABASE_URL")  # Set to Supabase connection string
 PRIMARY_MODEL  = "gemini-2.5-flash"
 FALLBACK_MODEL = "gemini-2.0-flash"
 MAX_IMAGE_PX   = 1024
+MAX_UPLOAD_MB  = 15  # reject oversized uploads before they hit memory/Gemini
 JPEG_QUALITY   = 60
 GEMINI_TIMEOUT = 45
 MAX_RETRIES    = 2
@@ -1188,6 +1189,11 @@ async def analyze_label(
     check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
+    if len(raw_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(status_code=413, detail={
+            "error_type": "file_too_large", "retryable": False,
+            "message": f"Image too large (max {MAX_UPLOAD_MB} MB).",
+        })
 
     processed_bytes = optimize_image(raw_bytes, file.content_type or "image/jpeg")
     raw_url, processed_url = await upload_raw_and_processed(
@@ -1256,6 +1262,11 @@ async def analyze_labels(
 
     for f in files:
         raw_bytes       = await f.read()
+        if len(raw_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(status_code=413, detail={
+                "error_type": "file_too_large", "retryable": False,
+                "message": f"One image is too large (max {MAX_UPLOAD_MB} MB).",
+            })
         processed_bytes = optimize_image(raw_bytes, f.content_type or "image/jpeg")
         image_id        = str(uuid.uuid4())
         image_ids.append(image_id)
