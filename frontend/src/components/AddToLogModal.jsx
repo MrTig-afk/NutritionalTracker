@@ -119,7 +119,7 @@ export default function AddToLogModal({ item, onClose, onAdded }) {
         <div style={{ display: "flex", gap: 8 }}>
           {macroCells([
             { label: "Cal",   value: cal,  unit: "kcal", color: "var(--orange)"  },
-            { label: "Prot",  value: prot, unit: "g",    color: "var(--teal)"    },
+            { label: "Prot",  value: prot, unit: "g",    color: "var(--accent)"    },
             { label: "Carbs", value: carb, unit: "g",    color: "var(--purple)"  },
             { label: "Fat",   value: fat,  unit: "g",    color: "var(--brown)"   },
           ])}

@@ -84,7 +84,7 @@ export default function DatePicker({ value, onChange, maxDate }) {
           color: "var(--brown)", background: "none", border: "none", cursor: "pointer",
           padding: "3px 6px", borderRadius: 8,
           outline: open ? "2px solid var(--teal)" : "none", outlineOffset: 1 }}>
-        <Icon n="calendar_today" size={14} style={{ color: "var(--teal)" }} />
+        <Icon n="calendar_today" size={14} style={{ color: "var(--accent)" }} />
         {formatDisplayDate(value)}
         <Icon n="expand_more" size={13} style={{ color: "var(--muted)",
           transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
@@ -141,7 +141,7 @@ export default function DatePicker({ value, onChange, maxDate }) {
                     fontSize: 12, fontWeight: isSelected || isToday ? 700 : 400,
                     cursor: isFuture ? "default" : "pointer",
                     background:    isSelected ? "var(--teal)" : "transparent",
-                    color:         isSelected ? "white" : isFuture ? "var(--border)" : isToday ? "var(--teal)" : "var(--text)",
+                    color:         isSelected ? "white" : isFuture ? "var(--border)" : isToday ? "var(--accent)" : "var(--text)",
                     outline:       isToday && !isSelected ? "1.5px solid var(--teal)" : "none",
                     outlineOffset: -1,
                   }}>
@@ -159,7 +159,7 @@ export default function DatePicker({ value, onChange, maxDate }) {
 
           {value !== maxDate && (
             <button onClick={() => { onChange(maxDate); setOpen(false); }}
-              style={{ width: "100%", marginTop: 10, padding: "7px", background: "var(--teal-lt)", border: "1px solid var(--teal)", borderRadius: 10, fontSize: 12, fontWeight: 700, color: "var(--teal)", cursor: "pointer" }}>
+              style={{ width: "100%", marginTop: 10, padding: "7px", background: "var(--teal-lt)", border: "1px solid var(--teal)", borderRadius: 10, fontSize: 12, fontWeight: 700, color: "var(--accent)", cursor: "pointer" }}>
               Jump to Today
             </button>
           )}

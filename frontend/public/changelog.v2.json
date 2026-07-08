@@ -1,4 +1,6 @@
 [
+  { "v": 12, "text": "Fresh dark mode look — brighter accents, cleaner header" },
+  { "v": 12, "text": "Header, banners and chat no longer blend together" },
   { "v": 11, "text": "Top bar stays visible in the AI chat tab" },
   { "v": 10, "text": "AI chat is now its own tab — no more floating window" },
   { "v": 9, "text": "Chat now opens as its own full screen" },

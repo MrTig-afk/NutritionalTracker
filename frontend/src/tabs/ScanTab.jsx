@@ -120,7 +120,7 @@ export default function ScanTab({ onAddToLog }) {
               onClick={() => fileInputRef.current?.click()}>
               <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple />
               <div style={{ width: 52, height: 52, borderRadius: 14, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon n="upload" size={22} style={{ color: "var(--teal)" }} />
+                <Icon n="upload" size={22} style={{ color: "var(--accent)" }} />
               </div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Upload nutrition label</div>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Crop → optimize → analyze</div>
@@ -170,7 +170,7 @@ export default function ScanTab({ onAddToLog }) {
               <input key={fileInputKey} ref={fileInputRef} type="file" style={{ display: "none" }} onChange={handleImageUpload} accept="image/*" multiple />
               <p style={{ fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
                 {images.length} image{images.length !== 1 ? "s" : ""} queued
-                {allOptimized && !loading && !results && <span style={{ color: "var(--teal)", marginLeft: 6 }}>· optimized ✓</span>}
+                {allOptimized && !loading && !results && <span style={{ color: "var(--accent)", marginLeft: 6 }}>· optimized ✓</span>}
                 {loadingMsg && <span style={{ color: "var(--orange)", marginLeft: 6 }}>· {loadingMsg}</span>}
               </p>
             </div>
@@ -218,7 +218,7 @@ export default function ScanTab({ onAddToLog }) {
           {loading ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: "60px 0" }}>
               <Spin size={32} />
-              <p style={{ fontSize: 13, color: "var(--teal)", fontWeight: 600 }}>{loadingMsg || "Running analysis..."}</p>
+              <p style={{ fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{loadingMsg || "Running analysis..."}</p>
             </div>
           ) : results ? (
             <div style={{ ...card, padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
@@ -234,7 +234,7 @@ export default function ScanTab({ onAddToLog }) {
                           <div style={{ width: 36, height: 36, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
                             {thumbSrc ? <img src={thumbSrc} alt={`Label ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
                           </div>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: activeIndex === i ? "var(--teal)" : "var(--muted)" }}>IMG {i + 1}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: activeIndex === i ? "var(--accent)" : "var(--muted)" }}>IMG {i + 1}</span>
                         </button>
                       );
                     })}
@@ -249,7 +249,7 @@ export default function ScanTab({ onAddToLog }) {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>Analyzing label</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brown)", marginTop: 2 }}>Image {activeIndex + 1} of {results.length}</div>
-                  {images[activeIndex]?.cropData && <div style={{ fontSize: 10, color: "var(--teal)", marginTop: 2 }}>✂ Cropped & optimized</div>}
+                  {images[activeIndex]?.cropData && <div style={{ fontSize: 10, color: "var(--accent)", marginTop: 2 }}>✂ Cropped & optimized</div>}
                 </div>
                 <button onClick={() => setSaveModal({ result: currentResult, imageId: currentResult?.image_id || "", name: logName.trim() })}
                   style={{ ...ghostBtn, flexShrink: 0 }}>

@@ -52,10 +52,10 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
       <div style={card}>
         <div style={cardHeader}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
-            <Icon n="my_location" size={14} style={{ color: "var(--teal)" }} /> Daily Goals
+            <Icon n="my_location" size={14} style={{ color: "var(--accent)" }} /> Daily Goals
           </div>
           <button onClick={() => { setGoalDraft({ ...goals }); setEditingGoals(v => !v); }}
-            style={{ fontSize: 12, fontWeight: 600, color: "var(--teal)", background: "none", border: "none", cursor: "pointer" }}>
+            style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}>
             {editingGoals ? "Cancel" : "Edit"}
           </button>
         </div>
@@ -88,7 +88,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
         {[
           { label: "Calories", val: totals.calories, unit: "kcal", color: "var(--orange)" },
-          { label: "Protein",  val: totals.protein,  unit: "g",    color: "var(--teal)"   },
+          { label: "Protein",  val: totals.protein,  unit: "g",    color: "var(--accent)"   },
           { label: "Carbs",    val: totals.carbs,    unit: "g",    color: "var(--purple)"  },
           { label: "Fat",      val: totals.fat,      unit: "g",    color: "var(--brown)"  },
         ].map(({ label, val, unit, color }) => (
@@ -132,7 +132,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
               </div>
               <button onClick={() => onEditEntry && onEditEntry(entry)}
                 style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon n="edit" size={13} style={{ color: "var(--teal)" }} />
+                <Icon n="edit" size={13} style={{ color: "var(--accent)" }} />
               </button>
               <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
                 style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>

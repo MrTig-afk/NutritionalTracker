@@ -211,7 +211,7 @@ export default function LibraryTab({ onAddToLog }) {
                 <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
                   {(item.nutrition?.processed_url || item.nutrition?.raw_url)
                     ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0 }}><img src={item.nutrition.processed_url || item.nutrition.raw_url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} /></div>
-                    : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={14} style={{ color: "var(--teal)" }} /></div>
+                    : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={14} style={{ color: "var(--accent)" }} /></div>
                   }
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
@@ -233,7 +233,7 @@ export default function LibraryTab({ onAddToLog }) {
               {folders.map(folder => (
                 <div key={folder.folder_id} style={card}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", cursor: "pointer" }} onClick={() => openFolderById(folder.folder_id)}>
-                    {openFolder === folder.folder_id ? <Icon n="folder_open" size={18} style={{ color: "var(--teal)" }} /> : <Icon n="folder" size={18} style={{ color: "var(--muted)" }} />}
+                    {openFolder === folder.folder_id ? <Icon n="folder_open" size={18} style={{ color: "var(--accent)" }} /> : <Icon n="folder" size={18} style={{ color: "var(--muted)" }} />}
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{folder.name}</span>
                     <span style={{ fontSize: 11, color: "var(--muted)" }}>{folderData[folder.folder_id]?.items?.length ?? ""} items</span>
                     <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
@@ -252,7 +252,7 @@ export default function LibraryTab({ onAddToLog }) {
                             <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 10px 20px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
                               {imageUrl
                                 ? <div style={{ width: 44, height: 44, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", flexShrink: 0 }}><img src={imageUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} /></div>
-                                : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={14} style={{ color: "var(--teal)" }} /></div>
+                                : <div style={{ width: 44, height: 44, borderRadius: 10, background: "var(--teal-lt)", border: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="storage" size={14} style={{ color: "var(--accent)" }} /></div>
                               }
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
@@ -277,7 +277,7 @@ export default function LibraryTab({ onAddToLog }) {
 
           {/* ── Meal Templates section ── */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-            <Icon n="restaurant_menu" size={16} style={{ color: "var(--teal)" }} />
+            <Icon n="restaurant_menu" size={16} style={{ color: "var(--accent)" }} />
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", flex: 1 }}>Meal Templates</span>
           </div>
 
@@ -300,7 +300,7 @@ export default function LibraryTab({ onAddToLog }) {
                 <div key={tmpl.template_id} style={card}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px" }}>
                     <div style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, flex: 1 }} onClick={() => openTemplateById(tmpl.template_id)}>
-                      <Icon n="set_meal" size={18} style={{ color: openTemplate === tmpl.template_id ? "var(--teal)" : "var(--muted)" }} />
+                      <Icon n="set_meal" size={18} style={{ color: openTemplate === tmpl.template_id ? "var(--accent)" : "var(--muted)" }} />
                       <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{tmpl.name}</span>
                       <span style={{ fontSize: 11, color: "var(--muted)" }}>{tmpl.item_count} items</span>
                     </div>
@@ -324,7 +324,7 @@ export default function LibraryTab({ onAddToLog }) {
                       {(templateData[tmpl.template_id]?.items || []).map((item, idx) => (
                         <div key={item.item_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 10px 20px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
                           <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--teal-lt)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            <Icon n="restaurant" size={13} style={{ color: "var(--teal)" }} />
+                            <Icon n="restaurant" size={13} style={{ color: "var(--accent)" }} />
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
@@ -355,7 +355,7 @@ export default function LibraryTab({ onAddToLog }) {
                                       <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.name}</div>
                                       <div style={{ fontSize: 11, color: "var(--muted)" }}>{i.folderName} · {macroLine(i.nutrition)}</div>
                                     </div>
-                                    <Icon n="add_circle" size={16} style={{ color: "var(--teal)", flexShrink: 0 }} />
+                                    <Icon n="add_circle" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
                                   </div>
                                 ));
                           })()}

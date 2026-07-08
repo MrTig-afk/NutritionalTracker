@@ -7,6 +7,8 @@ export const PALETTE_CSS = `
   }
   :root {
     --teal:      #006D77;
+    --header:    #006D77;
+    --accent:    #006D77;
     --teal-lt:   #DCF4F5;
     --teal-md:   #004E56;
     --teal-dk:   #003940;
@@ -34,6 +36,8 @@ export const PALETTE_CSS = `
   }
   :root[data-theme="dark"] {
     --teal:      #006D77;
+    --header:    #1B2423;
+    --accent:    #5FCFD8;
     --teal-lt:   #0E3A3F;
     --teal-md:   #004E56;
     --teal-dk:   #003940;

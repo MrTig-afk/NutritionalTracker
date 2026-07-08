@@ -51,7 +51,7 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("theme", theme);
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", theme === "dark" ? "#003940" : "#006D77");
+    if (meta) meta.setAttribute("content", theme === "dark" ? "#1B2423" : "#006D77");
   }, [theme]);
 
   useEffect(() => {
@@ -156,19 +156,19 @@ export default function App() {
         {editLogItem  && <EditLogModal  entry={editLogItem}  onClose={() => setEditLogItem(null)}  onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
 
         {showIOSBanner && (
-          <div style={{ background: "#004E56", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, zIndex: 39 }}>
-            <Icon n="ios_share" size={18} style={{ color: "var(--mint)", flexShrink: 0 }} />
-            <span style={{ flex: 1, fontSize: 13, color: "var(--mint)", lineHeight: 1.4 }}>
+          <div style={{ background: "var(--mint)", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, zIndex: 39 }}>
+            <Icon n="ios_share" size={18} style={{ color: "#0B3D22", flexShrink: 0 }} />
+            <span style={{ flex: 1, fontSize: 13, color: "#0B3D22", lineHeight: 1.4 }}>
               Tap <strong>Share</strong> → <strong>Add to Home Screen</strong> to install NutriScan
             </span>
-            <button onClick={dismissIOSBanner} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "rgba(174,246,199,0.6)", flexShrink: 0 }}>
+            <button onClick={dismissIOSBanner} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "rgba(11,61,34,0.6)", flexShrink: 0 }}>
               <Icon n="close" size={18} />
             </button>
           </div>
         )}
 
         {/* Top App Bar */}
-        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--teal)", paddingTop: "calc(12px + env(safe-area-inset-top, 0px))", paddingBottom: "12px", paddingLeft: "20px", paddingRight: "20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,109,119,0.25)" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 40, background: "var(--header)", paddingTop: "calc(12px + env(safe-area-inset-top, 0px))", paddingBottom: "12px", paddingLeft: "20px", paddingRight: "20px", display: "flex", alignItems: "center", justifyContent: "space-between", boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(174,246,199,0.18)", border: "1.5px solid rgba(174,246,199,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
@@ -207,9 +207,9 @@ export default function App() {
         {/* Update banner — kept out of the header so it never crowds it */}
         {updateReady && (
           <button onClick={() => setShowChangelog(true)}
-            style={{ width: "100%", background: "#004E56", border: "none", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer" }}>
-            <Icon n="new_releases" size={18} style={{ color: "var(--mint)", flexShrink: 0 }} />
-            <span style={{ fontSize: 13, color: "var(--mint)", fontWeight: 700 }}>
+            style={{ width: "100%", background: "var(--mint)", border: "none", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer" }}>
+            <Icon n="new_releases" size={18} style={{ color: "#0B3D22", flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: "#0B3D22", fontWeight: 700 }}>
               Update available — tap to see what's new
             </span>
           </button>
@@ -234,9 +234,9 @@ export default function App() {
             const active = activeMainTab === tab.id;
             return (
               <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--accent)" : "var(--muted)", transition: "color 0.15s" }}>
                 <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
-                  <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
+                  <Icon n={tab.icon} size={22} style={{ color: active ? "var(--accent)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
                 </div>
                 <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: "0.2px" }}>{tab.label}</span>
               </button>
@@ -250,7 +250,7 @@ export default function App() {
           <div style={{ background: "var(--surface)", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 400, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
               <div style={{ width: 34, height: 34, borderRadius: 10, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon n="new_releases" size={18} style={{ color: "var(--teal)" }} />
+                <Icon n="new_releases" size={18} style={{ color: "var(--accent)" }} />
               </div>
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)" }}>Update Available</div>

@@ -42,7 +42,7 @@ export default function SaveToFolderModal({ result, imageId, onClose, onSaved, i
     <div style={overlayBg}>
       <div style={modalBox}>
         <div style={modalHeader}>
-          <div style={modalTitle}><Icon n="bookmark_add" size={15} style={{ color: "var(--teal)" }} /> Save to Folder</div>
+          <div style={modalTitle}><Icon n="bookmark_add" size={15} style={{ color: "var(--accent)" }} /> Save to Folder</div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         {!initialName && (
