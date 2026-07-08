@@ -151,7 +151,7 @@ export default function SettingsTab() {
         </div>
         <div style={{ display: "flex", gap: 14, padding: "16px", justifyContent: "center" }}>
           {[
-            { href: LINKS.email,    title: "Email",    inner: <Icon n="mail" size={20} style={{ color: "var(--teal)" }} /> },
+            { href: LINKS.email,    title: "Email",    inner: <Icon n="mail" size={20} style={{ color: "var(--accent)" }} /> },
             { href: LINKS.linkedin, title: "LinkedIn", inner: <LinkedInLogo /> },
             { href: LINKS.github,   title: "GitHub",   inner: <GitHubLogo /> },
           ].map(l => (
@@ -170,7 +170,7 @@ export default function SettingsTab() {
         </div>
 
         <div style={{ ...rowStyle, borderTop: "none" }}>
-          <Icon n={subscribed ? "notifications_active" : "notifications"} size={20} style={{ color: "var(--teal)", flexShrink: 0 }} />
+          <Icon n={subscribed ? "notifications_active" : "notifications"} size={20} style={{ color: "var(--accent)", flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13, fontWeight: 700 }}>Notifications on this device</div>
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>

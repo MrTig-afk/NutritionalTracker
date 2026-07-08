@@ -188,13 +188,13 @@ export default function ChatAssistant({ open }) {
       background: "var(--surface)",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      <div style={{ background: "var(--teal)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(174,246,199,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <Icon n="nutrition" size={17} style={{ color: "var(--mint)" }} />
+      <div style={{ background: "var(--off)", borderBottom: "1px solid var(--border)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 10, background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Icon n="nutrition" size={17} style={{ color: "var(--accent)" }} />
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "white" }}>Nutrition Assistant</div>
-          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.65)" }}>Knows your log, goals & 7-day trends</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>Nutrition Assistant</div>
+          <div style={{ fontSize: 10, color: "var(--muted)" }}>Knows your log, goals & 7-day trends</div>
         </div>
       </div>
 

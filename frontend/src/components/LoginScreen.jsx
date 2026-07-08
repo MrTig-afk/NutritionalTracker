@@ -105,8 +105,8 @@ export default function LoginScreen() {
               </div>
 
               {googleConflict && (
-                <div style={{ background: "var(--teal-lt, #E0F4F5)", border: "1px solid var(--teal)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--teal)", display: "flex", alignItems: "center", gap: 8 }}>
-                  <Icon n="info" size={16} style={{ color: "var(--teal)", flexShrink: 0 }} />
+                <div style={{ background: "var(--teal-lt, #E0F4F5)", border: "1px solid var(--teal)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--accent)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Icon n="info" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
                   An account with this email already exists. Redirecting you to sign in with Google…
                 </div>
               )}
@@ -146,7 +146,7 @@ export default function LoginScreen() {
           ) : (
             <div style={{ textAlign: "center", padding: "12px 0" }}>
               <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--teal-lt)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}>
-                <Icon n="mark_email_read" size={28} style={{ color: "var(--teal)" }} />
+                <Icon n="mark_email_read" size={28} style={{ color: "var(--accent)" }} />
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Check your inbox</div>
               <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 10, lineHeight: 1.7 }}>
@@ -181,7 +181,7 @@ export default function LoginScreen() {
                 {verifying ? "Verifying…" : "Sign In"}
               </button>
 
-              <button onClick={() => { setSent(false); setEmail(""); setCode(""); setError(null); }} style={{ marginTop: 16, fontSize: 13, color: "var(--teal)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline" }}>
+              <button onClick={() => { setSent(false); setEmail(""); setCode(""); setError(null); }} style={{ marginTop: 16, fontSize: 13, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 700, textDecoration: "underline" }}>
                 Use a different email
               </button>
             </div>

@@ -30,7 +30,7 @@ export default function NutrientGrid({ data, activeTab, per100gData }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ background: "var(--off)", border: "1px solid var(--border)", borderRadius: 12, padding: "14px 16px" }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--brown)", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-          <Icon n="scale" size={13} style={{ color: "var(--teal)" }} /> Custom Serving Calculator
+          <Icon n="scale" size={13} style={{ color: "var(--accent)" }} /> Custom Serving Calculator
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <input type="number" min="1" step="any" placeholder="e.g. 58" value={customGrams} onChange={e => setCustomGrams(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
@@ -51,7 +51,7 @@ export default function NutrientGrid({ data, activeTab, per100gData }) {
               <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
                 <span style={{ fontSize: 20, fontWeight: 800, color: meta.color, lineHeight: 1.1 }}>{typeof display === "string" ? (parseNumeric(display) ?? display) : display}</span>
                 {meta.unit && <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{meta.unit}</span>}
-                {adjusted && <span style={{ fontSize: 10, color: "var(--teal)", marginLeft: 2 }}>adj.</span>}
+                {adjusted && <span style={{ fontSize: 10, color: "var(--accent)", marginLeft: 2 }}>adj.</span>}
               </div>
               {adjusted && <div style={{ fontSize: 10, color: "var(--muted)" }}>base: {baseDisplay}</div>}
             </div>

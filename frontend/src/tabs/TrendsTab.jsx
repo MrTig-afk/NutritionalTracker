@@ -19,7 +19,7 @@ export default function TrendsTab() {
 
   const macros = [
     { key: "calories", label: "Cal",     unit: "kcal", color: "var(--orange)", icon: "local_fire_department" },
-    { key: "protein",  label: "Protein", unit: "g",    color: "var(--teal)",   icon: "fitness_center"        },
+    { key: "protein",  label: "Protein", unit: "g",    color: "var(--accent)",   icon: "fitness_center"        },
     { key: "carbs",    label: "Carbs",   unit: "g",    color: "var(--purple)", icon: "grain"                 },
     { key: "fat",      label: "Fat",     unit: "g",    color: "var(--brown)",  icon: "water_drop"            },
   ];
@@ -88,7 +88,7 @@ export default function TrendsTab() {
                   alignItems: "center",
                 }}>
                   <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: isToday ? "var(--teal)" : "var(--text)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: isToday ? "var(--accent)" : "var(--text)" }}>
                       {dt.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </div>
                     <div style={{ fontSize: 10, color: "var(--muted)" }}>

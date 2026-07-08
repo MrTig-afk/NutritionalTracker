@@ -54,7 +54,7 @@ export default function EditLogModal({ entry, onClose, onSaved }) {
     <div style={overlayBg}>
       <div style={modalBox}>
         <div style={modalHeader}>
-          <div style={modalTitle}><Icon n="edit" size={15} style={{ color: "var(--teal)" }} /> Edit Log Entry</div>
+          <div style={modalTitle}><Icon n="edit" size={15} style={{ color: "var(--accent)" }} /> Edit Log Entry</div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         <div>
@@ -89,7 +89,7 @@ export default function EditLogModal({ entry, onClose, onSaved }) {
         <div style={{ display: "flex", gap: 8 }}>
           {macroCells([
             { label: "Cal",   value: cal,  unit: "kcal", color: "var(--orange)" },
-            { label: "Prot",  value: prot, unit: "g",    color: "var(--teal)"   },
+            { label: "Prot",  value: prot, unit: "g",    color: "var(--accent)"   },
             { label: "Carbs", value: carb, unit: "g",    color: "var(--purple)" },
             { label: "Fat",   value: fat,  unit: "g",    color: "var(--brown)"  },
           ])}
