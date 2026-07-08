@@ -25,6 +25,8 @@ export default function LibraryTab({ onAddToLog }) {
   const [deletingTmplItem, setDeletingTmplItem] = useState(null);
   const [itemPickerFor, setItemPickerFor] = useState(null);
   const [itemPickerQuery, setItemPickerQuery] = useState("");
+  const [pickerSelected, setPickerSelected] = useState([]);
+  const [savingPicker, setSavingPicker] = useState(false);
 
 
   // ── Load data ─────────────────────────────────────────────────────────────
@@ -135,21 +137,31 @@ export default function LibraryTab({ onAddToLog }) {
     finally { setDeletingTmplItem(null); }
   };
 
-  const addLibraryItemToTemplate = async (templateId, libraryItem) => {
-    const nutrition = libraryItem.nutrition || {};
+  const togglePickerItem = (itemId) => {
+    setPickerSelected(prev => prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]);
+  };
+
+  const addSelectedToTemplate = async (templateId) => {
+    const chosen = allLibraryItems.filter(i => pickerSelected.includes(i.item_id));
+    if (!chosen.length || savingPicker) return;
+    setSavingPicker(true);
     try {
-      const item = await apiFetch(`/meal-templates/${templateId}/items`, {
-        method: "POST",
-        body: JSON.stringify({ name: libraryItem.name, nutrition, servings: 1 }),
-      });
+      const added = await Promise.all(chosen.map(li =>
+        apiFetch(`/meal-templates/${templateId}/items`, {
+          method: "POST",
+          body: JSON.stringify({ name: li.name, nutrition: li.nutrition || {}, servings: 1 }),
+        }).then(item => ({ ...item, nutrition: li.nutrition || {} }))
+      ));
       setTemplateData(prev => ({
         ...prev,
-        [templateId]: { ...prev[templateId], items: [...(prev[templateId]?.items || []), { ...item, nutrition }] },
+        [templateId]: { ...prev[templateId], items: [...(prev[templateId]?.items || []), ...added] },
       }));
-      setTemplates(prev => prev.map(t => t.template_id === templateId ? { ...t, item_count: t.item_count + 1 } : t));
+      setTemplates(prev => prev.map(t => t.template_id === templateId ? { ...t, item_count: t.item_count + added.length } : t));
       setItemPickerFor(null);
       setItemPickerQuery("");
+      setPickerSelected([]);
     } catch (e) { console.error(e); }
+    finally { setSavingPicker(false); }
   };
 
   const logTemplate = async (templateId) => {
@@ -346,27 +358,36 @@ export default function LibraryTab({ onAddToLog }) {
                             const hits = allLibraryItems.filter(i => !q || i.name.toLowerCase().includes(q)).slice(0, 12);
                             return hits.length === 0
                               ? <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", padding: "8px 0" }}>No matches</div>
-                              : hits.map(i => (
-                                  <div key={i.item_id} onClick={() => addLibraryItemToTemplate(tmpl.template_id, i)}
-                                    style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}
-                                    onMouseEnter={e => e.currentTarget.style.background = "var(--off2)"}
-                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.name}</div>
-                                      <div style={{ fontSize: 11, color: "var(--muted)" }}>{i.folderName} · {macroLine(i.nutrition)}</div>
+                              : hits.map(i => {
+                                  const selected = pickerSelected.includes(i.item_id);
+                                  return (
+                                    <div key={i.item_id} onClick={() => togglePickerItem(i.item_id)}
+                                      style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", display: "flex", gap: 8, alignItems: "center", background: selected ? "var(--teal-lt)" : "transparent" }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.name}</div>
+                                        <div style={{ fontSize: 11, color: "var(--muted)" }}>{i.folderName} · {macroLine(i.nutrition)}</div>
+                                      </div>
+                                      <Icon n={selected ? "check_circle" : "radio_button_unchecked"} size={18}
+                                        style={{ color: selected ? "var(--accent)" : "var(--border2)", flexShrink: 0, fontVariationSettings: selected ? "'FILL' 1" : "'FILL' 0" }} />
                                     </div>
-                                    <Icon n="add_circle" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                                  </div>
-                                ));
+                                  );
+                                });
                           })()}
-                          <button onClick={() => { setItemPickerFor(null); setItemPickerQuery(""); }}
-                            style={{ marginTop: 6, background: "none", border: "none", color: "var(--muted)", fontSize: 12, cursor: "pointer" }}>
-                            Cancel
-                          </button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                            <button onClick={() => addSelectedToTemplate(tmpl.template_id)} disabled={pickerSelected.length === 0 || savingPicker}
+                              style={{ flex: 1, padding: "9px", borderRadius: 10, border: "none", background: pickerSelected.length ? "var(--teal)" : "var(--border)", color: pickerSelected.length ? "white" : "var(--muted)", fontSize: 13, fontWeight: 700, cursor: pickerSelected.length ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                              {savingPicker ? <Spin size={14} color="white" /> : <Icon n="playlist_add" size={15} style={{ color: pickerSelected.length ? "white" : "var(--muted)" }} />}
+                              {savingPicker ? "Adding…" : `Add ${pickerSelected.length || ""} item${pickerSelected.length === 1 ? "" : "s"}`}
+                            </button>
+                            <button onClick={() => { setItemPickerFor(null); setItemPickerQuery(""); setPickerSelected([]); }}
+                              style={{ background: "none", border: "none", color: "var(--muted)", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                              Cancel
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--off2)" }}>
-                          <button onClick={() => { setItemPickerFor(tmpl.template_id); setItemPickerQuery(""); }}
+                          <button onClick={() => { setItemPickerFor(tmpl.template_id); setItemPickerQuery(""); setPickerSelected([]); }}
                             style={{ background: "none", border: "1px dashed var(--border)", borderRadius: 8, padding: "6px 14px", fontSize: 12, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
                             <Icon n="add" size={13} /> Add from library
                           </button>
