@@ -4,7 +4,7 @@ import { parseNumeric } from "../lib/nutrition";
 import { card, inputStyle, primaryBtn } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 
-export default function LibraryTab({ onAddToLog }) {
+export default function LibraryTab({ onAddToLog, onLogAdded }) {
   // ── Folders ──────────────────────────────────────────────────────────────
   const [folders, setFolders]         = useState([]);
   const [openFolder, setOpenFolder]   = useState(null);
@@ -22,6 +22,7 @@ export default function LibraryTab({ onAddToLog }) {
   const [newTmplName, setNewTmplName] = useState("");
   const [creatingTmpl, setCreatingTmpl] = useState(false);
   const [loggingTmpl, setLoggingTmpl] = useState(null);
+  const [loggedTmpl, setLoggedTmpl]   = useState(null); // brief success state
   const [deletingTmplItem, setDeletingTmplItem] = useState(null);
   const [itemPickerFor, setItemPickerFor] = useState(null);
   const [itemPickerQuery, setItemPickerQuery] = useState("");
@@ -170,7 +171,11 @@ export default function LibraryTab({ onAddToLog }) {
       const d = new Date();
       const log_date = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
       const res = await apiFetch(`/meal-templates/${templateId}/log?log_date=${log_date}`, { method: "POST" });
-      if (res.logged > 0) onAddToLog(null);
+      if (res.logged > 0) {
+        onLogAdded?.();                 // Tracker refetches its data
+        setLoggedTmpl(templateId);      // brief "Logged ✓" on the button
+        setTimeout(() => setLoggedTmpl(null), 2500);
+      }
     } catch (e) { console.error(e); }
     finally { setLoggingTmpl(null); }
   };
@@ -316,9 +321,12 @@ export default function LibraryTab({ onAddToLog }) {
                       <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{tmpl.name}</span>
                       <span style={{ fontSize: 11, color: "var(--muted)" }}>{tmpl.item_count} items</span>
                     </div>
-                    <button onClick={() => logTemplate(tmpl.template_id)} disabled={loggingTmpl === tmpl.template_id || tmpl.item_count === 0}
-                      style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: tmpl.item_count === 0 ? 0.4 : 1 }}>
-                      {loggingTmpl === tmpl.template_id ? <Spin size={11} /> : <Icon n="playlist_add_check" size={11} />} Log Meal
+                    <button onClick={() => logTemplate(tmpl.template_id)} disabled={loggingTmpl === tmpl.template_id || loggedTmpl === tmpl.template_id || tmpl.item_count === 0}
+                      style={{ padding: "5px 10px", background: loggedTmpl === tmpl.template_id ? "var(--teal)" : "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: loggedTmpl === tmpl.template_id ? "white" : "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: tmpl.item_count === 0 ? 0.4 : 1, transition: "background 0.2s" }}>
+                      {loggingTmpl === tmpl.template_id ? <Spin size={11} />
+                        : loggedTmpl === tmpl.template_id ? <Icon n="check" size={11} style={{ color: "white" }} />
+                        : <Icon n="playlist_add_check" size={11} />}
+                      {loggedTmpl === tmpl.template_id ? "Logged!" : "Log Meal"}
                     </button>
                     <button onClick={e => { e.stopPropagation(); deleteTemplate(tmpl.template_id); }} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 2 }}>
                       <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />
