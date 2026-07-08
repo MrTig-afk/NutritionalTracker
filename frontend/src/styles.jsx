@@ -30,6 +30,34 @@ export const PALETTE_CSS = `
     --brown-lt:  #F5EDE0;
     --danger:    #BA1A1A;
     --danger-lt: #FFDAD6;
+    --on-danger: #FFFFFF;
+  }
+  :root[data-theme="dark"] {
+    --teal:      #006D77;
+    --teal-lt:   #0E3A3F;
+    --teal-md:   #004E56;
+    --teal-dk:   #003940;
+    --mint:      #AEF6C7;
+    --mint-dk:   #7FDCA4;
+    --bg:        #0F1414;
+    --surface:   #1A2020;
+    --off:       #212827;
+    --off2:      #2A3231;
+    --white:     #1A2020;
+    --border:    #3A4544;
+    --border2:   #556261;
+    --text:      #E1E5E4;
+    --text2:     #C0C8C7;
+    --muted:     #8A9493;
+    --orange:    #FFB77C;
+    --orange-lt: #4A2A0E;
+    --purple:    #C4BAF0;
+    --purp-lt:   #2E2A45;
+    --brown:     #E0C3A5;
+    --brown-lt:  #3A2E20;
+    --danger:    #FFB4AB;
+    --danger-lt: #4A1210;
+    --on-danger: #690005;
   }
   * { box-sizing: border-box; }
   body {

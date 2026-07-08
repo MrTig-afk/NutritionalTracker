@@ -53,7 +53,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY[
     'users', 'api_usage', 'image_records', 'folders', 'folder_items',
     'daily_log', 'user_goals', 'meal_templates', 'meal_template_items',
-    'push_subscriptions'
+    'push_subscriptions', 'notification_prefs'
   ]
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
@@ -68,14 +68,15 @@ BEGIN
 END $$;
 
 -- ---------- 3) System read access for scheduled jobs ----------
--- The meal-reminder scheduler runs with app.user_id = '__system__' (a real
--- Supabase JWT sub is always a UUID, so no user can occupy this value) and
--- needs cross-user READ on exactly these two tables. Policies are OR'd, so
--- this adds to user_isolation without widening writes (SELECT only).
+-- The meal-reminder/weekly-summary scheduler runs with app.user_id =
+-- '__system__' (a real Supabase JWT sub is always a UUID, so no user can
+-- occupy this value) and needs cross-user READ on exactly these tables.
+-- Policies are OR'd, so this adds to user_isolation without widening writes
+-- (SELECT only).
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['push_subscriptions', 'daily_log']
+  FOREACH t IN ARRAY ARRAY['push_subscriptions', 'daily_log', 'notification_prefs', 'user_goals']
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS system_read ON %I;', t);
     EXECUTE format($f$
@@ -94,7 +95,7 @@ END $$;
 --   DO $$ DECLARE t text; BEGIN
 --     FOREACH t IN ARRAY ARRAY['users','api_usage','image_records','folders',
 --       'folder_items','daily_log','user_goals','meal_templates',
---       'meal_template_items','push_subscriptions']
+--       'meal_template_items','push_subscriptions','notification_prefs']
 --     LOOP
 --       EXECUTE format('DROP POLICY IF EXISTS user_isolation ON %I;', t);
 --       EXECUTE format('DROP POLICY IF EXISTS system_read ON %I;', t);
