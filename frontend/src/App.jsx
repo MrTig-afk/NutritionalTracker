@@ -11,12 +11,14 @@ import ScanTab from "./tabs/ScanTab";
 import LibraryTab from "./tabs/LibraryTab";
 import TrackerTab from "./tabs/TrackerTab";
 import TrendsTab from "./tabs/TrendsTab";
+import SettingsTab from "./tabs/SettingsTab";
 
 const TABS = [
-  { id: "scan",    label: "Scan",    icon: "document_scanner" },
-  { id: "library", label: "Library", icon: "folder"           },
-  { id: "tracker", label: "Tracker", icon: "bar_chart"        },
-  { id: "trends",  label: "Trends",  icon: "show_chart"       },
+  { id: "scan",     label: "Scan",     icon: "document_scanner" },
+  { id: "library",  label: "Library",  icon: "folder"           },
+  { id: "tracker",  label: "Tracker",  icon: "bar_chart"        },
+  { id: "trends",   label: "Trends",   icon: "show_chart"       },
+  { id: "settings", label: "Settings", icon: "settings"         },
 ];
 
 const isIOSNotInstalled = () => {
@@ -39,6 +41,17 @@ export default function App() {
   const [showIOSBanner, setShowIOSBanner] = useState(
     () => isIOSNotInstalled() && !localStorage.getItem("ios-banner-dismissed")
   );
+  const [theme, setTheme] = useState(() =>
+    localStorage.getItem("theme")
+    || (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+  );
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("theme", theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme === "dark" ? "#003940" : "#006D77");
+  }, [theme]);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -176,6 +189,10 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={() => setTheme(t => (t === "dark" ? "light" : "dark"))} title="Toggle dark mode"
+              style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mint)", padding: 0 }}>
+              <Icon n={theme === "dark" ? "light_mode" : "dark_mode"} size={18} />
+            </button>
             {avatarUrl
               ? <img src={avatarUrl} alt="avatar" onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }} style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.5)" }} />
               : null}
@@ -196,6 +213,7 @@ export default function App() {
             <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
           </div>
           {activeMainTab === "trends" && <TrendsTab />}
+          {activeMainTab === "settings" && <SettingsTab />}
         </div>
 
         {/* Bottom Navigation */}

@@ -290,7 +290,8 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
             if row[0] >= DAILY_LIMIT:
                 cur.close(); release_db(conn)
                 notify_admin("scan_limit", "📊 Scan Limit Hit", f"User {user_id[:8]} hit the {DAILY_LIMIT}/day scan limit")
-                send_push_to_user(user_id, "📊 Scan Limit Reached", f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!")
+                if _pref_enabled(user_id, "scan_limit"):
+                    send_push_to_user(user_id, "📊 Scan Limit Reached", f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!")
                 raise HTTPException(status_code=429, detail={
                     "error_type": "rate_limit_exceeded",
                     "retryable": False,
@@ -381,7 +382,7 @@ def _check_goal_and_push(user_id: str, today: str):
         cur.close()
         release_db(conn)
         total = sum(_get_entry_calories(r[1], r[0]) for r in rows)
-        if total >= goal_cal:
+        if total >= goal_cal and _pref_enabled(user_id, "goal_reached"):
             send_push_to_user(user_id, "🎯 Daily Goal Hit!", f"You've reached {round(total)} kcal — goal was {round(goal_cal)} kcal!")
     except Exception as e:
         logger.debug(f"Goal push check failed: {e}")
@@ -429,6 +430,9 @@ class PushSubscriptionCreate(BaseModel):
     endpoint: str
     expirationTime: Optional[int] = None
     keys: dict
+
+class NotificationPrefs(BaseModel):
+    prefs: dict
 
 # ---------- PROMPTS ----------
 PROMPT_SINGLE = """Analyze this nutrition label image carefully.
@@ -734,6 +738,14 @@ def init_db():
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS notification_prefs (
+                user_id    VARCHAR PRIMARY KEY,
+                prefs      JSONB,
+                updated_at TIMESTAMP
+            )
+        """)
+
         conn.commit()
         cur.close()
         release_db(conn)
@@ -752,11 +764,77 @@ def init_db():
 MEAL_REMINDERS_ENABLED  = os.getenv("MEAL_REMINDERS_ENABLED", "1") == "1"
 REMINDER_UTC_OFFSET_MIN = int(os.getenv("REMINDER_UTC_OFFSET_MIN", "600"))  # default Sydney AEST (+10:00; set 660 during DST)
 _MEAL_REMINDERS = [
-    (9 * 60,  1, "Good morning",       "Time to log your first meal of the day."),
-    (14 * 60, 2, "Afternoon check-in", "Don't forget to log your second meal."),
-    (21 * 60, 3, "Evening reminder",   "Log today's meals before you wind down."),
+    (9 * 60,  1, "meal_morning",   "Good morning",       "Time to log your first meal of the day."),
+    (14 * 60, 2, "meal_afternoon", "Afternoon check-in", "Don't forget to log your second meal."),
+    (21 * 60, 3, "meal_evening",   "Evening reminder",   "Log today's meals before you wind down."),
 ]
 _reminder_sent: dict = {}  # slot minutes -> local date iso already sent
+
+# ---------- NOTIFICATION PREFERENCES ----------
+# Per-user toggles for each push type. Missing key = enabled; only deviations
+# are stored (notification_prefs.prefs JSONB), so all-default users need no row.
+NOTIF_PREF_KEYS = [
+    "meal_morning", "meal_afternoon", "meal_evening",
+    "goal_reached", "scan_limit", "weekly_summary",
+]
+
+def _pref_enabled(user_id: str, key: str) -> bool:
+    """Fail-open: a DB blip must never silently kill notifications."""
+    try:
+        conn = get_db(user_id)
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE((prefs->>%s)::boolean, true) FROM notification_prefs WHERE user_id = %s",
+            [key, user_id],
+        )
+        row = cur.fetchone()
+        cur.close()
+        release_db(conn)
+        return row[0] if row else True
+    except Exception as e:
+        logger.debug(f"pref check failed (fail-open): {e}")
+        return True
+
+# Weekly summary: Sunday 19:00 local recap of the week vs goals.
+_WEEKLY_SUMMARY_SLOT = 19 * 60
+_weekly_summary_sent: dict = {}
+
+def _run_weekly_summary(today_local):
+    conn = get_db("__system__")
+    cur  = conn.cursor()
+    start = (today_local - timedelta(days=6)).isoformat()
+    cur.execute("""
+        SELECT p.user_id
+        FROM push_subscriptions p
+        LEFT JOIN notification_prefs np ON np.user_id = p.user_id
+        WHERE COALESCE((np.prefs->>'weekly_summary')::boolean, true)
+        GROUP BY p.user_id
+    """)
+    users = [r[0] for r in cur.fetchall()]
+    sent = 0
+    for uid in users:
+        try:
+            cur.execute(
+                "SELECT servings, nutrition, date FROM daily_log WHERE user_id = %s AND date >= %s",
+                [uid, start],
+            )
+            rows = cur.fetchall()
+            if not rows:
+                continue
+            days_logged = len({r[2] for r in rows})
+            total_cal   = sum(_get_entry_calories(r[1], r[0]) for r in rows)
+            avg_cal     = round(total_cal / max(days_logged, 1))
+            cur.execute("SELECT calories FROM user_goals WHERE user_id = %s", [uid])
+            goal_row = cur.fetchone()
+            goal_txt = f" (goal {round(goal_row[0])})" if goal_row and goal_row[0] else ""
+            send_push_to_user(uid, "Your week in review",
+                              f"Avg {avg_cal} kcal/day{goal_txt} across {days_logged} logged day(s). Keep it up!")
+            sent += 1
+        except Exception as e:
+            logger.debug(f"weekly summary for {uid[:8]} failed: {e}")
+    cur.close()
+    release_db(conn)
+    logger.info(f"📅 Weekly summary queued for {sent} user(s)")
 
 # Supabase free tier pauses projects after ~7 days without API activity, which
 # takes its domain offline and breaks all logins. One authenticated API call a
@@ -780,16 +858,18 @@ def _supabase_keepalive():
         notify_admin("supabase_keepalive", "🔴 Supabase unreachable",
                      "Daily keepalive failed — the project may be paused. Logins will break; restore it at supabase.com/dashboard.")
 
-def _run_meal_reminder(threshold: int, title: str, body: str, today: str):
+def _run_meal_reminder(threshold: int, pref_key: str, title: str, body: str, today: str):
     conn = get_db("__system__")
     cur  = conn.cursor()
     cur.execute("""
         SELECT p.user_id
         FROM push_subscriptions p
         LEFT JOIN daily_log d ON d.user_id = p.user_id AND d.date = %s
+        LEFT JOIN notification_prefs np ON np.user_id = p.user_id
+        WHERE COALESCE((np.prefs->>%s)::boolean, true)
         GROUP BY p.user_id
         HAVING count(d.log_id) < %s
-    """, [today, threshold])
+    """, [today, pref_key, threshold])
     users = [r[0] for r in cur.fetchall()]
     cur.close()
     release_db(conn)
@@ -803,12 +883,16 @@ def _meal_reminder_loop():
             local   = datetime.utcnow() + timedelta(minutes=REMINDER_UTC_OFFSET_MIN)
             now_min = local.hour * 60 + local.minute
             today   = local.date().isoformat()
-            for slot, threshold, title, body in _MEAL_REMINDERS:
+            for slot, threshold, pref_key, title, body in _MEAL_REMINDERS:
                 # 2-min window so a late tick still fires, but a mid-day
                 # restart doesn't re-send old slots.
                 if 0 <= now_min - slot <= 2 and _reminder_sent.get(slot) != today:
                     _reminder_sent[slot] = today
-                    _run_meal_reminder(threshold, title, body, today)
+                    _run_meal_reminder(threshold, pref_key, title, body, today)
+            if (local.weekday() == 6 and 0 <= now_min - _WEEKLY_SUMMARY_SLOT <= 2
+                    and _weekly_summary_sent.get("d") != today):
+                _weekly_summary_sent["d"] = today
+                _run_weekly_summary(local.date())
             if 0 <= now_min - _SUPABASE_KEEPALIVE_SLOT <= 2 and _supabase_keepalive_sent.get("d") != today:
                 _supabase_keepalive_sent["d"] = today
                 _supabase_keepalive()
@@ -1830,6 +1914,79 @@ async def push_unsubscribe(authorization: Optional[str] = Header(default=None)):
     except Exception as e:
         raise _db_error(e)
     return {"unsubscribed": True}
+
+
+# =============================================================================
+# SETTINGS & ACCOUNT
+# =============================================================================
+
+@app.get("/settings/notifications")
+async def get_notification_prefs(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT prefs FROM notification_prefs WHERE user_id = %s", [user_id])
+        row = cur.fetchone()
+        cur.close(); release_db(conn)
+    except Exception as e:
+        raise _db_error(e)
+    stored = row[0] if row and row[0] else {}
+    if not isinstance(stored, dict):
+        stored = json.loads(stored)
+    return {"prefs": {k: bool(stored.get(k, True)) for k in NOTIF_PREF_KEYS}}
+
+
+@app.put("/settings/notifications")
+async def set_notification_prefs(body: NotificationPrefs, authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
+    clean = {k: bool(v) for k, v in body.prefs.items() if k in NOTIF_PREF_KEYS}
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO notification_prefs (user_id, prefs, updated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = EXCLUDED.updated_at
+        """, [user_id, json.dumps(clean), datetime.now()])
+        conn.commit(); cur.close(); release_db(conn)
+    except Exception as e:
+        raise _db_error(e)
+    return {"prefs": {k: clean.get(k, True) for k in NOTIF_PREF_KEYS}}
+
+
+_ACCOUNT_TABLES = [
+    "push_subscriptions", "notification_prefs", "meal_template_items",
+    "meal_templates", "folder_items", "folders", "daily_log", "user_goals",
+    "image_records", "api_usage", "users",
+]
+
+@app.delete("/account")
+async def delete_account(authorization: Optional[str] = Header(default=None)):
+    """Permanently delete the user's data and login. DB rows are mandatory;
+    the Supabase auth-user deletion is best-effort (tolerates 404)."""
+    user_id = get_user_id(authorization)
+    try:
+        conn = get_db(); cur = conn.cursor()
+        for t in _ACCOUNT_TABLES:
+            cur.execute(f"DELETE FROM {t} WHERE user_id = %s", [user_id])
+        conn.commit(); cur.close(); release_db(conn)
+    except Exception as e:
+        raise _db_error(e)
+
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if key:
+        try:
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                method="DELETE",
+            )
+            urllib.request.urlopen(req, timeout=15)
+        except Exception as e:
+            logger.warning(f"Supabase user delete failed (data already gone): {e}")
+
+    logger.info(f"🗑️ Account deleted: {user_id[:8]}")
+    notify_admin("account_deleted", "🗑️ Account Deleted", f"User {user_id[:8]} deleted their account")
+    return {"deleted": True}
 
 
 # =============================================================================
