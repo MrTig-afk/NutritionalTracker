@@ -216,27 +216,36 @@ export default function App() {
           {activeMainTab === "settings" && <SettingsTab />}
         </div>
 
-        {/* Bottom Navigation */}
+        {/* Bottom Navigation — order: tabs, AI, Settings. While the chat
+            overlay is open only AI highlights, so two items never light up. */}
         <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", paddingTop: 6, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
-          {TABS.map(tab => {
-            const active = activeMainTab === tab.id;
+          {(() => {
+            const navBtn = (tab) => {
+              const active = activeMainTab === tab.id && !chatOpen;
+              return (
+                <button key={tab.id} onClick={() => handleTabChange(tab.id)}
+                  style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                  <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
+                    <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: "0.2px" }}>{tab.label}</span>
+                </button>
+              );
+            };
             return (
-              <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
-                <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
-                  <Icon n={tab.icon} size={22} style={{ color: active ? "var(--teal)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
-                </div>
-                <span style={{ fontSize: 11, fontWeight: active ? 700 : 500, letterSpacing: "0.2px" }}>{tab.label}</span>
-              </button>
+              <>
+                {TABS.filter(t => t.id !== "settings").map(navBtn)}
+                <button onClick={() => setChatOpen(o => !o)}
+                  style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: chatOpen ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
+                  <div style={{ width: 56, height: 28, borderRadius: 14, background: chatOpen ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
+                    <Icon n="nutrition" size={22} style={{ color: chatOpen ? "var(--teal)" : "var(--muted)", fontVariationSettings: chatOpen ? "'FILL' 1" : "'FILL' 0" }} />
+                  </div>
+                  <span style={{ fontSize: 11, fontWeight: chatOpen ? 700 : 500, letterSpacing: "0.2px" }}>AI</span>
+                </button>
+                {navBtn(TABS.find(t => t.id === "settings"))}
+              </>
             );
-          })}
-          <button onClick={() => setChatOpen(o => !o)}
-            style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: chatOpen ? "var(--teal)" : "var(--muted)", transition: "color 0.15s" }}>
-            <div style={{ width: 56, height: 28, borderRadius: 14, background: chatOpen ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
-              <Icon n="nutrition" size={22} style={{ color: chatOpen ? "var(--teal)" : "var(--muted)", fontVariationSettings: chatOpen ? "'FILL' 1" : "'FILL' 0" }} />
-            </div>
-            <span style={{ fontSize: 11, fontWeight: chatOpen ? 700 : 500, letterSpacing: "0.2px" }}>AI</span>
-          </button>
+          })()}
         </div>
       </div>
 

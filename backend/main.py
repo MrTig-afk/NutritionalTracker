@@ -290,8 +290,7 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
             if row[0] >= DAILY_LIMIT:
                 cur.close(); release_db(conn)
                 notify_admin("scan_limit", "📊 Scan Limit Hit", f"User {user_id[:8]} hit the {DAILY_LIMIT}/day scan limit")
-                if _pref_enabled(user_id, "scan_limit"):
-                    send_push_to_user(user_id, "📊 Scan Limit Reached", f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!")
+                send_push_to_user(user_id, "📊 Scan Limit Reached", f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!")
                 raise HTTPException(status_code=429, detail={
                     "error_type": "rate_limit_exceeded",
                     "retryable": False,
@@ -382,7 +381,7 @@ def _check_goal_and_push(user_id: str, today: str):
         cur.close()
         release_db(conn)
         total = sum(_get_entry_calories(r[1], r[0]) for r in rows)
-        if total >= goal_cal and _pref_enabled(user_id, "goal_reached"):
+        if total >= goal_cal:
             send_push_to_user(user_id, "🎯 Daily Goal Hit!", f"You've reached {round(total)} kcal — goal was {round(goal_cal)} kcal!")
     except Exception as e:
         logger.debug(f"Goal push check failed: {e}")
@@ -771,29 +770,13 @@ _MEAL_REMINDERS = [
 _reminder_sent: dict = {}  # slot minutes -> local date iso already sent
 
 # ---------- NOTIFICATION PREFERENCES ----------
-# Per-user toggles for each push type. Missing key = enabled; only deviations
-# are stored (notification_prefs.prefs JSONB), so all-default users need no row.
+# Opt-in toggles for recurring reminder pushes only. Missing key = DISABLED —
+# users must explicitly turn reminders on in Settings. Event-driven alerts
+# (scan limit hit, goal reached) have no toggle: they always send to anyone
+# with device notifications enabled.
 NOTIF_PREF_KEYS = [
-    "meal_morning", "meal_afternoon", "meal_evening",
-    "goal_reached", "scan_limit", "weekly_summary",
+    "meal_morning", "meal_afternoon", "meal_evening", "weekly_summary",
 ]
-
-def _pref_enabled(user_id: str, key: str) -> bool:
-    """Fail-open: a DB blip must never silently kill notifications."""
-    try:
-        conn = get_db(user_id)
-        cur  = conn.cursor()
-        cur.execute(
-            "SELECT COALESCE((prefs->>%s)::boolean, true) FROM notification_prefs WHERE user_id = %s",
-            [key, user_id],
-        )
-        row = cur.fetchone()
-        cur.close()
-        release_db(conn)
-        return row[0] if row else True
-    except Exception as e:
-        logger.debug(f"pref check failed (fail-open): {e}")
-        return True
 
 # Weekly summary: Sunday 19:00 local recap of the week vs goals.
 _WEEKLY_SUMMARY_SLOT = 19 * 60
@@ -807,7 +790,7 @@ def _run_weekly_summary(today_local):
         SELECT p.user_id
         FROM push_subscriptions p
         LEFT JOIN notification_prefs np ON np.user_id = p.user_id
-        WHERE COALESCE((np.prefs->>'weekly_summary')::boolean, true)
+        WHERE COALESCE((np.prefs->>'weekly_summary')::boolean, false)
         GROUP BY p.user_id
     """)
     users = [r[0] for r in cur.fetchall()]
@@ -866,7 +849,7 @@ def _run_meal_reminder(threshold: int, pref_key: str, title: str, body: str, tod
         FROM push_subscriptions p
         LEFT JOIN daily_log d ON d.user_id = p.user_id AND d.date = %s
         LEFT JOIN notification_prefs np ON np.user_id = p.user_id
-        WHERE COALESCE((np.prefs->>%s)::boolean, true)
+        WHERE COALESCE((np.prefs->>%s)::boolean, false)
         GROUP BY p.user_id
         HAVING count(d.log_id) < %s
     """, [today, pref_key, threshold])
@@ -1933,7 +1916,7 @@ async def get_notification_prefs(authorization: Optional[str] = Header(default=N
     stored = row[0] if row and row[0] else {}
     if not isinstance(stored, dict):
         stored = json.loads(stored)
-    return {"prefs": {k: bool(stored.get(k, True)) for k in NOTIF_PREF_KEYS}}
+    return {"prefs": {k: bool(stored.get(k, False)) for k in NOTIF_PREF_KEYS}}
 
 
 @app.put("/settings/notifications")
@@ -1950,7 +1933,7 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
         conn.commit(); cur.close(); release_db(conn)
     except Exception as e:
         raise _db_error(e)
-    return {"prefs": {k: clean.get(k, True) for k in NOTIF_PREF_KEYS}}
+    return {"prefs": {k: clean.get(k, False) for k in NOTIF_PREF_KEYS}}
 
 
 _ACCOUNT_TABLES = [
