@@ -46,6 +46,18 @@ export default function App() {
     localStorage.getItem("theme")
     || (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
   );
+  const [keyboardUp, setKeyboardUp] = useState(false);
+
+  // iOS pans the page when the keyboard opens, which drags the fixed bottom
+  // nav into the middle of the screen. Hide it while any input has the
+  // keyboard up — the keyboard occupies that zone anyway.
+  useEffect(() => {
+    const v = window.visualViewport;
+    if (!v) return;
+    const onResize = () => setKeyboardUp(window.innerHeight - v.height > 80);
+    v.addEventListener("resize", onResize);
+    return () => v.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -228,8 +240,10 @@ export default function App() {
           {activeMainTab === "settings" && <SettingsTab />}
         </div>
 
-        {/* Bottom Navigation — AI is a normal tab like everything else */}
-        <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", paddingTop: 6, paddingBottom: "env(safe-area-inset-bottom, 0px)" }}>
+        {/* Bottom Navigation — AI is a normal tab like everything else.
+            Hidden while the keyboard is open (display falls back to the
+            responsive CSS when undefined). */}
+        <div className="ns-bottom-nav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 40, background: "var(--surface)", borderTop: "1px solid var(--border)", paddingTop: 6, paddingBottom: "env(safe-area-inset-bottom, 0px)", display: keyboardUp ? "none" : undefined }}>
           {TABS.map(tab => {
             const active = activeMainTab === tab.id;
             return (
