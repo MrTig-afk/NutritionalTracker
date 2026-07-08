@@ -168,24 +168,27 @@ export default function ChatAssistant({ open }) {
   if (!open) return null;
 
   // The chat is a full tab screen everywhere — no floating card, nothing
-  // visible behind it. Mobile: full screen ending above the bottom nav.
-  // Desktop: fills everything below the top bar. Keyboard up: fit the whole
-  // panel inside the visible viewport so header and input stay on screen.
+  // visible behind it. It starts BELOW the app's top bar (which stays usable)
+  // and ends above the bottom nav on mobile / at the bottom on desktop.
+  // Keyboard up: fit the whole panel inside the visible viewport so the chat
+  // header and input stay on screen.
   const isDesktop = window.innerWidth >= 768;
+  const HEADER = "calc(60px + env(safe-area-inset-top, 0px))";
   const panelPos = vv
     ? { top: vv.offsetTop, bottom: "auto", height: vv.height, left: 0, right: 0 }
-    : (isDesktop
-        ? { top: 60, bottom: 0, left: 0, right: 0 }
-        : { top: 0, bottom: "calc(74px + env(safe-area-inset-bottom, 0px))", left: 0, right: 0 });
+    : { top: HEADER, left: 0, right: 0,
+        bottom: isDesktop ? 0 : "calc(74px + env(safe-area-inset-bottom, 0px))" };
 
   return (
     <div style={{
-      position: "fixed", zIndex: 60,
+      // Below the app header (z40) when docked; above everything while the
+      // keyboard is up and the panel needs the full visible viewport.
+      position: "fixed", zIndex: vv ? 60 : 39,
       ...panelPos,
       background: "var(--surface)",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      <div style={{ background: "var(--teal)", padding: isDesktop ? "12px 16px" : "calc(12px + env(safe-area-inset-top, 0px)) 16px 12px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+      <div style={{ background: "var(--teal)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <div style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(174,246,199,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon n="nutrition" size={17} style={{ color: "var(--mint)" }} />
         </div>

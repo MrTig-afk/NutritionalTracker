@@ -1,4 +1,5 @@
 [
+  { "v": 11, "text": "Top bar stays visible in the AI chat tab" },
   { "v": 10, "text": "AI chat is now its own tab — no more floating window" },
   { "v": 9, "text": "Chat now opens as its own full screen" },
   { "v": 9, "text": "Pick your own time for each meal reminder — like 11:00 AM" },
