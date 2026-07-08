@@ -14,8 +14,6 @@ const NOTIF_TYPES = [
   { key: "meal_morning",   label: "Morning reminder",   desc: "9am — log your first meal" },
   { key: "meal_afternoon", label: "Afternoon reminder", desc: "2pm — log your second meal" },
   { key: "meal_evening",   label: "Evening reminder",   desc: "9pm — finish logging your day" },
-  { key: "goal_reached",   label: "Goal reached",       desc: "When you hit your daily calorie goal" },
-  { key: "scan_limit",     label: "Scan limit",         desc: "When you've used all daily scans" },
   { key: "weekly_summary", label: "Weekly summary",     desc: "Sunday evening recap of your week" },
 ];
 
@@ -142,6 +140,10 @@ export default function SettingsTab() {
           {pushLoading ? <Spin size={18} /> : (
             <Toggle on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()} />
           )}
+        </div>
+
+        <div style={{ padding: "8px 16px", fontSize: 11, color: "var(--muted)", borderTop: "1px solid var(--border)", lineHeight: 1.5 }}>
+          Goal-reached and scan-limit alerts are always included. Reminders below are optional — turn on the ones you want.
         </div>
 
         {NOTIF_TYPES.map(t => (
