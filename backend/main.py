@@ -57,6 +57,7 @@ ADMIN_USER_ID     = os.getenv("ADMIN_USER_ID", "")
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").replace("\\n", "\n")
 VAPID_PUBLIC_KEY  = os.getenv("VAPID_PUBLIC_KEY", "")
 VAPID_CLAIM       = os.getenv("VAPID_CLAIM", "mailto:theimpracticalguy007@gmail.com")
+NTFY_TOPIC        = os.getenv("NTFY_TOPIC", "")  # developer ops alerts → ntfy.sh
 
 logger.info(f"📦 DATABASE_URL configured: {bool(DATABASE_URL)}")
 
@@ -240,6 +241,7 @@ def get_user_id(authorization: Optional[str] = None) -> str:
         raise HTTPException(status_code=401, detail={"error_type": "token_expired", "message": "Session expired. Please log in again."})
     except Exception as e:
         logger.warning(f"⚠️ JWT verification failed: {e}")
+        _note_auth_failure(e)
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
 
 
@@ -267,6 +269,7 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         raise HTTPException(status_code=401, detail={"error_type": "token_expired", "message": "Session expired. Please log in again."})
     except Exception as e:
         logger.warning(f"⚠️ JWT verification failed: {e}")
+        _note_auth_failure(e)
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Invalid or missing token"})
 
 
@@ -281,7 +284,9 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
             INSERT INTO users (user_id, email, last_seen)
             VALUES (%s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, last_seen = EXCLUDED.last_seen
+            RETURNING (xmax = 0) AS inserted
         """, [user_id, email, datetime.now()])
+        is_new_user = bool(cur.fetchone()[0])
         cur.execute(
             "SELECT count FROM api_usage WHERE user_id = %s AND date = %s",
             [user_id, today]
@@ -311,6 +316,12 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
         conn.commit()
         cur.close()
         release_db(conn)
+        if is_new_user:
+            notify_admin(f"signup:{user_id[:8]}", "New signup",
+                         f"A new user just signed up: {email or user_id[:8]}")
+        if not duplicate and _spike("scan_volume", 150, 3600):
+            notify_admin("scan_volume", "High scan volume",
+                         "Over 150 scans in the last hour across all users — unusual load that burns your Gemini quota/bill. Check for abuse.")
     except HTTPException:
         raise
     except Exception as e:
@@ -323,16 +334,62 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
 _admin_alert_last: dict = {}  # event_key -> timestamp
 _ADMIN_ALERT_COOLDOWN = 600   # seconds, per event type
 
-def notify_admin(event_key: str, title: str, message: str):
-    """Send a developer alert as a web-push notification to the admin's own
-    devices (ADMIN_USER_ID). Rate-limited per event type; no-op if unset."""
-    if not ADMIN_USER_ID:
+def send_to_ntfy(title: str, message: str):
+    """Push a developer alert to the ntfy.sh topic. No-op if NTFY_TOPIC unset."""
+    if not NTFY_TOPIC:
         return
+    def _send():
+        try:
+            # HTTP headers must be latin-1, so strip emoji/unicode from the title;
+            # the full description always lives in the body regardless.
+            safe_title = title.encode("ascii", "ignore").decode().strip() or "NutriScan Alert"
+            req = urllib.request.Request(
+                f"https://ntfy.sh/{NTFY_TOPIC}",
+                data=message.encode("utf-8"),
+                headers={"Title": safe_title},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            logger.debug(f"ntfy send failed: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def notify_admin(event_key: str, title: str, message: str):
+    """Developer alert → the admin's push devices AND the ntfy topic. Rate-limited
+    per event type so a burst of the same error can't spam either channel."""
     now = time.time()
     if now - _admin_alert_last.get(event_key, 0) < _ADMIN_ALERT_COOLDOWN:
         return
     _admin_alert_last[event_key] = now
-    send_push_to_user(ADMIN_USER_ID, title, message)
+    if ADMIN_USER_ID:
+        send_push_to_user(ADMIN_USER_ID, title, message)
+    send_to_ntfy(title, message)
+
+
+# Spike detection: returns True exactly when `key` crosses `threshold` hits inside
+# a rolling `window_sec`. Paired with notify_admin's cooldown, alerts stay quiet.
+_event_windows: dict = {}  # key -> [window_start_ts, count]
+
+def _spike(key: str, threshold: int, window_sec: int) -> bool:
+    now = time.time()
+    w = _event_windows.get(key)
+    if not w or now - w[0] > window_sec:
+        _event_windows[key] = [now, 1]
+        return False
+    w[1] += 1
+    return w[1] == threshold
+
+def _note_auth_failure(e):
+    """Separate an auth-infra outage (signing keys unreachable/misconfigured → ALL
+    logins break) from ordinary bad/expired tokens, and watch for a 401 spike."""
+    msg = str(e)
+    if "not configured" in msg or "JWK" in msg or "signing key" in msg or "Unable to find" in msg:
+        notify_admin("auth_jwks", "Auth verification broken",
+                     f"Token verification failed at the infra level — Supabase signing keys are unreachable or misconfigured, so logins may be broken for everyone. Detail: {msg[:120]}")
+    if _spike("auth_fail", 20, 300):
+        notify_admin("auth_spike", "Auth-failure spike",
+                     "More than 20 login/token failures in 5 minutes — possible credential-stuffing attack or an auth outage.")
 
 
 def send_push_to_user(user_id: str, title: str, body: str):
@@ -356,6 +413,9 @@ def send_push_to_user(user_id: str, title: str, body: str):
                 )
         except Exception as e:
             logger.debug(f"Push send failed: {e}")
+            if _spike("push_fail", 10, 600):
+                notify_admin("push_fail", "Notifications failing",
+                             "Over 10 push deliveries failed in 10 minutes — VAPID keys may be wrong/expired or subscriptions stale, so users aren't getting notifications.")
     threading.Thread(target=_send, daemon=True).start()
 
 
@@ -593,9 +653,14 @@ def get_db(user_id: Optional[str] = None):
         conn.cursor().execute("SELECT 1")
     except Exception:
         logger.debug("Pool stale — resetting (Neon cold start)")
-        _reset_pool()
-        conn = _pool.getconn()
-        conn.autocommit = False
+        try:
+            _reset_pool()
+            conn = _pool.getconn()
+            conn.autocommit = False
+        except Exception as e:
+            notify_admin("db_unreachable", "Database unreachable",
+                         f"Connection pool reset failed — Neon is likely down or at its connection limit, so requests are failing. Detail: {str(e)[:120]}")
+            raise
     # RLS: bind the request's user to a transaction-local GUC so Postgres
     # row-level security policies enforce per-user isolation in the DB itself.
     uid = user_id or _current_user_id.get()
@@ -606,6 +671,8 @@ def get_db(user_id: Optional[str] = None):
             c.close()
         except Exception as e:
             logger.debug(f"RLS user bind skipped: {e}")
+            notify_admin("rls_bind", "RLS bind failed",
+                         f"Could not set app.user_id for row-level security this request — per-user DB isolation was not enforced. Detail: {str(e)[:120]}")
     return conn
 
 def release_db(conn):
@@ -621,6 +688,8 @@ def release_db(conn):
 def _db_error(e) -> HTTPException:
     """Log the real DB error server-side; return a sanitized 500 to the client."""
     logger.error(f"DB error: {e}")
+    notify_admin("db_error", "DB error",
+                 f"A database query failed (some endpoint). Neon may be down or a query is broken. Detail: {str(e)[:150]}")
     return HTTPException(status_code=500, detail={
         "error_type": "db_error",
         "message": "A database error occurred. Please try again.",
@@ -877,6 +946,26 @@ def _supabase_keepalive():
         notify_admin("supabase_keepalive", "🔴 Supabase unreachable",
                      "Daily keepalive failed — the project may be paused. Logins will break; restore it at supabase.com/dashboard.")
 
+# Once-a-day digest so you get a heartbeat even when nothing is broken.
+_DAILY_PULSE_SLOT = 20 * 60  # 20:00 local
+_daily_pulse_sent: dict = {}
+
+def _run_daily_pulse():
+    try:
+        conn = get_db("__system__")
+        cur  = conn.cursor()
+        today = date.today().isoformat()
+        cur.execute("SELECT COALESCE(SUM(count), 0), COUNT(DISTINCT user_id) FROM api_usage WHERE date = %s", [today])
+        scans, active = cur.fetchone()
+        cur.execute("SELECT COUNT(*) FROM users")
+        total = cur.fetchone()[0]
+        cur.close()
+        release_db(conn)
+        notify_admin("daily_pulse", "Daily pulse",
+                     f"Today: {scans} scan(s) by {active} active user(s). {total} users total.")
+    except Exception as e:
+        logger.debug(f"daily pulse failed: {e}")
+
 def _fire_due_reminders(due: list, today: str):
     """due: schedule rows whose time matched this tick. One DB round-trip for
     today's log counts, then push to users still under their threshold."""
@@ -921,12 +1010,21 @@ def _meal_reminder_loop():
             if (local.weekday() == 6 and 0 <= now_min - _WEEKLY_SUMMARY_SLOT <= 2
                     and _weekly_summary_sent.get("d") != today):
                 _weekly_summary_sent["d"] = today
-                _run_weekly_summary(local.date())
+                try:
+                    _run_weekly_summary(local.date())
+                except Exception as e:
+                    notify_admin("weekly_summary", "Weekly summary failed",
+                                 f"The Sunday weekly-summary job errored, so users didn't get their recap. Detail: {str(e)[:120]}")
             if 0 <= now_min - _SUPABASE_KEEPALIVE_SLOT <= 2 and _supabase_keepalive_sent.get("d") != today:
                 _supabase_keepalive_sent["d"] = today
                 _supabase_keepalive()
+            if 0 <= now_min - _DAILY_PULSE_SLOT <= 2 and _daily_pulse_sent.get("d") != today:
+                _daily_pulse_sent["d"] = today
+                _run_daily_pulse()
         except Exception as e:
             logger.warning(f"Meal reminder loop error: {e}")
+            notify_admin("scheduler_error", "Scheduler error",
+                         f"A background scheduler tick failed — meal reminders, weekly summary, Supabase keepalive and the daily pulse may not run. Detail: {str(e)[:120]}")
         time.sleep(60)
 
 
@@ -997,6 +1095,8 @@ async def upload_raw_and_processed(
             return url
         except Exception as e:
             logger.warning(f"   ⚠️ S3 upload failed for {key}: {e}")
+            notify_admin("s3_upload", "Image upload failing",
+                         f"S3 put_object failed — scan images aren't being saved. Detail: {str(e)[:120]}")
             return ""
 
     raw_url, processed_url = await asyncio.gather(
@@ -1036,6 +1136,8 @@ async def call_gemini_with_retry(contents: list, label: str = "") -> str:
             last_error = e
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                notify_admin("gemini_quota", "Gemini quota exhausted",
+                             "Google returned 429/RESOURCE_EXHAUSTED — the Gemini quota is used up, so label scanning is down until it resets.")
                 raise HTTPException(status_code=429, detail={
                     "error_type": "quota_exceeded", "retryable": False,
                     "message": "API quota exceeded. Try again later.",
@@ -1061,6 +1163,8 @@ async def call_gemini_with_retry(contents: list, label: str = "") -> str:
         logger.info(f"   ✅ [{label}] Fallback succeeded")
         return response.text
     except asyncio.TimeoutError:
+        notify_admin("gemini_down", "Scanning is down",
+                     f"Both Gemini models timed out for {label} — label scanning is failing for users right now.")
         raise HTTPException(status_code=504, detail={
             "error_type": "timeout", "retryable": True,
             "message": f"Both models timed out after {GEMINI_TIMEOUT}s.",
@@ -1068,11 +1172,15 @@ async def call_gemini_with_retry(contents: list, label: str = "") -> str:
     except Exception as e:
         err_str = str(e)
         if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            notify_admin("gemini_quota", "Gemini quota exhausted",
+                         "Google returned 429/RESOURCE_EXHAUSTED — the Gemini quota is used up, so label scanning is down until it resets.")
             raise HTTPException(status_code=429, detail={
                 "error_type": "quota_exceeded", "retryable": False,
                 "message": "API quota exceeded. Try again later.",
             })
         logger.warning(f"Gemini unavailable: {err_str}")
+        notify_admin("gemini_down", "Scanning is down",
+                     f"Both Gemini models failed for {label} — label scanning is unavailable. Detail: {err_str[:120]}")
         raise HTTPException(status_code=503, detail={
             "error_type": "api_unavailable", "retryable": True,
             "message": "Image analysis is temporarily unavailable. Please try again.",
@@ -1190,6 +1298,9 @@ async def analyze_label(
     image_id  = str(uuid.uuid4())
     raw_bytes = await file.read()
     if len(raw_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+        if _spike("oversize", 10, 600):
+            notify_admin("oversize", "Oversized uploads",
+                         "Over 10 too-large image uploads in 10 minutes — someone may be probing the upload limit.")
         raise HTTPException(status_code=413, detail={
             "error_type": "file_too_large", "retryable": False,
             "message": f"Image too large (max {MAX_UPLOAD_MB} MB).",
@@ -1263,6 +1374,9 @@ async def analyze_labels(
     for f in files:
         raw_bytes       = await f.read()
         if len(raw_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+            if _spike("oversize", 10, 600):
+                notify_admin("oversize", "Oversized uploads",
+                             "Over 10 too-large image uploads in 10 minutes — someone may be probing the upload limit.")
             raise HTTPException(status_code=413, detail={
                 "error_type": "file_too_large", "retryable": False,
                 "message": f"One image is too large (max {MAX_UPLOAD_MB} MB).",
@@ -2244,6 +2358,8 @@ async def chat(
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
     logger.error(f"❌ Unhandled: {exc}")
+    notify_admin("unhandled_500", "Unhandled server error",
+                 f"{request.method} {request.url.path} crashed with an unexpected error. Detail: {str(exc)[:150]}")
     return JSONResponse(
         status_code=500,
         content={"error_type": "internal_error", "retryable": True, "message": "An unexpected error occurred. Please try again."},
