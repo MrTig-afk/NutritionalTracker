@@ -752,9 +752,9 @@ def init_db():
 MEAL_REMINDERS_ENABLED  = os.getenv("MEAL_REMINDERS_ENABLED", "1") == "1"
 REMINDER_UTC_OFFSET_MIN = int(os.getenv("REMINDER_UTC_OFFSET_MIN", "600"))  # default Sydney AEST (+10:00; set 660 during DST)
 _MEAL_REMINDERS = [
-    (9 * 60,  1, "🍳 Good morning!",      "Time to log your first meal of the day."),
-    (14 * 60, 2, "🥗 Afternoon check-in", "Don't forget to log your second meal."),
-    (21 * 60, 3, "🌙 Evening reminder",   "Log today's meals before you wind down."),
+    (9 * 60,  1, "Good morning",       "Time to log your first meal of the day."),
+    (14 * 60, 2, "Afternoon check-in", "Don't forget to log your second meal."),
+    (21 * 60, 3, "Evening reminder",   "Log today's meals before you wind down."),
 ]
 _reminder_sent: dict = {}  # slot minutes -> local date iso already sent
 
