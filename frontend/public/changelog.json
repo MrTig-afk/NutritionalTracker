@@ -1,9 +1,6 @@
 [
-  "Typing in any field no longer zooms the screen in",
-  "Sign in with Google now lets you pick which account to use",
-  "Email sign-in now uses a 6-digit code you enter in the app",
-  "Chat no longer hides behind the keyboard while typing",
-  "Daily meal reminders at 9am, 2pm and 9pm (enable notifications)",
-  "Much faster app startup and more reliable updates",
-  "Security: your data is now isolated at the database level"
+  "Daily meal reminders at 9am, 2pm and 9pm — enable notifications to get them",
+  "Pick which Google account to use when signing in",
+  "Email sign-in now uses a 6-digit code entered in the app",
+  "Faster startup, no more zoom while typing, chat stays above the keyboard"
 ]
