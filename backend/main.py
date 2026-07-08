@@ -206,7 +206,7 @@ app.add_middleware(
 )
 
 # ---------- SUPABASE AUTH ----------
-SUPABASE_URL              = os.getenv("SUPABASE_URL", "https://kqgckmvwedkuoboftduu.supabase.co")
+SUPABASE_URL              = os.getenv("SUPABASE_URL", "https://npcoetxfrwnlwuexrezf.supabase.co")
 SUPABASE_JWT_SECRET       = os.getenv("SUPABASE_JWT_SECRET")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
@@ -750,7 +750,7 @@ def init_db():
 # app.user_id = '__system__' (a real Supabase JWT sub is always a UUID, so a
 # user can never occupy this value). Read-only: writes stay user-isolated.
 MEAL_REMINDERS_ENABLED  = os.getenv("MEAL_REMINDERS_ENABLED", "1") == "1"
-REMINDER_UTC_OFFSET_MIN = int(os.getenv("REMINDER_UTC_OFFSET_MIN", "330"))  # default IST (+05:30)
+REMINDER_UTC_OFFSET_MIN = int(os.getenv("REMINDER_UTC_OFFSET_MIN", "600"))  # default Sydney AEST (+10:00; set 660 during DST)
 _MEAL_REMINDERS = [
     (9 * 60,  1, "🍳 Good morning!",      "Time to log your first meal of the day."),
     (14 * 60, 2, "🥗 Afternoon check-in", "Don't forget to log your second meal."),
