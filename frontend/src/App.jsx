@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { supabase } from "./lib/api";
 import { PALETTE_CSS } from "./styles";
+import { CHANGELOG_VERSION } from "./version";
 import { Icon, Spin } from "./components/Icon";
 import AddToLogModal from "./components/AddToLogModal";
 import EditLogModal from "./components/EditLogModal";
@@ -75,9 +76,15 @@ export default function App() {
   useEffect(() => {
     const handler = () => {
       setUpdateReady(true);
-      fetch("/changelog.json", { cache: "reload" })
+      // Versioned notes: show only entries newer than the build we're running,
+      // so the prompt always matches exactly what the pending update contains.
+      fetch("/changelog.v2.json", { cache: "reload" })
         .then(r => r.json())
-        .then(items => setUpcomingChangelog(Array.isArray(items) ? items : []))
+        .then(items => setUpcomingChangelog(
+          (Array.isArray(items) ? items : [])
+            .filter(i => typeof i === "object" && i.v > CHANGELOG_VERSION)
+            .map(i => i.text)
+        ))
         .catch(() => {});
     };
     window.addEventListener('sw-update-ready', handler);
@@ -168,11 +175,6 @@ export default function App() {
               <Icon n="nutrition" size={20} style={{ color: "var(--mint)" }} />
             </div>
             <span style={{ fontSize: 20, fontWeight: 800, color: "white", letterSpacing: "-0.4px" }}>NutriScan</span>
-            {updateReady && (
-              <button onClick={() => setShowChangelog(true)} style={{ background: "var(--mint)", color: "var(--mint-dk)", border: "none", borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", letterSpacing: "0.2px" }}>
-                Update
-              </button>
-            )}
           </div>
 
           <div className="ns-top-tabs" style={{ alignItems: "center", gap: 4 }}>
@@ -202,6 +204,17 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Update banner — kept out of the header so it never crowds it */}
+        {updateReady && (
+          <button onClick={() => setShowChangelog(true)}
+            style={{ width: "100%", background: "#004E56", border: "none", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, cursor: "pointer" }}>
+            <Icon n="new_releases" size={18} style={{ color: "var(--mint)", flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: "var(--mint)", fontWeight: 700 }}>
+              Update available — tap to see what's new
+            </span>
+          </button>
+        )}
 
         {/* Content */}
         <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", paddingTop: 20 }}>

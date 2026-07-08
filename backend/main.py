@@ -762,21 +762,56 @@ def init_db():
 # user can never occupy this value). Read-only: writes stay user-isolated.
 MEAL_REMINDERS_ENABLED  = os.getenv("MEAL_REMINDERS_ENABLED", "1") == "1"
 REMINDER_UTC_OFFSET_MIN = int(os.getenv("REMINDER_UTC_OFFSET_MIN", "600"))  # default Sydney AEST (+10:00; set 660 during DST)
+# (pref key, entries-needed threshold, default local time, title, body)
 _MEAL_REMINDERS = [
-    (9 * 60,  1, "meal_morning",   "Good morning",       "Time to log your first meal of the day."),
-    (14 * 60, 2, "meal_afternoon", "Afternoon check-in", "Don't forget to log your second meal."),
-    (21 * 60, 3, "meal_evening",   "Evening reminder",   "Log today's meals before you wind down."),
+    ("meal_morning",   1, "09:00", "Good morning",       "Time to log your first meal of the day."),
+    ("meal_afternoon", 2, "14:00", "Afternoon check-in", "Don't forget to log your second meal."),
+    ("meal_evening",   3, "21:00", "Evening reminder",   "Log today's meals before you wind down."),
 ]
-_reminder_sent: dict = {}  # slot minutes -> local date iso already sent
+_reminder_sent: dict = {}  # (user_id, pref_key) -> local date iso already handled
 
 # ---------- NOTIFICATION PREFERENCES ----------
 # Opt-in toggles for recurring reminder pushes only. Missing key = DISABLED —
 # users must explicitly turn reminders on in Settings. Event-driven alerts
 # (scan limit hit, goal reached) have no toggle: they always send to anyone
-# with device notifications enabled.
+# with device notifications enabled. Each meal reminder also has a per-user
+# time ("<key>_time", 24h "HH:MM"; defaults below).
 NOTIF_PREF_KEYS = [
     "meal_morning", "meal_afternoon", "meal_evening", "weekly_summary",
 ]
+NOTIF_TIME_DEFAULTS = {f"{k}_time": t for k, _, t, _, _ in _MEAL_REMINDERS}
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+
+# In-memory reminder schedule so the per-minute scheduler tick never touches
+# the database (which would keep Neon's compute awake 24/7). It reloads only
+# when prefs/subscriptions change (see _mark_schedule_dirty call sites) and
+# queries the DB solely at the moment a reminder actually fires.
+_reminder_schedule: list = []       # (user_id, key, threshold, "HH:MM", title, body)
+_schedule_dirty = threading.Event()
+_schedule_dirty.set()
+
+def _mark_schedule_dirty():
+    _schedule_dirty.set()
+
+def _reload_reminder_schedule() -> list:
+    rows = []
+    conn = get_db("__system__")
+    cur  = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT p.user_id, np.prefs
+        FROM push_subscriptions p
+        LEFT JOIN notification_prefs np ON np.user_id = p.user_id
+    """)
+    for uid, prefs in cur.fetchall():
+        prefs = prefs if isinstance(prefs, dict) else (json.loads(prefs) if prefs else {})
+        for key, threshold, dflt, title, body in _MEAL_REMINDERS:
+            if prefs.get(key):
+                t = prefs.get(f"{key}_time", dflt)
+                rows.append((uid, key, threshold, t if _TIME_RE.match(str(t)) else dflt, title, body))
+    cur.close()
+    release_db(conn)
+    logger.info(f"⏰ Reminder schedule reloaded: {len(rows)} slot(s) across users")
+    return rows
 
 # Weekly summary: Sunday 19:00 local recap of the week vs goals.
 _WEEKLY_SUMMARY_SLOT = 19 * 60
@@ -841,37 +876,47 @@ def _supabase_keepalive():
         notify_admin("supabase_keepalive", "🔴 Supabase unreachable",
                      "Daily keepalive failed — the project may be paused. Logins will break; restore it at supabase.com/dashboard.")
 
-def _run_meal_reminder(threshold: int, pref_key: str, title: str, body: str, today: str):
+def _fire_due_reminders(due: list, today: str):
+    """due: schedule rows whose time matched this tick. One DB round-trip for
+    today's log counts, then push to users still under their threshold."""
+    uids = list({r[0] for r in due})
     conn = get_db("__system__")
     cur  = conn.cursor()
-    cur.execute("""
-        SELECT p.user_id
-        FROM push_subscriptions p
-        LEFT JOIN daily_log d ON d.user_id = p.user_id AND d.date = %s
-        LEFT JOIN notification_prefs np ON np.user_id = p.user_id
-        WHERE COALESCE((np.prefs->>%s)::boolean, false)
-        GROUP BY p.user_id
-        HAVING count(d.log_id) < %s
-    """, [today, pref_key, threshold])
-    users = [r[0] for r in cur.fetchall()]
+    cur.execute(
+        "SELECT user_id, count(*) FROM daily_log WHERE date = %s AND user_id = ANY(%s) GROUP BY user_id",
+        [today, uids],
+    )
+    counts = dict(cur.fetchall())
     cur.close()
     release_db(conn)
-    for uid in users:
-        send_push_to_user(uid, title, body)
-    logger.info(f"⏰ Meal reminder ({title}) queued for {len(users)} user(s)")
+    sent = 0
+    for uid, key, threshold, _t, title, body in due:
+        _reminder_sent[(uid, key)] = today  # handled either way for today
+        if counts.get(uid, 0) < threshold:
+            send_push_to_user(uid, title, body)
+            sent += 1
+    logger.info(f"⏰ Meal reminders fired: {sent}/{len(due)} due slot(s)")
 
 def _meal_reminder_loop():
+    global _reminder_schedule
     while True:
         try:
-            local   = datetime.utcnow() + timedelta(minutes=REMINDER_UTC_OFFSET_MIN)
+            local = datetime.utcnow() + timedelta(minutes=REMINDER_UTC_OFFSET_MIN)
             now_min = local.hour * 60 + local.minute
-            today   = local.date().isoformat()
-            for slot, threshold, pref_key, title, body in _MEAL_REMINDERS:
-                # 2-min window so a late tick still fires, but a mid-day
-                # restart doesn't re-send old slots.
-                if 0 <= now_min - slot <= 2 and _reminder_sent.get(slot) != today:
-                    _reminder_sent[slot] = today
-                    _run_meal_reminder(threshold, pref_key, title, body, today)
+            today = local.date().isoformat()
+
+            if _schedule_dirty.is_set():
+                _schedule_dirty.clear()
+                _reminder_schedule = _reload_reminder_schedule()
+
+            # 3-min window so a late tick still fires; per-(user,slot) daily
+            # dedup keeps consecutive ticks from double-sending.
+            candidates = {(local - timedelta(minutes=m)).strftime("%H:%M") for m in range(3)}
+            due = [r for r in _reminder_schedule
+                   if r[3] in candidates and _reminder_sent.get((r[0], r[1])) != today]
+            if due:
+                _fire_due_reminders(due, today)
+
             if (local.weekday() == 6 and 0 <= now_min - _WEEKLY_SUMMARY_SLOT <= 2
                     and _weekly_summary_sent.get("d") != today):
                 _weekly_summary_sent["d"] = today
@@ -1884,6 +1929,7 @@ async def push_subscribe(body: PushSubscriptionCreate, authorization: Optional[s
         conn.commit(); cur.close(); release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    _mark_schedule_dirty()
     return {"subscribed": True}
 
 
@@ -1896,6 +1942,7 @@ async def push_unsubscribe(authorization: Optional[str] = Header(default=None)):
         conn.commit(); cur.close(); release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    _mark_schedule_dirty()
     return {"unsubscribed": True}
 
 
@@ -1916,13 +1963,26 @@ async def get_notification_prefs(authorization: Optional[str] = Header(default=N
     stored = row[0] if row and row[0] else {}
     if not isinstance(stored, dict):
         stored = json.loads(stored)
-    return {"prefs": {k: bool(stored.get(k, False)) for k in NOTIF_PREF_KEYS}}
+    prefs = {k: bool(stored.get(k, False)) for k in NOTIF_PREF_KEYS}
+    for tk, dflt in NOTIF_TIME_DEFAULTS.items():
+        t = str(stored.get(tk, dflt))
+        prefs[tk] = t if _TIME_RE.match(t) else dflt
+    return {"prefs": prefs}
 
 
 @app.put("/settings/notifications")
 async def set_notification_prefs(body: NotificationPrefs, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
     clean = {k: bool(v) for k, v in body.prefs.items() if k in NOTIF_PREF_KEYS}
+    for tk in NOTIF_TIME_DEFAULTS:
+        if tk in body.prefs:
+            t = str(body.prefs[tk])
+            if not _TIME_RE.match(t):
+                raise HTTPException(status_code=400, detail={
+                    "error_type": "invalid_time",
+                    "message": f"Invalid time for {tk} — use HH:MM (24h).",
+                })
+            clean[tk] = t
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("""
@@ -1931,9 +1991,14 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
             ON CONFLICT (user_id) DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = EXCLUDED.updated_at
         """, [user_id, json.dumps(clean), datetime.now()])
         conn.commit(); cur.close(); release_db(conn)
+    except HTTPException:
+        raise
     except Exception as e:
         raise _db_error(e)
-    return {"prefs": {k: clean.get(k, False) for k in NOTIF_PREF_KEYS}}
+    _mark_schedule_dirty()
+    out = {k: clean.get(k, False) for k in NOTIF_PREF_KEYS}
+    out.update({tk: clean.get(tk, dflt) for tk, dflt in NOTIF_TIME_DEFAULTS.items()})
+    return {"prefs": out}
 
 
 _ACCOUNT_TABLES = [
@@ -1967,6 +2032,7 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
         except Exception as e:
             logger.warning(f"Supabase user delete failed (data already gone): {e}")
 
+    _mark_schedule_dirty()
     logger.info(f"🗑️ Account deleted: {user_id[:8]}")
     notify_admin("account_deleted", "🗑️ Account Deleted", f"User {user_id[:8]} deleted their account")
     return {"deleted": True}

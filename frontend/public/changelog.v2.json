@@ -1,0 +1,11 @@
+[
+  { "v": 9, "text": "Chat now opens as its own full screen" },
+  { "v": 9, "text": "Pick your own time for each meal reminder — like 11:00 AM" },
+  { "v": 9, "text": "Cleaner header — update alerts are now a banner" },
+  { "v": 8, "text": "Settings: turn on meal reminders and weekly summaries, contact the developer, delete your account" },
+  { "v": 8, "text": "Dark mode — toggle it from the top bar" },
+  { "v": 8, "text": "Weekly summary notification on Sunday evenings" },
+  { "v": 7, "text": "Pick which Google account to use when signing in" },
+  { "v": 7, "text": "Email sign-in now uses a 6-digit code entered in the app" },
+  { "v": 7, "text": "Daily meal reminders — turn them on in Settings" }
+]
