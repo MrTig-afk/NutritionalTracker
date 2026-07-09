@@ -17,6 +17,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [loading, setLoading] = useState(true);
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [expandedGroups, setExpandedGroups] = useState({});
 
   // The app can stay open across midnight (installed PWA). If the user was
   // viewing "today", roll the view forward when the date changes so new logs
@@ -58,6 +59,38 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
     catch (e) { console.error(e); }
     finally { setDeletingId(null); }
   };
+
+  const toggleGroup = (gid) => setExpandedGroups(prev => ({ ...prev, [gid]: !prev[gid] }));
+
+  const deleteGroup = async (block) => {
+    setDeletingId(block.gid);
+    try {
+      for (const it of block.items) await apiFetch(`/log/${it.log_id}`, { method: "DELETE" });
+      await loadData();
+    } catch (e) { console.error(e); }
+    finally { setDeletingId(null); }
+  };
+
+  // One log row (used standalone and as a group child).
+  const renderItemRow = (entry, { topBorder = "none", indent = false } = {}) => (
+    <div key={entry.log_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: indent ? "10px 16px 10px 40px" : "12px 16px", borderTop: topBorder }}>
+      <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--teal)", flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+          ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {entry.contribution.calories.toFixed(0)} kcal · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
+        </div>
+      </div>
+      <button onClick={() => onEditEntry && onEditEntry(entry)}
+        style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Icon n="edit" size={13} style={{ color: "var(--accent)" }} />
+      </button>
+      <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
+        style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {deletingId === entry.log_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
+      </button>
+    </div>
+  );
 
   if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Spin size={24} /></div>;
 
@@ -139,25 +172,51 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
             {selectedDate === today ? "No entries yet. Add food from Library." : "No entries for this day."}
           </div>
         ) : (
-          logData.items.map((entry, idx) => (
-            <div key={entry.log_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: idx === 0 ? "none" : "1px solid var(--off2)" }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: idx % 2 === 0 ? "var(--teal)" : "var(--orange)", flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</div>
-                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                  ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {entry.contribution.calories.toFixed(0)} kcal · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
+          (() => {
+            // Rows sharing a meal_group (logged from one template) collapse into a
+            // single "Breakfast" block that expands to its editable ingredients.
+            const blocks = [];
+            const gidx = {};
+            logData.items.forEach(it => {
+              const gid = it.meal_group;
+              if (gid) {
+                if (gidx[gid] == null) { gidx[gid] = blocks.length; blocks.push({ type: "group", gid, label: it.meal_label || "Meal", items: [it] }); }
+                else blocks[gidx[gid]].items.push(it);
+              } else {
+                blocks.push({ type: "item", item: it });
+              }
+            });
+            return blocks.map((block, bIdx) => {
+              const topBorder = bIdx === 0 ? "none" : "1px solid var(--off2)";
+              if (block.type === "item") return renderItemRow(block.item, { topBorder });
+              const sum = block.items.reduce((a, it) => ({
+                calories: a.calories + it.contribution.calories,
+                protein:  a.protein  + it.contribution.protein,
+                carbs:    a.carbs    + it.contribution.carbs,
+                fat:      a.fat      + it.contribution.fat,
+              }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+              const open = !!expandedGroups[block.gid];
+              return (
+                <div key={block.gid} style={{ borderTop: topBorder }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }} onClick={() => toggleGroup(block.gid)}>
+                    <Icon n="restaurant_menu" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{block.label}</div>
+                      <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+                        {block.items.length} item{block.items.length !== 1 ? "s" : ""} · {sum.calories.toFixed(0)} kcal · P {sum.protein.toFixed(1)}g · C {sum.carbs.toFixed(1)}g · F {sum.fat.toFixed(1)}g
+                      </div>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid}
+                      style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {deletingId === block.gid ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
+                    </button>
+                    <Icon n={open ? "expand_less" : "expand_more"} size={16} style={{ color: "var(--muted)", flexShrink: 0 }} />
+                  </div>
+                  {open && block.items.map(it => renderItemRow(it, { topBorder: "1px solid var(--off2)", indent: true }))}
                 </div>
-              </div>
-              <button onClick={() => onEditEntry && onEditEntry(entry)}
-                style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon n="edit" size={13} style={{ color: "var(--accent)" }} />
-              </button>
-              <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
-                style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                {deletingId === entry.log_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
-              </button>
-            </div>
-          ))
+              );
+            });
+          })()
         )}
       </div>
       </div>

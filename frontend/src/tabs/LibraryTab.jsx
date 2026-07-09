@@ -125,6 +125,21 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     } catch (e) { console.error(e); }
   };
 
+  const setTmplItemServings = async (templateId, itemId, servings) => {
+    const next = Math.max(1, Math.round(servings));
+    // Optimistic: update the row immediately, revert on failure.
+    setTemplateData(prev => ({
+      ...prev,
+      [templateId]: { ...prev[templateId], items: prev[templateId].items.map(i => i.item_id === itemId ? { ...i, servings: next } : i) },
+    }));
+    try {
+      await apiFetch(`/meal-templates/${templateId}/items/${itemId}`, {
+        method: "PUT",
+        body: JSON.stringify({ servings: next }),
+      });
+    } catch (e) { console.error(e); loadTemplates(); openTemplateById(templateId); }
+  };
+
   const deleteTmplItem = async (templateId, itemId) => {
     setDeletingTmplItem(itemId);
     try {
@@ -351,7 +366,18 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                           </div>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
-                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>×{item.servings} · {macroLine(item.nutrition)}</div>
+                            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{macroLine(item.nutrition)} / serving</div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings - 1)} disabled={item.servings <= 1}
+                              style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--off)", cursor: item.servings <= 1 ? "not-allowed" : "pointer", opacity: item.servings <= 1 ? 0.4 : 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                              <Icon n="remove" size={13} style={{ color: "var(--text)" }} />
+                            </button>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", minWidth: 16, textAlign: "center" }}>{item.servings}</span>
+                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings + 1)}
+                              style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+                              <Icon n="add" size={13} style={{ color: "var(--text)" }} />
+                            </button>
                           </div>
                           <button onClick={() => deleteTmplItem(tmpl.template_id, item.item_id)} disabled={deletingTmplItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
                             {deletingTmplItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
