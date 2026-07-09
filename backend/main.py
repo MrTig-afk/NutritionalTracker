@@ -486,6 +486,9 @@ class MealTemplateItemCreate(BaseModel):
     nutrition: dict
     servings: float = 1.0
 
+class MealTemplateItemUpdate(BaseModel):
+    servings: float = Field(gt=0)
+
 class PushSubscriptionCreate(BaseModel):
     endpoint: str
     expirationTime: Optional[int] = None
@@ -1727,6 +1730,8 @@ async def get_daily_log(
             "name":     name,
             "servings": servings,
             "nutrition": nutrition,
+            "meal_group": nutrition.get("_meal_group"),
+            "meal_label": nutrition.get("_meal_label"),
             "contribution": {
                 "calories": round(cal,  1),
                 "protein":  round(prot, 1),
@@ -1991,6 +1996,24 @@ async def add_meal_template_item(template_id: str, body: MealTemplateItemCreate,
     return {"item_id": item_id, "name": body.name, "servings": body.servings}
 
 
+@app.put("/meal-templates/{template_id}/items/{item_id}")
+async def update_meal_template_item(template_id: str, item_id: str, body: MealTemplateItemUpdate, authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
+    try:
+        conn = get_db(); cur = conn.cursor()
+        cur.execute(
+            "UPDATE meal_template_items SET servings = %s WHERE item_id = %s AND template_id = %s AND user_id = %s",
+            [body.servings, item_id, template_id, user_id],
+        )
+        updated = cur.rowcount
+        conn.commit(); cur.close(); release_db(conn)
+    except Exception as e:
+        raise _db_error(e)
+    if not updated:
+        raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template item not found"})
+    return {"item_id": item_id, "servings": body.servings}
+
+
 @app.delete("/meal-templates/{template_id}/items/{item_id}")
 async def delete_meal_template_item(template_id: str, item_id: str, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
@@ -2009,21 +2032,30 @@ async def log_meal_template(template_id: str, log_date: Optional[str] = None, au
     today   = log_date or date.today().isoformat()
     try:
         conn = get_db(); cur = conn.cursor()
-        cur.execute("SELECT template_id FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
-        if not cur.fetchone():
+        cur.execute("SELECT name FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
+        tmpl = cur.fetchone()
+        if not tmpl:
             cur.close(); release_db(conn)
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
+        template_name = tmpl[0]
         cur.execute("SELECT name, nutrition, servings FROM meal_template_items WHERE template_id = %s", [template_id])
         items = cur.fetchall()
         if not items:
             cur.close(); release_db(conn)
             return {"logged": 0}
+        # Log each item as its own row (so ingredients stay individually editable),
+        # but stamp them all with one meal_group + label. The Tracker collapses a
+        # group into one "Breakfast" line that expands to its ingredients. The
+        # group tags live inside the nutrition JSON, so no schema change is needed.
+        group_id = str(uuid.uuid4())
         for name, nutrition, servings in items:
-            log_id     = str(uuid.uuid4())
-            nutri_json = json.dumps(nutrition) if isinstance(nutrition, dict) else (nutrition or "{}")
+            n = nutrition if isinstance(nutrition, dict) else json.loads(nutrition or "{}")
+            n["_meal_group"] = group_id
+            n["_meal_label"] = template_name
+            log_id = str(uuid.uuid4())
             cur.execute(
                 "INSERT INTO daily_log (log_id, user_id, date, name, servings, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                [log_id, user_id, today, name, servings, nutri_json, datetime.now()],
+                [log_id, user_id, today, name, servings, json.dumps(n), datetime.now()],
             )
         conn.commit(); cur.close(); release_db(conn)
     except HTTPException:

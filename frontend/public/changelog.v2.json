@@ -1,4 +1,6 @@
 [
+  { "v": 18, "text": "Logging a meal template now groups into one meal in your tracker (like 'Breakfast') that you can tap to expand and edit each ingredient" },
+  { "v": 18, "text": "Set servings per item in a template - 2 slices of cheese, not 1 - and the totals follow through when you log it" },
   { "v": 17, "text": "Delete saved foods straight from library search results" },
   { "v": 17, "text": "Tap the NutriScan logo to jump back to the Scan screen" },
   { "v": 16, "text": "Tracker always shows the right day, and Trends uses your local date" },
