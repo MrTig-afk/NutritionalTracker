@@ -21,6 +21,7 @@
 **/*.local
 **/node_modules/
 **/dist/
+**/dist-demo/
 **/dev-dist/
 **/__pycache__/
 **/*.pyc

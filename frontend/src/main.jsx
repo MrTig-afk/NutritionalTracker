@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
+// PUBLIC DEMO build only: self-hosted fonts + body.is-demo badge class.
+// import.meta.env.VITE_DEMO is statically undefined in normal builds, so this
+// branch — and the whole src/demo tree behind it — is tree-shaken out.
+if (import.meta.env.VITE_DEMO === '1') import('./demo/demoBoot.js')
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

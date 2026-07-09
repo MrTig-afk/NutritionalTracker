@@ -7,6 +7,13 @@ import ImageCropper from "../components/ImageCropper";
 import SaveToFolderModal from "../components/SaveToFolderModal";
 import NutrientGrid from "../components/NutrientGrid";
 
+// PUBLIC DEMO build only: one-tap sample labels. The env flag is statically
+// undefined in normal builds, so the component (and its bundled label images)
+// is tree-shaken out of the real app.
+const DemoSamples = import.meta.env.VITE_DEMO === "1"
+  ? React.lazy(() => import("../demo/DemoSamples.jsx"))
+  : null;
+
 export default function ScanTab({ onAddToLog }) {
   const [images, setImages] = useState([]);
   const [optimizedFiles, setOptimizedFiles] = useState([]);
@@ -124,6 +131,13 @@ export default function ScanTab({ onAddToLog }) {
               </div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>Upload nutrition label</div>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>Crop → optimize → analyze</div>
+              {DemoSamples && (
+                <div style={{ width: "100%", marginTop: 8 }} onClick={e => e.stopPropagation()}>
+                  <React.Suspense fallback={null}>
+                    <DemoSamples onPick={(file) => handleImageUpload({ target: { files: [file] } })} />
+                  </React.Suspense>
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

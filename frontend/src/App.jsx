@@ -14,6 +14,10 @@ import TrackerTab from "./tabs/TrackerTab";
 import TrendsTab from "./tabs/TrendsTab";
 import SettingsTab from "./tabs/SettingsTab";
 
+// PUBLIC DEMO build flag: statically false in normal builds, so demo-only
+// branches below are tree-shaken out of the real app.
+const IS_DEMO = import.meta.env.VITE_DEMO === "1";
+
 const TABS = [
   { id: "scan",     label: "Scan",     icon: "document_scanner" },
   { id: "library",  label: "Library",  icon: "folder"           },
@@ -298,7 +302,12 @@ export default function App() {
 
       {/* Kept mounted so the conversation survives tab switches */}
       <ChatAssistant open={activeMainTab === "ai"} />
-      <Analytics />
+      {!IS_DEMO && <Analytics />}
+      {IS_DEMO && (
+        <div style={{ position: "fixed", right: 12, bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", zIndex: 60, background: "var(--teal)", color: "#fff", borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.3px", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", pointerEvents: "none" }}>
+          Demo · synthetic data
+        </div>
+      )}
     </>
   );
 }
