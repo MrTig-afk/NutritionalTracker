@@ -47,9 +47,9 @@ PRIMARY_MODEL  = "gemini-2.5-flash"
 FALLBACK_MODEL = "gemini-2.0-flash"
 MAX_IMAGE_PX   = 1024
 MAX_UPLOAD_MB  = 15  # reject oversized uploads before they hit memory/Gemini
-MAX_DECODED_PIXELS    = 50_000_000  # decoded-pixel cap: MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
+MAX_DECODED_PIXELS    = 30_000_000  # decoded-pixel cap (~90 MB RGB): MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
 ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}  # what this Pillow decodes; the PWA sends canvas JPEGs (HEIC needs pillow-heif)
-SCAN_BURST_USER = 5   # scan requests per user per minute, checked before the paid Gemini call
+SCAN_BURST_USER = 8   # scan requests per user per minute, before the paid Gemini call (the PWA retries a flaky call up to 3x per tap)
 SCAN_BURST_IP   = 20  # scan requests per IP per minute -> the abuse_guard 10-minute penalty box
 Image.MAX_IMAGE_PIXELS = MAX_DECODED_PIXELS  # Pillow's own hard stop (DecompressionBombError above 2x)
 JPEG_QUALITY   = 60
@@ -1311,6 +1311,7 @@ def validate_and_decode_image(image_bytes: bytes) -> bytes:
                                 f"Image dimensions too large (max {MAX_DECODED_PIXELS // 1_000_000} megapixels).")
         probe.verify()  # structural check; invalidates the object, so reopen to decode
         img = Image.open(io.BytesIO(image_bytes))
+        img.draft("RGB", (MAX_IMAGE_PX * 2, MAX_IMAGE_PX * 2))  # JPEG only: libjpeg decodes at reduced scale, no full-size buffer
         img.load()
     except HTTPException:
         raise

@@ -108,7 +108,7 @@ class ValidateAndDecode(unittest.TestCase):
         # 30000 x 30000 = 900 MP, above Pillow's 2x hard stop -> DecompressionBombError
         st = status_of(main.validate_and_decode_image, png_with_declared_canvas(30000, 30000))
         self.assertEqual(st[:2], (422, "image_too_large"))
-        # 8000 x 8000 = 64 MP, between 1x and 2x: Pillow only warns, our explicit cap rejects
+        # 8000 x 8000 = 64 MP, above the 30 MP cap but below Pillow's 2x hard stop: our explicit check rejects
         st = status_of(main.validate_and_decode_image, png_with_declared_canvas(8000, 8000))
         self.assertEqual(st[:2], (422, "image_too_large"))
 
