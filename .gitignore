@@ -31,7 +31,12 @@
 **/*.duckdb
 **/*.sqlite
 **/*.sqlite3
+*.tex
 
 # 4) Local-only design/marketing material, ignored wherever it appears.
 assets/
 social-media/
+
+# 5) Local study/interview docs — never commit.
+#    (Already covered by the /* default-deny; listed explicitly for clarity.)
+/PROJECT_RUNDOWN.md
