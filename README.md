@@ -62,8 +62,13 @@ NutriScan/
 ├── backend/
 │   ├── main.py              FastAPI app: all routes, JWT auth, DB pool, AI calls,
 │   │                        reminder scheduler, notification prefs, RLS binding,
+│   │                        image upload gate (format sniff, pixel cap, re-encode),
+│   │                        model-output schema check, scan burst caps,
 │   │                        abuse guards (per-IP flood/probe blocks, delete-spree
 │   │                        account freeze), ops alerts to ntfy, optional Sentry
+│   ├── tests/               unittest suite for the upload gate and output schema
+│   │                        (crafted bytes per rejection path; NUTRI_LIVE=1 adds
+│   │                        a live prompt-injection probe)
 │   ├── rls_policies.sql     Row-level security policies (per-user data isolation)
 │   ├── recycle_bin.sql      BEFORE DELETE triggers: every deleted row kept 30 days,
 │   │                        readable only by the DB owner (restore-by-email)
