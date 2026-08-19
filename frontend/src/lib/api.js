@@ -68,7 +68,12 @@ export async function apiFetch(path, options = {}) {
     await supabase.auth.signOut();
     throw new Error("Session expired. Please log in again.");
   }
-  if (!res.ok) { const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` })); throw new Error(err.message || `HTTP ${res.status}`); }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const msg = err.message || err.detail?.message || `HTTP ${res.status}`;  // FastAPI wraps HTTPException in {detail}
+    if (res.status === 423) { window.alert(msg); await supabase.auth.signOut(); }  // account frozen server-side
+    throw new Error(msg);
+  }
   return res.json();
 }
 
