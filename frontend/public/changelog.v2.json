@@ -1,4 +1,6 @@
 [
+  { "v": 20, "text": "Scan only accepts real JPEG, PNG or WebP photos now; anything else is refused with a clear message instead of a failed scan" },
+  { "v": 20, "text": "Rapid-fire scanning is rate limited for a minute; the daily scan limit is unchanged" },
   { "v": 19, "text": "Deleting a folder, meal template or log entry now asks you to confirm first - no more accidental one-tap wipes" },
   { "v": 19, "text": "If something fails to save, delete or load in Library or Tracker, you now see a short message instead of nothing happening" },
   { "v": 19, "text": "Screen-reader support: every icon button is now named, and decorative icons are skipped" },
