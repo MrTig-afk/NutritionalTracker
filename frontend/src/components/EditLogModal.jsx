@@ -55,7 +55,7 @@ export default function EditLogModal({ entry, onClose, onSaved }) {
       <div style={modalBox}>
         <div style={modalHeader}>
           <div style={modalTitle}><Icon n="edit" size={15} style={{ color: "var(--accent)" }} /> Edit Log Entry</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         <div>
           <label style={labelStyle}>Name</label>

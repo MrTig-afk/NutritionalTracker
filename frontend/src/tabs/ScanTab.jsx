@@ -148,11 +148,11 @@ export default function ScanTab({ onAddToLog }) {
                 }
                 {images.length > 1 && (
                   <>
-                    <button onClick={() => setActiveIndex(i => Math.max(0, i - 1))} disabled={activeIndex === 0}
+                    <button onClick={() => setActiveIndex(i => Math.max(0, i - 1))} disabled={activeIndex === 0} aria-label="Previous photo"
                       style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: "50%", background: "var(--white)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: activeIndex === 0 ? 0.3 : 1 }}>
                       <Icon n="chevron_left" size={14} />
                     </button>
-                    <button onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))} disabled={activeIndex === images.length - 1}
+                    <button onClick={() => setActiveIndex(i => Math.min(images.length - 1, i + 1))} disabled={activeIndex === images.length - 1} aria-label="Next photo"
                       style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: "50%", background: "var(--white)", border: "1px solid var(--border)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: activeIndex === images.length - 1 ? 0.3 : 1 }}>
                       <Icon n="chevron_right" size={14} />
                     </button>
@@ -167,8 +167,8 @@ export default function ScanTab({ onAddToLog }) {
                       {thumbSrc ? <img src={thumbSrc} alt={`Thumb ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
                       {!results && (
                         <>
-                          <button onClick={e => { e.stopPropagation(); removeImage(i); }} style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="close" size={9} /></button>
-                          <button onClick={e => { e.stopPropagation(); handleReCrop(i); }} style={{ position: "absolute", bottom: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="crop" size={9} /></button>
+                          <button onClick={e => { e.stopPropagation(); removeImage(i); }} aria-label={`Remove photo ${i + 1}`} style={{ position: "absolute", top: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="close" size={9} /></button>
+                          <button onClick={e => { e.stopPropagation(); handleReCrop(i); }} aria-label={`Crop photo ${i + 1}`} style={{ position: "absolute", bottom: 2, right: 2, width: 16, height: 16, borderRadius: "50%", background: "white", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon n="crop" size={9} /></button>
                         </>
                       )}
                       <div style={{ position: "absolute", bottom: 2, left: 4, fontSize: 9, fontWeight: 700, color: "white", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>{i + 1}</div>
@@ -225,7 +225,7 @@ export default function ScanTab({ onAddToLog }) {
             <div style={{ background: "#FDF0DC", border: "1px solid var(--orange)", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 10, alignItems: "flex-start" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "var(--orange)" }}>Error</span>
               <p style={{ flex: 1, fontSize: 13, color: "var(--brown)" }}>{error}</p>
-              <button onClick={() => setError(null)} style={{ background: "none", border: "none", cursor: "pointer" }}><Icon n="close" size={14} style={{ color: "var(--muted)" }} /></button>
+              <button onClick={() => setError(null)} aria-label="Dismiss" style={{ background: "none", border: "none", cursor: "pointer" }}><Icon n="close" size={14} style={{ color: "var(--muted)" }} /></button>
             </div>
           )}
 

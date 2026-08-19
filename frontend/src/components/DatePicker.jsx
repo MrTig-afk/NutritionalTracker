@@ -104,14 +104,14 @@ export default function DatePicker({ value, onChange, maxDate }) {
             padding: "14px 16px", width: dropPos.calW,
           }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <button onClick={goPrev}
+            <button onClick={goPrev} aria-label="Previous month"
               style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="chevron_left" size={14} />
             </button>
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
               {MONTHS_LONG[viewMonth]} {viewYear}
             </span>
-            <button onClick={goNext} disabled={nextDisabled}
+            <button onClick={goNext} disabled={nextDisabled} aria-label="Next month"
               style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "none", cursor: nextDisabled ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: nextDisabled ? 0.3 : 1 }}>
               <Icon n="chevron_right" size={14} />
             </button>

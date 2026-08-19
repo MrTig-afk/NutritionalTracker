@@ -1,4 +1,7 @@
 [
+  { "v": 19, "text": "Deleting a folder, meal template or log entry now asks you to confirm first - no more accidental one-tap wipes" },
+  { "v": 19, "text": "If something fails to save, delete or load in Library or Tracker, you now see a short message instead of nothing happening" },
+  { "v": 19, "text": "Screen-reader support: every icon button is now named, and decorative icons are skipped" },
   { "v": 18, "text": "Logging a meal template now groups into one meal in your tracker (like 'Breakfast') that you can tap to expand and edit each ingredient" },
   { "v": 18, "text": "Set servings per item in a template - 2 slices of cheese, not 1 - and the totals follow through when you log it" },
   { "v": 17, "text": "Delete saved foods straight from library search results" },

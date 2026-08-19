@@ -102,7 +102,7 @@ export default function ImageCropper({ file, onConfirm, onCancel }) {
             </p>
             <p style={{ fontSize: 11, color: "rgba(253,252,249,0.5)", marginTop: 2 }}>Drag corners to resize · Drag inside to move</p>
           </div>
-          <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(253,252,249,0.5)" }}><Icon n="close" size={18} /></button>
+          <button onClick={onCancel} aria-label="Cancel crop" style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(253,252,249,0.5)" }}><Icon n="close" size={18} /></button>
         </div>
         <div ref={containerRef} style={{ width: "100%", borderRadius: 14, overflow: "hidden", border: "1px solid var(--border2)", touchAction: "none", userSelect: "none" }}>
           {imageLoaded

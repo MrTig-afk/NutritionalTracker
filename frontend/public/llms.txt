@@ -1,0 +1,18 @@
+# NutriScan
+
+> Mobile-first PWA that reads nutrition labels from a photo and turns them into a daily food log, macro tracker and trends — with an AI assistant that knows your log.
+
+NutriScan is a logged-in web app, not a content site. There is one public page ("/"), which is the app itself (Google sign-in or magic link). Live app: https://nutritional-tracker-delta.vercel.app
+
+## What it does
+- Scan: photograph a nutrition label, get per-100g and per-serving values extracted by a vision model, edit and save.
+- Library: folders of saved foods and reusable meal templates.
+- Tracker: daily log against calorie / protein / carb / fat / fibre goals.
+- Trends: weekly and monthly averages.
+- AI: chat assistant grounded in your own log.
+
+## Stack
+FastAPI + Postgres (row-level security) on the backend, React/Vite PWA on the frontend, Supabase auth.
+
+## Source
+https://github.com/MrTig-afk/NutritionalTracker

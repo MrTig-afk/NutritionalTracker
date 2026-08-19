@@ -237,7 +237,7 @@ export default function ChatAssistant({ open }) {
           placeholder="Ask about your nutrition…"
           style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid var(--border)", fontSize: 16, background: "var(--surface)", color: "var(--text)", outline: "none" }}
         />
-        <button onClick={send} disabled={!input.trim() || loading} style={{
+        <button onClick={send} disabled={!input.trim() || loading} aria-label="Send" style={{
           width: 38, height: 38, borderRadius: 10, flexShrink: 0,
           background: input.trim() && !loading ? "var(--teal)" : "var(--border)",
           border: "none", cursor: input.trim() && !loading ? "pointer" : "default",
