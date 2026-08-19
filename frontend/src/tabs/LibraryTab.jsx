@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api";
 import { parseNumeric } from "../lib/nutrition";
 import { card, inputStyle, primaryBtn } from "../styles";
 import { Icon, Spin } from "../components/Icon";
+import { confirm } from "../lib/confirm";
 
 export default function LibraryTab({ onAddToLog, onLogAdded }) {
   // ── Folders ──────────────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
   };
 
   const deleteFolder = async (folderId) => {
-    if (!window.confirm("Delete this folder and everything in it?")) return;
+    if (!(await confirm("This folder and every saved food in it will be deleted.", { title: "Delete folder?" }))) return;
     try {
       await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
       setFolders(prev => prev.filter(f => f.folder_id !== folderId));
@@ -121,7 +122,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
   };
 
   const deleteTemplate = async (id) => {
-    if (!window.confirm("Delete this meal template?")) return;
+    if (!(await confirm("This meal template will be deleted. Your log entries stay.", { title: "Delete template?" }))) return;
     try {
       await apiFetch(`/meal-templates/${id}`, { method: "DELETE" });
       setTemplates(prev => prev.filter(t => t.template_id !== id));

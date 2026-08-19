@@ -8,6 +8,7 @@ import AddToLogModal from "./components/AddToLogModal";
 import EditLogModal from "./components/EditLogModal";
 import ChatAssistant from "./components/ChatAssistant";
 import LoginScreen from "./components/LoginScreen";
+import ConfirmHost from "./components/ConfirmDialog";
 import ScanTab from "./tabs/ScanTab";
 import LibraryTab from "./tabs/LibraryTab";
 import TrackerTab from "./tabs/TrackerTab";
@@ -168,6 +169,7 @@ export default function App() {
     <>
       <style>{PALETTE_CSS}</style>
       <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex", flexDirection: "column" }}>
+        <ConfirmHost />
         {addToLogItem && <AddToLogModal item={addToLogItem} onClose={() => setAddToLogItem(null)} onAdded={handleLogAdded} />}
         {editLogItem  && <EditLogModal  entry={editLogItem}  onClose={() => setEditLogItem(null)}  onSaved={() => { setLogRefreshKey(k => k + 1); }} />}
 
