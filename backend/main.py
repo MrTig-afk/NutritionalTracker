@@ -44,7 +44,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # ---------- CONFIG ----------
 DATABASE_URL   = os.getenv("DATABASE_URL")  # Set to Supabase connection string
 PRIMARY_MODEL  = "gemini-2.5-flash"
-FALLBACK_MODEL = "gemini-2.0-flash"
+FALLBACK_MODEL = "gemini-3.6-flash"  # gemini-2.0-flash was retired (404); this is Google's redirect target and a separate capacity pool
 MAX_IMAGE_PX   = 1024
 MAX_UPLOAD_MB  = 15  # reject oversized uploads before they hit memory/Gemini
 MAX_DECODED_PIXELS    = 30_000_000  # decoded-pixel cap (~90 MB RGB): MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
