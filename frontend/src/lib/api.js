@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeResult } from "./nutrition";
+import { confirm } from "./confirm";
 
 export const API_URL = import.meta.env.VITE_API_URL
   || (import.meta.env.DEV ? "http://localhost:8000" : "https://nutritionaltracker.onrender.com");
@@ -71,7 +72,7 @@ export async function apiFetch(path, options = {}) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = err.message || err.detail?.message || `HTTP ${res.status}`;  // FastAPI wraps HTTPException in {detail}
-    if (res.status === 423) { window.alert(msg); await supabase.auth.signOut(); }  // account frozen server-side
+    if (res.status === 423) { await confirm(msg, { title: "Account locked", okLabel: "OK", cancel: false }); await supabase.auth.signOut(); }  // frozen server-side
     throw new Error(msg);
   }
   return res.json();

@@ -5,6 +5,7 @@ import { card, cardHeader, inputStyle, labelStyle, primaryBtn } from "../styles"
 import { Icon, Spin } from "../components/Icon";
 import MacroBar from "../components/MacroBar";
 import DatePicker from "../components/DatePicker";
+import { confirm } from "../lib/confirm";
 
 export default function TrackerTab({ refreshKey, onEditEntry }) {
   const now = new Date();
@@ -56,7 +57,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   };
 
   const deleteEntry = async (logId) => {
-    if (!window.confirm("Remove this entry from your log?")) return;
+    if (!(await confirm("This entry will be removed from your log.", { title: "Remove entry?", okLabel: "Remove" }))) return;
     setDeletingId(logId);
     try { await apiFetch(`/log/${logId}`, { method: "DELETE" }); await loadData(); }
     catch (e) { console.error(e); setErr("Couldn't delete that entry. Try again."); }
@@ -66,7 +67,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const toggleGroup = (gid) => setExpandedGroups(prev => ({ ...prev, [gid]: !prev[gid] }));
 
   const deleteGroup = async (block) => {
-    if (!window.confirm(`Remove "${block.label}" and its ${block.items.length} items from your log?`)) return;
+    if (!(await confirm(`"${block.label}" and its ${block.items.length} items will be removed from your log.`, { title: "Remove meal?", okLabel: "Remove" }))) return;
     setDeletingId(block.gid);
     try {
       for (const it of block.items) await apiFetch(`/log/${it.log_id}`, { method: "DELETE" });
