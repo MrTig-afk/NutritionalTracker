@@ -37,12 +37,14 @@ export async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RET
       const status = response.status;
       const isRetryable = status !== 429 && (status === 500 || status === 503 || status === 504);
       if (!isRetryable || attempt === maxRetries) {
-        if (status === 429) {
-          const body = await response.json().catch(() => null);
-          throw new Error(body?.message || "You've reached your daily scan limit. Come back tomorrow!");
-        }
-        const errorText = await response.text().catch(() => `HTTP ${status}`);
-        throw new Error(`Pipeline Error: ${status} — ${errorText}`);
+        // Show the server's own message (FastAPI wraps HTTPException in {detail}); never the raw body.
+        const body = await response.json().catch(() => null);
+        const msg  = body?.detail?.message || body?.message;
+        const err  = new Error(msg || (status === 429
+          ? "You've reached your daily scan limit. Come back tomorrow!"
+          : "Something went wrong. Please try again."));
+        err.noRetry = true;  // a 4xx was the server's final answer: do not resend the file
+        throw err;
       }
       lastError = new Error(`Retryable error: ${status}`);
       await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000));
@@ -51,7 +53,7 @@ export async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RET
       if (err.name === "AbortError") {
         lastError = new Error("Request timed out. Please try again.");
         if (attempt < maxRetries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000)); continue; }
-      } else if (err.message.startsWith("Pipeline Error:")) { throw err; }
+      } else if (err.noRetry) { throw err; }
       else { lastError = err; if (attempt < maxRetries) { await new Promise(r => setTimeout(r, RETRY_DELAY_MS[attempt] || 3000)); continue; } }
     }
   }
