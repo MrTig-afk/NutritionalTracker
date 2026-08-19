@@ -5,7 +5,10 @@ import { confirm } from "./confirm";
 export const API_URL = import.meta.env.VITE_API_URL
   || (import.meta.env.DEV ? "http://localhost:8000" : "https://nutritionaltracker.onrender.com");
 
-const REQUEST_TIMEOUT_MS   = 25000;
+// Must outlast the backend's worst case (GEMINI_TIMEOUT 45 s x 2 attempts + 3 s backoff
+// + 45 s fallback = 138 s): aborting earlier made the UI report failure and retry while
+// the server was still working, so one scan cost two or three Gemini calls.
+const REQUEST_TIMEOUT_MS   = 140000;
 const MAX_FRONTEND_RETRIES = 2;
 const RETRY_DELAY_MS       = [1500, 3000];
 
