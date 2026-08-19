@@ -187,6 +187,15 @@ def _allow_provider_check(ip: str) -> bool:
 # ---------- FASTAPI ----------
 # Interactive API docs are disabled unless ENABLE_DOCS=1 (keep schema private in prod).
 _DOCS_ENABLED = os.getenv("ENABLE_DOCS", "0") == "1"
+# Crash autopsy: unhandled exceptions -> Sentry with stack trace + request context.
+# ntfy (notify_admin) stays the ops pager; Sentry only owns "why did it crash".
+if os.getenv("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=os.getenv("SENTRY_DSN"), traces_sample_rate=0, send_default_pii=False)
+    except Exception as _e:  # missing package or bad DSN must never block startup
+        logging.getLogger(__name__).warning(f"Sentry init skipped: {_e}")
+
 app = FastAPI(
     title="NutriScan API",
     version="4.0",
@@ -235,8 +244,13 @@ def get_user_id(authorization: Optional[str] = None) -> str:
         user_id = payload.get("sub")
         if not user_id:
             raise Exception("No sub claim in JWT")
+        if user_id in _frozen:
+            raise HTTPException(status_code=423, detail={"error_type": "account_locked",
+                "message": "This account is locked after unusual activity. Email theimpracticalguy007@gmail.com to restore it."})
         _current_user_id.set(user_id)
         return user_id
+    except HTTPException:
+        raise
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail={"error_type": "token_expired", "message": "Session expired. Please log in again."})
     except Exception as e:
@@ -373,6 +387,9 @@ _event_windows: dict = {}  # key -> [window_start_ts, count]
 
 def _spike(key: str, threshold: int, window_sec: int) -> bool:
     now = time.time()
+    if len(_event_windows) > 20000:  # bound memory: per-IP keys from scanners pile up
+        for k in [k for k, v in _event_windows.items() if now - v[0] > 3600]:
+            del _event_windows[k]
     w = _event_windows.get(key)
     if not w or now - w[0] > window_sec:
         _event_windows[key] = [now, 1]
@@ -390,6 +407,69 @@ def _note_auth_failure(e):
     if _spike("auth_fail", 20, 300):
         notify_admin("auth_spike", "Auth-failure spike",
                      "More than 20 login/token failures in 5 minutes — possible credential-stuffing attack or an auth outage.")
+
+
+# =============================================================================
+# ABUSE GUARDS — block, not just alert. One process on Render, so in-memory.
+# =============================================================================
+_frozen: set = set()      # user_ids locked after a delete spree (see freeze_user)
+_blocked: dict = {}       # ip -> unblock_ts
+
+def _client_ip(request) -> str:
+    # Render fronts with Cloudflare, which sets true-client-ip / cf-connecting-ip
+    # itself (not spoofable by the caller). X-Forwarded-For keeps any client-sent
+    # value FIRST, so it is only the local-dev fallback.
+    h = request.headers
+    return (h.get("true-client-ip") or h.get("cf-connecting-ip")
+            or h.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else "unknown"))
+
+def freeze_user(user_id: str, reason: str):
+    """Lock an account NOW (every request 423s via get_user_id) and durably
+    (Supabase ban: refresh + re-login refused, survives a Render restart).
+    Undo: docs/nutriscan-ops.md "Unfreeze an account"."""
+    _frozen.add(user_id)
+    banned = False
+    if SUPABASE_SERVICE_ROLE_KEY:
+        try:
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                data=json.dumps({"ban_duration": "876000h"}).encode(),
+                headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                         "Content-Type": "application/json"},
+                method="PUT",
+            )
+            urllib.request.urlopen(req, timeout=15); banned = True
+        except Exception as e:
+            logger.warning(f"Supabase ban failed for {user_id[:8]}: {e}")
+    notify_admin(f"account_frozen:{user_id}", "🧊 Account frozen",
+                 f"User {user_id[:8]} locked: {reason}. Supabase ban {'applied' if banned else 'FAILED (app-side lock only, lost on restart)'}. "
+                 f"Deleted rows are in recycle_bin. See docs/nutriscan-ops.md 'Unfreeze an account'.")
+
+@app.middleware("http")
+async def abuse_guard(request: Request, call_next):
+    ip = _client_ip(request)
+    if _blocked.get(ip, 0) > time.time():
+        return JSONResponse({"error_type": "rate_limited", "message": "Too many requests. Try again later."}, status_code=429)
+    if _spike(f"req:{ip}", 300, 60):                       # app-level flood / scraping
+        _blocked[ip] = time.time() + 600
+        notify_admin("ip_flood", "IP flood blocked", f"{ip} sent 300+ requests in a minute — blocked for 10 min.")
+    response = await call_next(request)
+    if response.status_code == 404 and _spike(f"404:{ip}", 30, 300):   # /wp-admin, /.env walk, id guessing
+        _blocked[ip] = time.time() + 600
+        notify_admin("scan_probe", "Vulnerability scan blocked", f"{ip} hit 30 unknown paths in 5 min — blocked for 10 min.")
+    if request.method == "DELETE" and 200 <= response.status_code < 300:
+        # Count verified deletes per account; the route already checked the
+        # signature (2xx), so an unverified decode here is safe for counting.
+        try:
+            sub = pyjwt.decode(request.headers.get("authorization", "")[7:], options={"verify_signature": False}).get("sub")
+        except Exception:
+            sub = None
+        # Group-delete in the Tracker issues one DELETE per ingredient, so a
+        # real user clearing a day is ~15; 40 in 10 min is nobody legit.
+        if sub and sub not in _frozen and _spike(f"del:{sub}", 40, 600):
+            freeze_user(sub, "40 deletes in 10 minutes (possible hijacked session)")
+    return response
 
 
 def send_push_to_user(user_id: str, title: str, body: str):
@@ -990,6 +1070,15 @@ def _fire_due_reminders(due: list, today: str):
             sent += 1
     logger.info(f"⏰ Meal reminders fired: {sent}/{len(due)} due slot(s)")
 
+def _purge_recycle_bin():
+    """Deleted rows are kept 30 days (fixed in the SQL function) for restore-by-email, then dropped."""
+    try:
+        conn = get_db("__system__"); cur = conn.cursor()
+        cur.execute("SELECT purge_recycle_bin()")
+        conn.commit(); cur.close(); release_db(conn)
+    except Exception as e:
+        logger.warning(f"recycle_bin purge skipped: {e}")
+
 def _meal_reminder_loop():
     global _reminder_schedule
     while True:
@@ -1024,6 +1113,7 @@ def _meal_reminder_loop():
             if 0 <= now_min - _DAILY_PULSE_SLOT <= 2 and _daily_pulse_sent.get("d") != today:
                 _daily_pulse_sent["d"] = today
                 _run_daily_pulse()
+                _purge_recycle_bin()
         except Exception as e:
             logger.warning(f"Meal reminder loop error: {e}")
             notify_admin("scheduler_error", "Scheduler error",
@@ -1231,8 +1321,7 @@ async def health_check(deep: bool = False):
 
 @app.get("/check-provider")
 async def check_provider(request: Request, email: str = Query(...)):
-    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-          or (request.client.host if request.client else "unknown"))
+    ip = _client_ip(request)
     if not _allow_provider_check(ip):
         return JSONResponse({"has_google": False}, status_code=429)
     key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -2175,6 +2264,17 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
     """Permanently delete the user's data and login. DB rows are mandatory;
     the Supabase auth-user deletion is best-effort (tolerates 404)."""
     user_id = get_user_id(authorization)
+    # A stolen session must not be able to nuke the account: require an actual
+    # sign-in (Supabase `amr` timestamp, not `iat` — refreshes renew iat but
+    # not amr) within the last 5 minutes.
+    try:
+        claims = pyjwt.decode(authorization.replace("Bearer ", "").strip(), options={"verify_signature": False})
+        last_auth = max((int(a.get("timestamp", 0)) for a in claims.get("amr", [])), default=0)
+    except Exception:
+        last_auth = 0
+    if time.time() - last_auth > 300:
+        raise HTTPException(status_code=403, detail={"error_type": "reauth_required",
+            "message": "For safety, sign out and sign back in, then delete your account within 5 minutes."})
     try:
         conn = get_db(); cur = conn.cursor()
         for t in _ACCOUNT_TABLES:

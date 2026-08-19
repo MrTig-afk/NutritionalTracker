@@ -9,3 +9,4 @@ pyjwt[crypto]
 python-multipart
 groq
 pywebpush
+sentry-sdk[fastapi]

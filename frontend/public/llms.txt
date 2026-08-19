@@ -1,6 +1,6 @@
 # NutriScan
 
-> Mobile-first PWA that reads nutrition labels from a photo and turns them into a daily food log, macro tracker and trends — with an AI assistant that knows your log.
+> Mobile-first PWA that reads nutrition labels from a photo and turns them into a daily food log, macro tracker and trends, with an AI assistant that knows your log.
 
 NutriScan is a logged-in web app, not a content site. There is one public page ("/"), which is the app itself (Google sign-in or magic link). Live app: https://nutritional-tracker-delta.vercel.app
 
