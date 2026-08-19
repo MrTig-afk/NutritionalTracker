@@ -28,6 +28,8 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
   const [itemPickerQuery, setItemPickerQuery] = useState("");
   const [pickerSelected, setPickerSelected] = useState([]);
   const [savingPicker, setSavingPicker] = useState(false);
+  const [err, setErr]                 = useState(null); // one inline line, auto-clears
+  useEffect(() => { if (!err) return; const t = setTimeout(() => setErr(null), 5000); return () => clearTimeout(t); }, [err]);
 
 
   // ── Load data ─────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
           .then(data => setFolderData(prev => ({ ...prev, [f.folder_id]: data })))
           .catch(() => {});
       });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't load your library. Try again."); }
     finally { setLoading(false); }
   }, []);
 
@@ -49,7 +51,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     try {
       const tl = await apiFetch("/meal-templates");
       setTemplates(tl);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't load meal templates. Try again."); }
   }, []);
 
   useEffect(() => { loadFolders(); loadTemplates(); }, [loadFolders, loadTemplates]);
@@ -60,7 +62,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     if (openFolder === id) { setOpenFolder(null); return; }
     setOpenFolder(id);
     try { const data = await apiFetch(`/folders/${id}`); setFolderData(prev => ({ ...prev, [id]: data })); }
-    catch (e) { console.error(e); }
+    catch (e) { console.error(e); setErr("Couldn't open that folder. Try again."); }
   };
 
   const createFolder = async () => {
@@ -68,7 +70,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     try {
       const f = await apiFetch("/folders", { method: "POST", body: JSON.stringify({ name: newFolderName.trim() }) });
       setFolders(prev => [f, ...prev]); setNewFolderName("");
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't create the folder. Try again."); }
     finally { setCreating(false); }
   };
 
@@ -83,16 +85,17 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     try {
       await apiFetch(`/folders/${folderId}/items/${itemId}`, { method: "DELETE" });
       setFolderData(prev => ({ ...prev, [folderId]: { ...prev[folderId], items: prev[folderId].items.filter(i => i.item_id !== itemId) } }));
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't delete that item. Try again."); }
     finally { setDeletingItem(null); }
   };
 
   const deleteFolder = async (folderId) => {
+    if (!window.confirm("Delete this folder and everything in it?")) return;
     try {
       await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
       setFolders(prev => prev.filter(f => f.folder_id !== folderId));
       if (openFolder === folderId) setOpenFolder(null);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't delete the folder. Try again."); }
   };
 
   // ── Meal Templates ────────────────────────────────────────────────────────
@@ -104,7 +107,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
       setNewTmplName("");
       setOpenTemplate(t.template_id);
       setTemplateData(prev => ({ ...prev, [t.template_id]: { ...t, items: [] } }));
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't create the template. Try again."); }
     finally { setCreatingTmpl(false); }
   };
 
@@ -113,16 +116,17 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     setOpenTemplate(id);
     if (!templateData[id]) {
       try { const data = await apiFetch(`/meal-templates/${id}`); setTemplateData(prev => ({ ...prev, [id]: data })); }
-      catch (e) { console.error(e); }
+      catch (e) { console.error(e); setErr("Couldn't open that template. Try again."); }
     }
   };
 
   const deleteTemplate = async (id) => {
+    if (!window.confirm("Delete this meal template?")) return;
     try {
       await apiFetch(`/meal-templates/${id}`, { method: "DELETE" });
       setTemplates(prev => prev.filter(t => t.template_id !== id));
       if (openTemplate === id) setOpenTemplate(null);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't delete the template. Try again."); }
   };
 
   const setTmplItemServings = async (templateId, itemId, servings) => {
@@ -149,7 +153,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
         [templateId]: { ...prev[templateId], items: prev[templateId].items.filter(i => i.item_id !== itemId) },
       }));
       setTemplates(prev => prev.map(t => t.template_id === templateId ? { ...t, item_count: t.item_count - 1 } : t));
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't remove that item. Try again."); }
     finally { setDeletingTmplItem(null); }
   };
 
@@ -176,7 +180,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
       setItemPickerFor(null);
       setItemPickerQuery("");
       setPickerSelected([]);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't add those items. Try again."); }
     finally { setSavingPicker(false); }
   };
 
@@ -191,7 +195,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
         setLoggedTmpl(templateId);      // brief "Logged ✓" on the button
         setTimeout(() => setLoggedTmpl(null), 2500);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't log that meal. Try again."); }
     finally { setLoggingTmpl(null); }
   };
 
@@ -213,6 +217,11 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {err && (
+        <div role="alert" style={{ background: "var(--danger-lt)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
+          {err}
+        </div>
+      )}
 
       {/* ── Create folder ── */}
       <div style={{ display: "flex", gap: 8 }}>
@@ -252,7 +261,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                   <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                     <Icon n="add" size={11} /> Log
                   </button>
-                  <button onClick={() => deleteItem(item.folderId, item.item_id)} disabled={deletingItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                  <button onClick={() => deleteItem(item.folderId, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
                     {deletingItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                   </button>
                 </div>
@@ -271,7 +280,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                     {openFolder === folder.folder_id ? <Icon n="folder_open" size={18} style={{ color: "var(--accent)" }} /> : <Icon n="folder" size={18} style={{ color: "var(--muted)" }} />}
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{folder.name}</span>
                     <span style={{ fontSize: 11, color: "var(--muted)" }}>{folderData[folder.folder_id]?.items?.length ?? ""} items</span>
-                    <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
+                    <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} aria-label={`Delete folder ${folder.name}`} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
                       <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />
                     </button>
                     {openFolder === folder.folder_id ? <Icon n="expand_less" size={14} style={{ color: "var(--muted)" }} /> : <Icon n="expand_more" size={14} style={{ color: "var(--muted)" }} />}
@@ -296,7 +305,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                               <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                                 <Icon n="add" size={11} /> Log
                               </button>
-                              <button onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                              <button onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
                                 {deletingItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                               </button>
                             </div>
@@ -346,7 +355,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                         : <Icon n="playlist_add_check" size={11} />}
                       {loggedTmpl === tmpl.template_id ? "Logged!" : "Log Meal"}
                     </button>
-                    <button onClick={e => { e.stopPropagation(); deleteTemplate(tmpl.template_id); }} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 2 }}>
+                    <button onClick={e => { e.stopPropagation(); deleteTemplate(tmpl.template_id); }} aria-label={`Delete template ${tmpl.name}`} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 2 }}>
                       <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />
                     </button>
                     <div onClick={() => openTemplateById(tmpl.template_id)} style={{ cursor: "pointer" }}>
@@ -369,17 +378,17 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{macroLine(item.nutrition)} / serving</div>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings - 1)} disabled={item.servings <= 1}
+                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings - 1)} disabled={item.servings <= 1} aria-label="Fewer servings"
                               style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--off)", cursor: item.servings <= 1 ? "not-allowed" : "pointer", opacity: item.servings <= 1 ? 0.4 : 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
                               <Icon n="remove" size={13} style={{ color: "var(--text)" }} />
                             </button>
                             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", minWidth: 16, textAlign: "center" }}>{item.servings}</span>
-                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings + 1)}
+                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings + 1)} aria-label="More servings"
                               style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
                               <Icon n="add" size={13} style={{ color: "var(--text)" }} />
                             </button>
                           </div>
-                          <button onClick={() => deleteTmplItem(tmpl.template_id, item.item_id)} disabled={deletingTmplItem === item.item_id} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                          <button onClick={() => deleteTmplItem(tmpl.template_id, item.item_id)} disabled={deletingTmplItem === item.item_id} aria-label={`Remove ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
                             {deletingTmplItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                           </button>
                         </div>

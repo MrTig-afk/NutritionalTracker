@@ -2,6 +2,7 @@ import React from "react";
 
 export const Icon = ({ n, size = 20, style: s = {}, cls = "" }) => (
   <span
+    aria-hidden="true"
     className={`material-symbols-outlined${cls ? " " + cls : ""}`}
     style={{ fontSize: size, lineHeight: 1, display: "inline-flex", alignItems: "center", userSelect: "none", flexShrink: 0, ...s }}
   >

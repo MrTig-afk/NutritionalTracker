@@ -47,12 +47,13 @@ const GitHubLogo = () => (
   </svg>
 );
 
-function Toggle({ on, onChange, disabled }) {
+function Toggle({ on, onChange, disabled, label }) {
   return (
     <button
       onClick={onChange}
       disabled={disabled}
       aria-pressed={on}
+      aria-label={label}
       style={{
         width: 44, height: 26, borderRadius: 20, border: "none", padding: 2,
         background: on ? "var(--teal)" : "var(--border)",
@@ -180,7 +181,7 @@ export default function SettingsTab() {
             </div>
           </div>
           {pushLoading ? <Spin size={18} /> : (
-            <Toggle on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()} />
+            <Toggle label="Push notifications" on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()} />
           )}
         </div>
 
@@ -197,7 +198,7 @@ export default function SettingsTab() {
               </div>
             </div>
             {prefs === null ? <Spin size={14} /> : (
-              <Toggle on={!!prefs[t.key]} onChange={() => togglePref(t.key)} disabled={!subscribed} />
+              <Toggle label={t.label} on={!!prefs[t.key]} onChange={() => togglePref(t.key)} disabled={!subscribed} />
             )}
             {t.hasTime && prefs?.[t.key] && subscribed && (
               <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>

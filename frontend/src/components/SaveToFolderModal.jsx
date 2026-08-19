@@ -43,7 +43,7 @@ export default function SaveToFolderModal({ result, imageId, onClose, onSaved, i
       <div style={modalBox}>
         <div style={modalHeader}>
           <div style={modalTitle}><Icon n="bookmark_add" size={15} style={{ color: "var(--accent)" }} /> Save to Folder</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         {!initialName && (
           <div>
@@ -60,7 +60,7 @@ export default function SaveToFolderModal({ result, imageId, onClose, onSaved, i
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <input value={newFolder} onChange={e => setNewFolder(e.target.value)} placeholder="New folder name..." onKeyDown={handleFolderKeyDown} style={{ ...inputStyle, flex: 1 }} />
-          <button onClick={createFolder} style={{ ...ghostBtn, padding: "9px 12px" }}><Icon n="create_new_folder" size={14} /></button>
+          <button onClick={createFolder} aria-label="Create folder" style={{ ...ghostBtn, padding: "9px 12px" }}><Icon n="create_new_folder" size={14} /></button>
         </div>
         {status && <p style={{ fontSize: 12, color: status.type === "ok" ? "var(--mint-dk)" : "var(--danger)" }}>{status.msg}</p>}
         <button onClick={save} disabled={saving || !selectedFolder || !itemName.trim()} style={{ ...primaryBtn, opacity: (saving || !selectedFolder || !itemName.trim()) ? 0.45 : 1 }}>

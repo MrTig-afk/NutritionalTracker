@@ -70,7 +70,7 @@ export default function AddToLogModal({ item, onClose, onAdded }) {
       <div style={modalBox}>
         <div style={modalHeader}>
           <div style={modalTitle}><Icon n="calendar_today" size={15} style={{ color: "var(--mint-dk)" }} /> Add to Today's Log</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)" }}><Icon n="close" size={16} /></button>
         </div>
         <input value={manualName} onChange={e => setManualName(e.target.value)} placeholder="Item name..." style={{ ...inputStyle, fontWeight: 700 }} />
         <div style={pillRow}>

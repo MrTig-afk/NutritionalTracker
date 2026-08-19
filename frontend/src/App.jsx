@@ -177,7 +177,7 @@ export default function App() {
             <span style={{ flex: 1, fontSize: 13, color: "#0B3D22", lineHeight: 1.4 }}>
               Tap <strong>Share</strong> → <strong>Add to Home Screen</strong> to install NutriScan
             </span>
-            <button onClick={dismissIOSBanner} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "rgba(11,61,34,0.6)", flexShrink: 0 }}>
+            <button onClick={dismissIOSBanner} aria-label="Dismiss" style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "rgba(11,61,34,0.6)", flexShrink: 0 }}>
               <Icon n="close" size={18} />
             </button>
           </div>
@@ -206,7 +206,7 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button onClick={() => setTheme(t => (t === "dark" ? "light" : "dark"))} title="Toggle dark mode"
+            <button onClick={() => setTheme(t => (t === "dark" ? "light" : "dark"))} title="Toggle dark mode" aria-label="Toggle dark mode"
               style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--mint)", padding: 0 }}>
               <Icon n={theme === "dark" ? "light_mode" : "dark_mode"} size={18} />
             </button>

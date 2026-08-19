@@ -18,6 +18,8 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [err, setErr] = useState(null); // one inline line, auto-clears
+  useEffect(() => { if (!err) return; const t = setTimeout(() => setErr(null), 5000); return () => clearTimeout(t); }, [err]);
 
   // The app can stay open across midnight (installed PWA). If the user was
   // viewing "today", roll the view forward when the date changes so new logs
@@ -40,7 +42,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); setGoals(g); setLogData(l); }
-    catch (e) { console.error("Tracker load failed:", e); }
+    catch (e) { console.error("Tracker load failed:", e); setErr("Couldn't load your log. Pull to refresh or try again."); }
     finally { setLoading(false); }
   }, [selectedDate]);
 
@@ -49,25 +51,27 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const saveGoals = async () => {
     setSavingGoals(true);
     try { const updated = await apiFetch("/goals", { method: "POST", body: JSON.stringify(goalDraft) }); setGoals(updated); setEditingGoals(false); }
-    catch (e) { console.error(e); }
+    catch (e) { console.error(e); setErr("Couldn't save your goals. Try again."); }
     finally { setSavingGoals(false); }
   };
 
   const deleteEntry = async (logId) => {
+    if (!window.confirm("Remove this entry from your log?")) return;
     setDeletingId(logId);
     try { await apiFetch(`/log/${logId}`, { method: "DELETE" }); await loadData(); }
-    catch (e) { console.error(e); }
+    catch (e) { console.error(e); setErr("Couldn't delete that entry. Try again."); }
     finally { setDeletingId(null); }
   };
 
   const toggleGroup = (gid) => setExpandedGroups(prev => ({ ...prev, [gid]: !prev[gid] }));
 
   const deleteGroup = async (block) => {
+    if (!window.confirm(`Remove "${block.label}" and its ${block.items.length} items from your log?`)) return;
     setDeletingId(block.gid);
     try {
       for (const it of block.items) await apiFetch(`/log/${it.log_id}`, { method: "DELETE" });
       await loadData();
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setErr("Couldn't remove that meal. Try again."); }
     finally { setDeletingId(null); }
   };
 
@@ -81,11 +85,11 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
           ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {entry.contribution.calories.toFixed(0)} kcal · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
         </div>
       </div>
-      <button onClick={() => onEditEntry && onEditEntry(entry)}
+      <button onClick={() => onEditEntry && onEditEntry(entry)} aria-label={`Edit ${entry.name}`}
         style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Icon n="edit" size={13} style={{ color: "var(--accent)" }} />
       </button>
-      <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id}
+      <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id} aria-label={`Delete ${entry.name}`}
         style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {deletingId === entry.log_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
       </button>
@@ -100,6 +104,11 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
     <div className="ns-tracker-grid">
       {/* Left col — goals + summary */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {err && (
+        <div role="alert" style={{ background: "var(--danger-lt)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
+          {err}
+        </div>
+      )}
       <div style={card}>
         <div style={cardHeader}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
@@ -157,11 +166,11 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
       <div style={card}>
         <div style={{ ...cardHeader, background: "var(--off)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={() => setSelectedDate(d => addDays(d, -1))} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <button onClick={() => setSelectedDate(d => addDays(d, -1))} aria-label="Previous day" style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon n="chevron_left" size={13} />
             </button>
             <DatePicker value={selectedDate} onChange={setSelectedDate} maxDate={today} />
-            <button onClick={() => setSelectedDate(d => addDays(d, 1))} disabled={selectedDate >= today} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedDate >= today ? 0.3 : 1 }}>
+            <button onClick={() => setSelectedDate(d => addDays(d, 1))} disabled={selectedDate >= today} aria-label="Next day" style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid var(--border)", background: "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: selectedDate >= today ? 0.3 : 1 }}>
               <Icon n="chevron_right" size={13} />
             </button>
           </div>
@@ -206,7 +215,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
                         {block.items.length} item{block.items.length !== 1 ? "s" : ""} · {sum.calories.toFixed(0)} kcal · P {sum.protein.toFixed(1)}g · C {sum.carbs.toFixed(1)}g · F {sum.fat.toFixed(1)}g
                       </div>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid}
+                    <button onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid} aria-label={`Delete ${block.label}`}
                       style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {deletingId === block.gid ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
                     </button>
