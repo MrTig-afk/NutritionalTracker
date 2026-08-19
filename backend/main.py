@@ -428,23 +428,25 @@ def freeze_user(user_id: str, reason: str):
     """Lock an account NOW (every request 423s via get_user_id) and durably
     (Supabase ban: refresh + re-login refused, survives a Render restart).
     Undo: docs/nutriscan-ops.md "Unfreeze an account"."""
-    _frozen.add(user_id)
-    banned = False
-    if SUPABASE_SERVICE_ROLE_KEY:
-        try:
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
-                data=json.dumps({"ban_duration": "876000h"}).encode(),
-                headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-                         "Content-Type": "application/json"},
-                method="PUT",
-            )
-            urllib.request.urlopen(req, timeout=15); banned = True
-        except Exception as e:
-            logger.warning(f"Supabase ban failed for {user_id[:8]}: {e}")
-    notify_admin(f"account_frozen:{user_id}", "🧊 Account frozen",
-                 f"User {user_id[:8]} locked: {reason}. Supabase ban {'applied' if banned else 'FAILED (app-side lock only, lost on restart)'}. "
-                 f"Deleted rows are in recycle_bin. See docs/nutriscan-ops.md 'Unfreeze an account'.")
+    _frozen.add(user_id)  # instant, in-process; the durable ban below must not block the event loop
+    def _ban_and_notify():
+        banned = False
+        if SUPABASE_SERVICE_ROLE_KEY:
+            try:
+                req = urllib.request.Request(
+                    f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                    data=json.dumps({"ban_duration": "876000h"}).encode(),
+                    headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                             "Content-Type": "application/json"},
+                    method="PUT",
+                )
+                urllib.request.urlopen(req, timeout=15); banned = True
+            except Exception as e:
+                logger.warning(f"Supabase ban failed for {user_id[:8]}: {e}")
+        notify_admin(f"account_frozen:{user_id}", "🧊 Account frozen",
+                     f"User {user_id[:8]} locked: {reason}. Supabase ban {'applied' if banned else 'FAILED (app-side lock only, lost on restart)'}. "
+                     f"Deleted rows are in recycle_bin. See docs/nutriscan-ops.md 'Unfreeze an account'.")
+    threading.Thread(target=_ban_and_notify, daemon=True).start()
 
 @app.middleware("http")
 async def abuse_guard(request: Request, call_next):
