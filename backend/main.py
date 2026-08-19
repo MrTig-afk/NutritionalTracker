@@ -204,17 +204,9 @@ app = FastAPI(
     openapi_url="/openapi.json" if _DOCS_ENABLED else None,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://nutritional-tracker-delta.vercel.app",
-        "http://localhost:5173",
-        "http://localhost:4173",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["Authorization", "Content-Type", "X-Client-Date", "X-Scan-ID"],
-)
+# CORSMiddleware is registered AFTER abuse_guard (see "ABUSE GUARDS" below):
+# Starlette makes the last-added middleware the outermost, and the guard's 429s
+# must still carry CORS headers or the browser shows an opaque network error.
 
 # ---------- SUPABASE AUTH ----------
 SUPABASE_URL              = os.getenv("SUPABASE_URL", "https://npcoetxfrwnlwuexrezf.supabase.co")
@@ -277,8 +269,13 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         user_id = payload.get("sub")
         if not user_id:
             raise Exception("No sub claim in JWT")
+        if user_id in _frozen:
+            raise HTTPException(status_code=423, detail={"error_type": "account_locked",
+                "message": "This account is locked after unusual activity. Email theimpracticalguy007@gmail.com to restore it."})
         _current_user_id.set(user_id)
         return user_id, payload.get("email", "")
+    except HTTPException:
+        raise
     except pyjwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail={"error_type": "token_expired", "message": "Session expired. Please log in again."})
     except Exception as e:
@@ -385,11 +382,16 @@ def notify_admin(event_key: str, title: str, message: str):
 # a rolling `window_sec`. Paired with notify_admin's cooldown, alerts stay quiet.
 _event_windows: dict = {}  # key -> [window_start_ts, count]
 
+_last_sweep = [0.0]
+
 def _spike(key: str, threshold: int, window_sec: int) -> bool:
     now = time.time()
-    if len(_event_windows) > 20000:  # bound memory: per-IP keys from scanners pile up
-        for k in [k for k, v in _event_windows.items() if now - v[0] > 3600]:
+    if now - _last_sweep[0] > 60:  # once a minute: drop expired windows and expired IP blocks
+        _last_sweep[0] = now
+        for k in [k for k, v in _event_windows.items() if now - v[0] > 600]:
             del _event_windows[k]
+        for k in [k for k, t in _blocked.items() if t < now]:
+            del _blocked[k]
     w = _event_windows.get(key)
     if not w or now - w[0] > window_sec:
         _event_windows[key] = [now, 1]
@@ -450,6 +452,8 @@ def freeze_user(user_id: str, reason: str):
 
 @app.middleware("http")
 async def abuse_guard(request: Request, call_next):
+    if request.method == "OPTIONS":            # CORS preflight: never counted, never blocked
+        return await call_next(request)
     ip = _client_ip(request)
     if _blocked.get(ip, 0) > time.time():
         return JSONResponse({"error_type": "rate_limited", "message": "Too many requests. Try again later."}, status_code=429)
@@ -460,7 +464,7 @@ async def abuse_guard(request: Request, call_next):
     if response.status_code == 404 and _spike(f"404:{ip}", 30, 300):   # /wp-admin, /.env walk, id guessing
         _blocked[ip] = time.time() + 600
         notify_admin("scan_probe", "Vulnerability scan blocked", f"{ip} hit 30 unknown paths in 5 min — blocked for 10 min.")
-    if request.method == "DELETE" and 200 <= response.status_code < 300:
+    if request.method == "DELETE" and 200 <= response.status_code < 300 and request.url.path != "/push/unsubscribe":
         # Count verified deletes per account; the route already checked the
         # signature (2xx), so an unverified decode here is safe for counting.
         try:
@@ -468,10 +472,22 @@ async def abuse_guard(request: Request, call_next):
         except Exception:
             sub = None
         # Group-delete in the Tracker issues one DELETE per ingredient, so a
-        # real user clearing a day is ~15; 40 in 10 min is nobody legit.
-        if sub and sub not in _frozen and _spike(f"del:{sub}", 40, 600):
-            freeze_user(sub, "40 deletes in 10 minutes (possible hijacked session)")
+        # real user removing two 22-item meals sends 44; 60 in 10 min is nobody legit.
+        if sub and sub not in _frozen and _spike(f"del:{sub}", 60, 600):
+            freeze_user(sub, "60 deletes in 10 minutes (possible hijacked session)")
     return response
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://nutritional-tracker-delta.vercel.app",
+        "http://localhost:5173",
+        "http://localhost:4173",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_headers=["Authorization", "Content-Type", "X-Client-Date", "X-Scan-ID"],
+)
 
 
 def send_push_to_user(user_id: str, title: str, body: str):
@@ -1074,12 +1090,15 @@ def _fire_due_reminders(due: list, today: str):
 
 def _purge_recycle_bin():
     """Deleted rows are kept 30 days (fixed in the SQL function) for restore-by-email, then dropped."""
+    conn = None
     try:
         conn = get_db("__system__"); cur = conn.cursor()
         cur.execute("SELECT purge_recycle_bin()")
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         logger.warning(f"recycle_bin purge skipped: {e}")
+    finally:
+        if conn: release_db(conn)
 
 def _meal_reminder_loop():
     global _reminder_schedule
@@ -1132,6 +1151,7 @@ def startup():
         # the Render deploy log is the reliable record for startup failures.
         notify_admin("startup_failed", "🔴 NutriScan Startup Failed", f"DB init error: {e}")
         raise
+    threading.Thread(target=_purge_recycle_bin, daemon=True).start()  # also daily from the scheduler
     if MEAL_REMINDERS_ENABLED and _webpush_ok and VAPID_PRIVATE_KEY:
         threading.Thread(target=_meal_reminder_loop, daemon=True).start()
         logger.info("⏰ Meal reminder scheduler started")
@@ -2279,6 +2299,9 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
             "message": "For safety, sign out and sign back in, then delete your account within 5 minutes."})
     try:
         conn = get_db(); cur = conn.cursor()
+        # The UI promises "cannot be undone": tell the recycle-bin trigger to
+        # stand down for this transaction (recycle_bin.sql reads app.skip_bin).
+        cur.execute("SELECT set_config('app.skip_bin', '1', true)")
         for t in _ACCOUNT_TABLES:
             cur.execute(f"DELETE FROM {t} WHERE user_id = %s", [user_id])
         conn.commit(); cur.close(); release_db(conn)

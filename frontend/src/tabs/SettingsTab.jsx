@@ -135,6 +135,7 @@ export default function SettingsTab() {
       await apiFetch("/account", { method: "DELETE" });
       await supabase.auth.signOut();
     } catch (e) {
+      setConfirmOpen(false);   // the error banner sits behind the modal otherwise
       setError(e.message);
       setDeleting(false);
     }

@@ -7,6 +7,10 @@
 -- with a BEFORE DELETE trigger means every delete path — the 7 routes,
 -- DELETE /account, anything added later — is covered with zero Python.
 --
+-- Account deletion (DELETE /account) is the one exception: it sets the
+-- transaction-local GUC app.skip_bin = '1' and the trigger lets those rows go,
+-- because the user explicitly asked for erasure.
+--
 -- Isolation: the runtime role `nutriscan_app` gets NO privileges on
 -- recycle_bin. The trigger and the purge run as SECURITY DEFINER (owned by
 -- neondb_owner), so the API can write to the bin through the trigger and purge
@@ -33,6 +37,11 @@ REVOKE ALL ON SEQUENCE recycle_bin_id_seq FROM nutriscan_app;
 CREATE OR REPLACE FUNCTION to_recycle_bin() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
+  -- DELETE /account sets app.skip_bin = '1' for its transaction: the user asked
+  -- for erasure and the UI promises it, so those rows are not retained.
+  IF current_setting('app.skip_bin', true) = '1' THEN
+    RETURN OLD;
+  END IF;
   INSERT INTO recycle_bin (tbl, user_id, row)
   VALUES (TG_TABLE_NAME, OLD.user_id, to_jsonb(OLD));
   RETURN OLD;

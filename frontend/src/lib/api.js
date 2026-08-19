@@ -72,7 +72,11 @@ export async function apiFetch(path, options = {}) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = err.message || err.detail?.message || `HTTP ${res.status}`;  // FastAPI wraps HTTPException in {detail}
-    if (res.status === 423) { await confirm(msg, { title: "Account locked", okLabel: "OK", cancel: false }); await supabase.auth.signOut(); }  // frozen server-side
+    if (res.status === 423 && !apiFetch._locked) {                       // frozen server-side: tell once, then sign out
+      apiFetch._locked = true;
+      await confirm(msg, { title: "Account locked", okLabel: "OK", cancel: false });
+      await supabase.auth.signOut();
+    }
     throw new Error(msg);
   }
   return res.json();
