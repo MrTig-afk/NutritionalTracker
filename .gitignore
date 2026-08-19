@@ -12,6 +12,8 @@
 # 2) ...then re-allow the runtime surface.
 !/.gitignore
 !/README.md
+!/CONTRIBUTING.md
+!/SECURITY.md
 !/backend/
 !/frontend/
 
