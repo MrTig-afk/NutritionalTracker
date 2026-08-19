@@ -5,9 +5,14 @@ import { _register } from "../lib/confirm";
 // Styled like the Settings "Delete account?" modal. Mounted once in App;
 // call sites use `confirm()` from lib/confirm.js.
 export default function ConfirmHost() {
-  const [req, setReq] = useState(null);
-  const done = v => { req?.resolve(v); setReq(null); };
-  useEffect(() => { _register(setReq); return () => _register(null); }, []);
+  const [queue, setQueue] = useState([]);          // concurrent confirm() calls wait their turn
+  const req = queue[0] || null;
+  const done = v => { req?.resolve(v); setQueue(q => q.slice(1)); };
+  useEffect(() => {
+    const pending = [];
+    _register(r => { pending.push(r); setQueue(q => [...q, r]); });
+    return () => { _register(null); pending.forEach(r => r.resolve(false)); };  // unmount: nothing hangs
+  }, []);
   useEffect(() => {
     if (!req) return;
     const onKey = e => { if (e.key === "Escape") done(false); };

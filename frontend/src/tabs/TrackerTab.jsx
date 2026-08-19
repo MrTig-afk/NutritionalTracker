@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/api";
 import { addDays } from "../lib/nutrition";
-import { card, cardHeader, inputStyle, labelStyle, primaryBtn } from "../styles";
+import { card, cardHeader, inputStyle, labelStyle, primaryBtn, errorBanner } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 import MacroBar from "../components/MacroBar";
 import DatePicker from "../components/DatePicker";
@@ -106,7 +106,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
       {/* Left col — goals + summary */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {err && (
-        <div role="alert" style={{ background: "var(--danger-lt)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
+        <div role="alert" style={errorBanner}>
           {err}
         </div>
       )}

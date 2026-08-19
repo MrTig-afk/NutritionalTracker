@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api";
 import { parseNumeric } from "../lib/nutrition";
-import { card, inputStyle, primaryBtn } from "../styles";
+import { card, inputStyle, primaryBtn, errorBanner } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 import { confirm } from "../lib/confirm";
 
@@ -219,7 +219,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {err && (
-        <div role="alert" style={{ background: "var(--danger-lt)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
+        <div role="alert" style={errorBanner}>
           {err}
         </div>
       )}
