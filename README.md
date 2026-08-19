@@ -2,6 +2,8 @@
 
 **Live:** [nutritional-tracker-delta.vercel.app](https://nutritional-tracker-delta.vercel.app)
 
+**Demo build:** `VITE_DEMO=1 npm run build` (or `npm run dev`) in `frontend/` runs the whole app on synthetic in-memory data: no backend, no account, no AI calls, no network requests. Useful for a quick look or screenshots.
+
 ## About
 
 NutriScan turns a photo of any nutrition label into tracked macros in seconds. Snap the label, and AI vision reads the calories, protein, carbs, fat and fibre for you. No barcode database, no manual typing, no guesswork with foods that aren't in an app's catalog.
@@ -59,18 +61,25 @@ It ships as an installable PWA: add it to your home screen on iOS or Android and
 NutriScan/
 ├── backend/
 │   ├── main.py              FastAPI app: all routes, JWT auth, DB pool, AI calls,
-│   │                        reminder scheduler, notification prefs, RLS binding
+│   │                        reminder scheduler, notification prefs, RLS binding,
+│   │                        abuse guards (per-IP flood/probe blocks, delete-spree
+│   │                        account freeze), ops alerts to ntfy, optional Sentry
 │   ├── rls_policies.sql     Row-level security policies (per-user data isolation)
+│   ├── recycle_bin.sql      BEFORE DELETE triggers: every deleted row kept 30 days,
+│   │                        readable only by the DB owner (restore-by-email)
 │   └── requirements.txt
 │
 └── frontend/
     ├── public/
     │   ├── favicon.svg      Adaptive icon (light/dark via prefers-color-scheme)
     │   ├── changelog.v2.json  Versioned release notes shown by the update banner
-    │   └── icon-{192,512}.png
+    │   ├── icon-{192,512}.png
+    │   ├── robots.txt · llms.txt · .well-known/security.txt
+    │   └── nutriscan-card-v8.png  OG / link-preview image
     ├── src/
     │   ├── lib/
     │   │   ├── api.js       Supabase client, apiFetch (auth-aware), retry, runAnalysis
+    │   │   ├── confirm.js   Promise-based confirm() backed by ConfirmDialog
     │   │   ├── push.js      Web-push subscribe/unsubscribe helpers
     │   │   └── nutrition.js Parse/normalize macros, image pipeline (resize, grayscale)
     │   ├── components/
@@ -78,12 +87,13 @@ NutriScan/
     │   │   ├── AddToLogModal.jsx     Log a food (serving / by-weight / manual modes)
     │   │   ├── EditLogModal.jsx      Edit an existing log entry
     │   │   ├── SaveToFolderModal.jsx Save a scan result to a library folder
+    │   │   ├── ConfirmDialog.jsx     In-app confirm/alert modal (replaces window.confirm)
     │   │   ├── ImageCropper.jsx      Canvas crop UI, touch + mouse, corner handles
     │   │   ├── NutrientGrid.jsx      Nutrient table with custom serving calculator
     │   │   ├── DatePicker.jsx        Calendar dropdown with tracked-day dots
     │   │   ├── MacroBar.jsx          Single macro progress bar
     │   │   ├── LoginScreen.jsx       Google OAuth + email OTP code entry
-    │   │   └── Icon.jsx              Material Symbols wrapper + CSS spinner
+    │   │   └── Icon.jsx              Material Symbols wrapper (aria-hidden) + CSS spinner
     │   ├── tabs/
     │   │   ├── ScanTab.jsx      Upload, crop queue, Gemini analysis, results
     │   │   ├── LibraryTab.jsx   Folders, items, meal templates with multi-select
@@ -98,12 +108,15 @@ NutriScan/
     └── index.html
 ```
 
-**Database (Neon PostgreSQL, 11 tables, all under row-level security)**
+**Database (Neon PostgreSQL, 11 user tables under row-level security + 1 owner-only)**
 
 ```
 users · api_usage · image_records · folders · folder_items · daily_log
 user_goals · meal_templates · meal_template_items · push_subscriptions · notification_prefs
+recycle_bin (trigger-fed copy of every deleted row, 30-day retention, no app-role access)
 ```
+
+**Contributing / security:** see [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 ---
 
