@@ -322,7 +322,13 @@ class ClaimsIfValid(unittest.TestCase):
         # The failure this guards against: with no secret nothing can be
         # verified, every caller sees a tidy None, and the app looks merely
         # unpopular rather than broken. It must alert.
+        # CodeRabbit (PR #9): restore the cooldown entry too, not just the
+        # secret - verify_claims writes a fresh one, and leaking it could
+        # suppress a later test's expected alert. Sentinel distinguishes
+        # "key was absent" from "key held a value".
+        sentinel = object()
         saved, main.SUPABASE_JWT_SECRET = main.SUPABASE_JWT_SECRET, ""
+        previous_alert = main._admin_alert_last.get("auth_misconfigured", sentinel)
         before = len(_ALERTS)
         main._admin_alert_last.pop("auth_misconfigured", None)   # defeat the cooldown
         try:
@@ -335,6 +341,10 @@ class ClaimsIfValid(unittest.TestCase):
                                "a misconfigured verifier must page someone")
         finally:
             main.SUPABASE_JWT_SECRET = saved
+            if previous_alert is sentinel:
+                main._admin_alert_last.pop("auth_misconfigured", None)
+            else:
+                main._admin_alert_last["auth_misconfigured"] = previous_alert
 
 
 def jwt_like_hs256() -> str:
