@@ -30,10 +30,10 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # --- Python (backend/) ------------------------------------------------
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
       - name: Install backend
@@ -42,7 +42,7 @@ jobs:
           uv pip install -r backend/requirements.txt
 
       # --- Node (frontend/) -------------------------------------------------
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -75,9 +75,19 @@ jobs:
     container:
       image: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v6
-      # --config auto picks the registry rulesets for the languages present.
-      # --error fails the job on findings. This repo has never been scanned, so
-      # the first run is a discovery run: expect findings, triage before
-      # requiring this check in branch protection.
-      - run: semgrep scan --config auto --error
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      # Rulesets are PINNED, not `--config auto`. `auto` resolves the registry
+      # at run time, so the rule set drifts underneath you: the same commit
+      # scanned twice can give different results, and a green main can go red
+      # overnight with no code change. That is disqualifying for a check that
+      # branch protection requires - the gate must mean the same thing tomorrow
+      # as it does today. Proven here on 2026-08-20: a local semgrep 1.173.0
+      # run and this container's `auto` run returned different findings on the
+      # identical tree.
+      # Adding a ruleset is a deliberate edit to this line, and the PR that
+      # does it shows exactly what new class of finding was turned on.
+      - run: >
+          semgrep scan --error
+          --config p/python
+          --config p/javascript
+          --config p/secrets
