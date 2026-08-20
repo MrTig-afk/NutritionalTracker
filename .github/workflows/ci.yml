@@ -1,0 +1,83 @@
+# CI - the gate everything else keys off. No Claude, no tokens.
+# Keep the workflow name "CI" and the job ids "ci" and "semgrep": branch
+# protection requires both checks, and the review workflow triggers on
+# workflow_run of the workflow named "CI".
+#
+# Lint / Test / Build below are this repo's real commands, verified locally
+# 2026-08-20 before this file was written:
+#   Lint  = frontend eslint            -> 14 errors (pre-existing, see PR)
+#   Test  = backend unittest, 23 tests -> passes (1 skipped: the live Gemini
+#           call, gated behind NUTRI_LIVE, which needs a paid key)
+#   Build = frontend vite build        -> passes
+# The project block in CLAUDE.md still says "no test suite yet" and gives
+# py_compile as the backend check. That is stale - backend/tests/ exists and
+# runs - so the real suite is wired here instead.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # --- Python (backend/) ------------------------------------------------
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install backend
+        run: |
+          uv venv .venv --python 3.11
+          uv pip install -r backend/requirements.txt
+
+      # --- Node (frontend/) -------------------------------------------------
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      # --- The three commands ----------------------------------------------
+      # `if: always()` on Test and Build is deliberate. Lint is red today (14
+      # pre-existing errors), and without it the job would stop at Lint and
+      # tell us nothing about whether Test and Build pass in CI. All three run,
+      # the job still fails, and one PR shows the complete picture instead of
+      # three red cycles. Remove it once main is green if you prefer fail-fast.
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Test
+        if: always()
+        run: .venv/bin/python -m unittest discover -s backend/tests -t . -v
+
+      - name: Build
+        if: always()
+        working-directory: frontend
+        run: npm run build
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v6
+      # --config auto picks the registry rulesets for the languages present.
+      # --error fails the job on findings. This repo has never been scanned, so
+      # the first run is a discovery run: expect findings, triage before
+      # requiring this check in branch protection.
+      - run: semgrep scan --config auto --error
