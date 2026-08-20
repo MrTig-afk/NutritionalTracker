@@ -5,7 +5,10 @@
 #
 # Lint / Test / Build below are this repo's real commands, verified locally
 # 2026-08-20 before this file was written:
-#   Lint  = frontend eslint            -> 14 errors (pre-existing, see PR)
+#   Lint  = frontend eslint            -> exit 0. (This line once said
+#           "14 errors (pre-existing)". Those are fixed; re-measured
+#           2026-08-20. A stale sign on a live gate is how a real
+#           failure gets skimmed past - keep this line true.)
 #   Test  = backend unittest, 23 tests -> passes (1 skipped: the live Gemini
 #           call, gated behind NUTRI_LIVE, which needs a paid key)
 #   Build = frontend vite build        -> passes
@@ -52,11 +55,15 @@ jobs:
         run: npm ci
 
       # --- The three commands ----------------------------------------------
-      # `if: always()` on Test and Build is deliberate. Lint is red today (14
-      # pre-existing errors), and without it the job would stop at Lint and
-      # tell us nothing about whether Test and Build pass in CI. All three run,
-      # the job still fails, and one PR shows the complete picture instead of
-      # three red cycles. Remove it once main is green if you prefer fail-fast.
+      # `if: always()` on Test and Build is deliberate and STAYS - but not for
+      # the reason first written here. That said "Lint is red today (14
+      # pre-existing errors)"; lint is exit 0 now, so that justification is dead.
+      # The flag is still load-bearing for the NEXT lint break: when Lint fails
+      # on a PR, Test and Build still run, so ONE red cycle shows the whole
+      # picture instead of three. That reason does not expire with the fix.
+      # Sharp edge, left alone on purpose: always() is ALSO true when the run is
+      # CANCELLED, so these steps execute on cancel and burn runner minutes.
+      # `if: !cancelled()` is the tighter idiom - a behaviour change, own go.
       - name: Lint
         working-directory: frontend
         run: npm run lint

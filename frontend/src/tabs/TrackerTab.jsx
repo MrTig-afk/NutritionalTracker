@@ -15,7 +15,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [selectedDate, setSelectedDate] = useState(today);
   const [editingGoals, setEditingGoals] = useState(false);
   const [goalDraft, setGoalDraft] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [loadedFor, setLoadedFor] = useState(null); // key of the data now in state
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
   const [expandedGroups, setExpandedGroups] = useState({});
@@ -40,14 +40,25 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
     return () => document.removeEventListener("visibilitychange", syncToday);
   }, []);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); setGoals(g); setLogData(l); }
-    catch (e) { console.error("Tracker load failed:", e); setErr("Couldn't load your log. Pull to refresh or try again."); }
-    finally { setLoading(false); }
-  }, [selectedDate]);
+  // Loading is derived: show the spinner until the data in state matches the
+  // date + refresh counter being asked for. Nothing sets it from an effect.
+  const dataKey = `${selectedDate}|${refreshKey}`;
+  const loading = loadedFor !== dataKey;
 
-  useEffect(() => { loadData(); }, [loadData, refreshKey]);
+  // Latest wins. Two loads can be in flight when the date changes twice quickly,
+  // or when a delete-triggered reload overlaps one. Without this guard the slower
+  // EARLIER request lands last and marks its own (stale) key loaded, which strands
+  // the spinner until something else triggers a load.
+  const reqSeq = useRef(0);
+
+  const loadData = useCallback(async () => {
+    const seq = ++reqSeq.current;
+    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); if (seq !== reqSeq.current) return; setGoals(g); setLogData(l); }
+    catch (e) { if (seq !== reqSeq.current) return; console.error("Tracker load failed:", e); setErr("Couldn't load your log. Pull to refresh or try again."); }
+    finally { if (seq === reqSeq.current) setLoadedFor(dataKey); }
+  }, [selectedDate, dataKey]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const saveGoals = async () => {
     setSavingGoals(true);
@@ -59,7 +70,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const deleteEntry = async (logId) => {
     if (!(await confirm("This entry will be removed from your log.", { title: "Remove entry?", okLabel: "Remove" }))) return;
     setDeletingId(logId);
-    try { await apiFetch(`/log/${logId}`, { method: "DELETE" }); await loadData(); }
+    try { await apiFetch(`/log/${logId}`, { method: "DELETE" }); setLoadedFor(null); await loadData(); }
     catch (e) { console.error(e); setErr("Couldn't delete that entry. Try again."); }
     finally { setDeletingId(null); }
   };
@@ -71,6 +82,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
     setDeletingId(block.gid);
     try {
       for (const it of block.items) await apiFetch(`/log/${it.log_id}`, { method: "DELETE" });
+      setLoadedFor(null);
       await loadData();
     } catch (e) { console.error(e); setErr("Couldn't remove that meal. Try again."); }
     finally { setDeletingId(null); }

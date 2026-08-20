@@ -35,7 +35,6 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
 
   // ── Load data ─────────────────────────────────────────────────────────────
   const loadFolders = useCallback(async () => {
-    setLoading(true); setFolderData({});
     try {
       const fl = await apiFetch("/folders");
       setFolders(fl);
