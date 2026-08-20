@@ -37,7 +37,7 @@ export default function LoginScreen() {
             return;
           }
         }
-      } catch (_) {}
+      } catch { /* fall through to the OTP path */ }
 
       const { error: otpError } = await supabase.auth.signInWithOtp({ email: normalizedEmail });
       if (otpError) throw new Error(otpError.message);
