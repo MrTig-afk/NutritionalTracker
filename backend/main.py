@@ -480,6 +480,13 @@ def _spike(key: str, threshold: int, window_sec: int) -> bool:
 def _note_auth_failure(e):
     """Separate an auth-infra outage (signing keys unreachable/misconfigured → ALL
     logins break) from ordinary bad/expired tokens, and watch for a 401 spike."""
+    if isinstance(e, AuthMisconfigured):
+        # Already alerted at the raise site in verify_claims, and its message
+        # contains "not configured", which would otherwise trip the auth_jwks
+        # branch below too - one broken secret paging both channels twice
+        # (CodeRabbit, PR #9). The 401-spike counter is skipped as well:
+        # a misconfiguration is not a credential-stuffing signal.
+        return
     msg = str(e)
     if "not configured" in msg or "JWK" in msg or "signing key" in msg or "Unable to find" in msg:
         notify_admin("auth_jwks", "Auth verification broken",
