@@ -17,6 +17,7 @@
 !/backend/
 !/frontend/
 !/.github/
+!/.coderabbit.yaml
 
 # 3) Inside the allowed dirs, still keep secrets, deps and build output out.
 #    (.env.example is intentionally NOT matched by **/.env, so it stays tracked.)
