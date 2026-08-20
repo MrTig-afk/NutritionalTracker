@@ -22,6 +22,21 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
 
+# ------------------------------------------------------- no real alerts, ever
+# main.py calls load_dotenv(backend/.env) AT IMPORT, so importing it here loads
+# the real NTFY_TOPIC and admin push config. Tests that exercise the abuse
+# guards (the IP burst cap, the delete-spike freeze) reach notify_admin, which
+# then sent a genuine push to the maintainer's phone on every local run -
+# "9.9.9.9 sent more than N scan requests in a minute". CI never saw it because
+# .env is gitignored there, so it only ever hit whoever ran the suite locally.
+#
+# Both outbound channels are stubbed here rather than notify_admin itself, so
+# its cooldown and bookkeeping still run and stay under test. A test suite must
+# not be able to page a human.
+_ALERTS = []                       # (title, message), if a test ever wants them
+main.send_to_ntfy = lambda title, message: _ALERTS.append((title, message))
+main.send_push_to_user = lambda user_id, title, message: _ALERTS.append((title, message))
+
 
 # ---------------------------------------------------------------- crafted bytes
 def jpeg_bytes(w=1, h=1, color=(200, 30, 30), **save_kw) -> bytes:
