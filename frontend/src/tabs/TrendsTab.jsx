@@ -5,12 +5,14 @@ import { Icon, Spin } from "../components/Icon";
 export default function TrendsTab() {
   const [range,     setRange]     = useState("weekly");
   const [trendData, setTrendData] = useState(null);
-  const [loading,   setLoading]   = useState(false);
+  const [loading,   setLoading]   = useState(true);   // the first fetch starts on mount
   const [error,     setError]     = useState(null);
 
+  // The loading/error reset moved to the range button (the event that causes
+  // the refetch) instead of running synchronously in this effect body, which
+  // is what react-hooks/set-state-in-effect forbids: a setState in an effect
+  // body renders once, then immediately renders again.
   useEffect(() => {
-    setLoading(true);
-    setError(null);
     const d = new Date();
     const clientDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
     apiFetch(`/log/trends?range=${range}&client_date=${clientDate}`)
@@ -40,7 +42,7 @@ export default function TrendsTab() {
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "var(--text)" }}>Nutrition Trends</h2>
         <div style={{ display: "flex", gap: 6 }}>
           {["weekly", "monthly"].map(r => (
-            <button key={r} onClick={() => setRange(r)}
+            <button key={r} onClick={() => { if (r !== range) { setLoading(true); setError(null); } setRange(r); }}
               style={{ padding: "6px 16px", borderRadius: 20, border: "1.5px solid var(--border)", fontSize: 13, fontWeight: 600,
                 cursor: "pointer", transition: "all 0.15s",
                 background: range === r ? "var(--teal)" : "var(--surface)",
