@@ -45,10 +45,17 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const dataKey = `${selectedDate}|${refreshKey}`;
   const loading = loadedFor !== dataKey;
 
+  // Latest wins. Two loads can be in flight when the date changes twice quickly,
+  // or when a delete-triggered reload overlaps one. Without this guard the slower
+  // EARLIER request lands last and marks its own (stale) key loaded, which strands
+  // the spinner until something else triggers a load.
+  const reqSeq = useRef(0);
+
   const loadData = useCallback(async () => {
-    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); setGoals(g); setLogData(l); }
-    catch (e) { console.error("Tracker load failed:", e); setErr("Couldn't load your log. Pull to refresh or try again."); }
-    finally { setLoadedFor(dataKey); }
+    const seq = ++reqSeq.current;
+    try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); if (seq !== reqSeq.current) return; setGoals(g); setLogData(l); }
+    catch (e) { if (seq !== reqSeq.current) return; console.error("Tracker load failed:", e); setErr("Couldn't load your log. Pull to refresh or try again."); }
+    finally { if (seq === reqSeq.current) setLoadedFor(dataKey); }
   }, [selectedDate, dataKey]);
 
   useEffect(() => { loadData(); }, [loadData]);
