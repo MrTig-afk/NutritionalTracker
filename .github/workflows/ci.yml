@@ -1,0 +1,93 @@
+# CI - the gate everything else keys off. No Claude, no tokens.
+# Keep the workflow name "CI" and the job ids "ci" and "semgrep": branch
+# protection requires both checks, and the review workflow triggers on
+# workflow_run of the workflow named "CI".
+#
+# Lint / Test / Build below are this repo's real commands, verified locally
+# 2026-08-20 before this file was written:
+#   Lint  = frontend eslint            -> 14 errors (pre-existing, see PR)
+#   Test  = backend unittest, 23 tests -> passes (1 skipped: the live Gemini
+#           call, gated behind NUTRI_LIVE, which needs a paid key)
+#   Build = frontend vite build        -> passes
+# The project block in CLAUDE.md still says "no test suite yet" and gives
+# py_compile as the backend check. That is stale - backend/tests/ exists and
+# runs - so the real suite is wired here instead.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # --- Python (backend/) ------------------------------------------------
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+      - name: Install backend
+        run: |
+          uv venv .venv --python 3.11
+          uv pip install -r backend/requirements.txt
+
+      # --- Node (frontend/) -------------------------------------------------
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci
+
+      # --- The three commands ----------------------------------------------
+      # `if: always()` on Test and Build is deliberate. Lint is red today (14
+      # pre-existing errors), and without it the job would stop at Lint and
+      # tell us nothing about whether Test and Build pass in CI. All three run,
+      # the job still fails, and one PR shows the complete picture instead of
+      # three red cycles. Remove it once main is green if you prefer fail-fast.
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Test
+        if: always()
+        run: .venv/bin/python -m unittest discover -s backend/tests -t . -v
+
+      - name: Build
+        if: always()
+        working-directory: frontend
+        run: npm run build
+
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      # Rulesets are PINNED, not `--config auto`. `auto` resolves the registry
+      # at run time, so the rule set drifts underneath you: the same commit
+      # scanned twice can give different results, and a green main can go red
+      # overnight with no code change. That is disqualifying for a check that
+      # branch protection requires - the gate must mean the same thing tomorrow
+      # as it does today. Proven here on 2026-08-20: a local semgrep 1.173.0
+      # run and this container's `auto` run returned different findings on the
+      # identical tree.
+      # Adding a ruleset is a deliberate edit to this line, and the PR that
+      # does it shows exactly what new class of finding was turned on.
+      - run: >
+          semgrep scan --error
+          --config p/python
+          --config p/javascript
+          --config p/secrets
