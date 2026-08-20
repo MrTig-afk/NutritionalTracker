@@ -245,6 +245,16 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 _jwks_client = pyjwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True)
 
+class AuthMisconfigured(RuntimeError):
+    """The verifier itself cannot run - config is missing, not the token's fault.
+
+    Kept distinct from every pyjwt error because the two mean opposite things.
+    A bad token is the guard WORKING. A missing signing secret is the guard
+    NOT WORKING while still returning a tidy "no" to every caller, which is
+    indistinguishable from success unless someone is told.
+    """
+
+
 def verify_claims(authorization: Optional[str]) -> dict:
     """Fully VERIFIED claims from a Supabase bearer token. Raises on a bad one.
 
@@ -263,7 +273,15 @@ def verify_claims(authorization: Optional[str]) -> dict:
     logger.info(f"🔑 JWT alg: {alg}")
     if alg == "HS256":
         if not SUPABASE_JWT_SECRET:
-            raise Exception("SUPABASE_JWT_SECRET not configured")
+            # Loud on purpose. Without the secret nothing can be verified, so
+            # every HS256 request is rejected and the app looks merely
+            # unpopular rather than broken. notify_admin has its own cooldown,
+            # so this alerts once per window, not once per request.
+            logger.error("🚨 SUPABASE_JWT_SECRET is not set - no HS256 token can be verified")
+            notify_admin("auth_misconfigured", "Auth is misconfigured",
+                         "SUPABASE_JWT_SECRET is not set, so no HS256 token can be "
+                         "verified. Every request presenting one is being rejected.")
+            raise AuthMisconfigured("SUPABASE_JWT_SECRET not configured")
         return pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"],
                             options={"verify_aud": False})
     signing_key = _jwks_client.get_signing_key_from_jwt(token)
@@ -284,7 +302,14 @@ def claims_if_valid(authorization: Optional[str]) -> Optional[dict]:
         return None
     try:
         return verify_claims(authorization)
-    except Exception:
+    except AuthMisconfigured:
+        return None          # already logged and alerted at the raise site
+    except pyjwt.PyJWTError:
+        return None          # expired, forged, malformed: the guard working
+    except Exception as e:
+        # Anything else is unexpected - a JWKS fetch failure, a network error.
+        # Still fails closed, but it does not get to be silent.
+        logger.warning(f"⚠️ claims_if_valid: unexpected verification error: {e}")
         return None
 
 

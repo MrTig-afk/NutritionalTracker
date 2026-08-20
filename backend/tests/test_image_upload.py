@@ -309,5 +309,44 @@ class LiveInjection(unittest.TestCase):
         self.assertNotIn("note", json.dumps(data))
 
 
+# ---------------------------------------------------------------- auth guard
+class ClaimsIfValid(unittest.TestCase):
+    """A bad token and a broken verifier both yield None. Only one is normal."""
+
+    def test_missing_header_and_junk_token_are_quiet_none(self):
+        self.assertIsNone(main.claims_if_valid(None))
+        self.assertIsNone(main.claims_if_valid(""))
+        self.assertIsNone(main.claims_if_valid("Bearer not.a.jwt"))
+
+    def test_missing_signing_secret_is_loud_not_silent(self):
+        # The failure this guards against: with no secret nothing can be
+        # verified, every caller sees a tidy None, and the app looks merely
+        # unpopular rather than broken. It must alert.
+        saved, main.SUPABASE_JWT_SECRET = main.SUPABASE_JWT_SECRET, ""
+        before = len(_ALERTS)
+        main._admin_alert_last.pop("auth_misconfigured", None)   # defeat the cooldown
+        try:
+            token = jwt_like_hs256()
+            with self.assertRaises(main.AuthMisconfigured):
+                main.verify_claims(f"Bearer {token}")
+            self.assertIsNone(main.claims_if_valid(f"Bearer {token}"),
+                              "must still fail closed")
+            self.assertGreater(len(_ALERTS), before,
+                               "a misconfigured verifier must page someone")
+        finally:
+            main.SUPABASE_JWT_SECRET = saved
+
+
+def jwt_like_hs256() -> str:
+    """An HS256-headed token. The signature is irrelevant: the secret check
+    happens before any verification."""
+    import base64
+
+    def b64(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
+
+    return f"{b64({'alg': 'HS256', 'typ': 'JWT'})}.{b64({'sub': 'u1'})}.sig"
+
+
 if __name__ == "__main__":
     unittest.main()
