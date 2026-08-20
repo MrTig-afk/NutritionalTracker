@@ -1,0 +1,17 @@
+# CodeRabbit is this repo's automatic PR review layer. Free on public repos,
+# and it costs no Claude tokens - that is why it is here rather than a
+# Claude-based review workflow.
+#
+# profile: assertive
+#   The default is `chill`, which is deliberately low-noise. Under `chill` it
+#   reviewed two PRs here and produced zero findings both times, including on
+#   a security-relevant JWT refactor that contained a defensible issue (a
+#   blanket `except Exception` that hid a misconfiguration). `assertive` asks
+#   for more feedback, at the cost of some nitpicking.
+#
+#   If assertive is still silent on issues a careful human reviewer would
+#   raise, that is the answer: CodeRabbit is a summariser and a safety net,
+#   not a defect finder, and the pre-merge review discipline stays regardless.
+#   Valid values: quiet | chill | assertive.
+reviews:
+  profile: assertive
