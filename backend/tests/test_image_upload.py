@@ -22,6 +22,21 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
 
+# ------------------------------------------------------- no real alerts, ever
+# main.py calls load_dotenv(backend/.env) AT IMPORT, so importing it here loads
+# the real NTFY_TOPIC and admin push config. Tests that exercise the abuse
+# guards (the IP burst cap, the delete-spike freeze) reach notify_admin, which
+# then sent a genuine push to the maintainer's phone on every local run -
+# "9.9.9.9 sent more than N scan requests in a minute". CI never saw it because
+# .env is gitignored there, so it only ever hit whoever ran the suite locally.
+#
+# Both outbound channels are stubbed here rather than notify_admin itself, so
+# its cooldown and bookkeeping still run and stay under test. A test suite must
+# not be able to page a human.
+_ALERTS = []                       # (title, message), if a test ever wants them
+main.send_to_ntfy = lambda title, message: _ALERTS.append((title, message))
+main.send_push_to_user = lambda user_id, title, message: _ALERTS.append((title, message))
+
 
 # ---------------------------------------------------------------- crafted bytes
 def jpeg_bytes(w=1, h=1, color=(200, 30, 30), **save_kw) -> bytes:
@@ -292,6 +307,55 @@ class LiveInjection(unittest.TestCase):
         cal = main.normalize_extracted_data(data)["per_100g"]["calories"]
         self.assertTrue(240 <= cal <= 260, f"model obeyed the printed instruction: calories={cal}")
         self.assertNotIn("note", json.dumps(data))
+
+
+# ---------------------------------------------------------------- auth guard
+class ClaimsIfValid(unittest.TestCase):
+    """A bad token and a broken verifier both yield None. Only one is normal."""
+
+    def test_missing_header_and_junk_token_are_quiet_none(self):
+        self.assertIsNone(main.claims_if_valid(None))
+        self.assertIsNone(main.claims_if_valid(""))
+        self.assertIsNone(main.claims_if_valid("Bearer not.a.jwt"))
+
+    def test_missing_signing_secret_is_loud_not_silent(self):
+        # The failure this guards against: with no secret nothing can be
+        # verified, every caller sees a tidy None, and the app looks merely
+        # unpopular rather than broken. It must alert.
+        # CodeRabbit (PR #9): restore the cooldown entry too, not just the
+        # secret - verify_claims writes a fresh one, and leaking it could
+        # suppress a later test's expected alert. Sentinel distinguishes
+        # "key was absent" from "key held a value".
+        sentinel = object()
+        saved, main.SUPABASE_JWT_SECRET = main.SUPABASE_JWT_SECRET, ""
+        previous_alert = main._admin_alert_last.get("auth_misconfigured", sentinel)
+        before = len(_ALERTS)
+        main._admin_alert_last.pop("auth_misconfigured", None)   # defeat the cooldown
+        try:
+            token = jwt_like_hs256()
+            with self.assertRaises(main.AuthMisconfigured):
+                main.verify_claims(f"Bearer {token}")
+            self.assertIsNone(main.claims_if_valid(f"Bearer {token}"),
+                              "must still fail closed")
+            self.assertGreater(len(_ALERTS), before,
+                               "a misconfigured verifier must page someone")
+        finally:
+            main.SUPABASE_JWT_SECRET = saved
+            if previous_alert is sentinel:
+                main._admin_alert_last.pop("auth_misconfigured", None)
+            else:
+                main._admin_alert_last["auth_misconfigured"] = previous_alert
+
+
+def jwt_like_hs256() -> str:
+    """An HS256-headed token. The signature is irrelevant: the secret check
+    happens before any verification."""
+    import base64
+
+    def b64(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
+
+    return f"{b64({'alg': 'HS256', 'typ': 'JWT'})}.{b64({'sub': 'u1'})}.sig"
 
 
 if __name__ == "__main__":

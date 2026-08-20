@@ -245,23 +245,80 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 _jwks_client = pyjwt.PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json", cache_keys=True)
 
+class AuthMisconfigured(RuntimeError):
+    """The verifier itself cannot run - config is missing, not the token's fault.
+
+    Kept distinct from every pyjwt error because the two mean opposite things.
+    A bad token is the guard WORKING. A missing signing secret is the guard
+    NOT WORKING while still returning a tidy "no" to every caller, which is
+    indistinguishable from success unless someone is told.
+    """
+
+
+def verify_claims(authorization: Optional[str]) -> dict:
+    """Fully VERIFIED claims from a Supabase bearer token. Raises on a bad one.
+
+    The only place in this file that decodes a token. HS256 is checked against
+    SUPABASE_JWT_SECRET; anything else against the JWKS signing key. The `alg`
+    comes from the unverified header, which is safe here only because the
+    HS256 branch uses a SEPARATE shared secret and never the RSA public key -
+    the classic RS256->HS256 confusion needs the public key as the HMAC
+    secret, so it does not apply.
+
+    Callers that gate access keep their own except blocks; callers that only
+    want to READ a claim use claims_if_valid() below.
+    """
+    token = (authorization or "").replace("Bearer ", "").strip()
+    alg = pyjwt.get_unverified_header(token).get("alg", "HS256")
+    logger.info(f"🔑 JWT alg: {alg}")
+    if alg == "HS256":
+        if not SUPABASE_JWT_SECRET:
+            # Loud on purpose. Without the secret nothing can be verified, so
+            # every HS256 request is rejected and the app looks merely
+            # unpopular rather than broken. notify_admin has its own cooldown,
+            # so this alerts once per window, not once per request.
+            logger.error("🚨 SUPABASE_JWT_SECRET is not set - no HS256 token can be verified")
+            notify_admin("auth_misconfigured", "Auth is misconfigured",
+                         "SUPABASE_JWT_SECRET is not set, so no HS256 token can be "
+                         "verified. Every request presenting one is being rejected.")
+            raise AuthMisconfigured("SUPABASE_JWT_SECRET not configured")
+        return pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"],
+                            options={"verify_aud": False})
+    signing_key = _jwks_client.get_signing_key_from_jwt(token)
+    return pyjwt.decode(token, signing_key.key, algorithms=[alg],
+                        options={"verify_aud": False})
+
+
+def claims_if_valid(authorization: Optional[str]) -> Optional[dict]:
+    """verify_claims() for read-only callers: verified claims, or None.
+
+    Replaces two `options={"verify_signature": False}` decodes. Those were
+    safe in context - both ran on a token a route had already verified - but
+    each depended on an invariant held somewhere else in the file, which is
+    the kind of safety that quietly stops being true. Verifying costs one
+    HMAC (or a cached JWKS key) and depends on nothing.
+    """
+    if not authorization:
+        return None
+    try:
+        return verify_claims(authorization)
+    except AuthMisconfigured:
+        return None          # already logged and alerted at the raise site
+    except pyjwt.PyJWTError:
+        return None          # expired, forged, malformed: the guard working
+    except Exception as e:
+        # Anything else is unexpected - a JWKS fetch failure, a network error.
+        # Still fails closed, but it does not get to be silent.
+        logger.warning(f"⚠️ claims_if_valid: unexpected verification error: {e}")
+        return None
+
+
 def get_user_id(authorization: Optional[str] = None) -> str:
     """Extract user ID from Supabase JWT. Supports both HS256 and RS256."""
     if not authorization:
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Missing authorization header"})
     try:
-        token = authorization.replace("Bearer ", "").strip()
-        header = pyjwt.get_unverified_header(token)
-        alg    = header.get("alg", "HS256")
-        logger.info(f"🔑 JWT alg: {alg}")
-
-        if alg == "HS256":
-            if not SUPABASE_JWT_SECRET:
-                raise Exception("SUPABASE_JWT_SECRET not configured")
-            payload = pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
-        else:
-            signing_key = _jwks_client.get_signing_key_from_jwt(token)
-            payload = pyjwt.decode(token, signing_key.key, algorithms=[alg], options={"verify_aud": False})
+        payload = verify_claims(authorization)
 
         user_id = payload.get("sub")
         if not user_id:
@@ -286,16 +343,7 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
     if not authorization:
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Missing authorization header"})
     try:
-        token = authorization.replace("Bearer ", "").strip()
-        header = pyjwt.get_unverified_header(token)
-        alg    = header.get("alg", "HS256")
-        if alg == "HS256":
-            if not SUPABASE_JWT_SECRET:
-                raise Exception("SUPABASE_JWT_SECRET not configured")
-            payload = pyjwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
-        else:
-            signing_key = _jwks_client.get_signing_key_from_jwt(token)
-            payload = pyjwt.decode(token, signing_key.key, algorithms=[alg], options={"verify_aud": False})
+        payload = verify_claims(authorization)
         user_id = payload.get("sub")
         if not user_id:
             raise Exception("No sub claim in JWT")
@@ -432,6 +480,13 @@ def _spike(key: str, threshold: int, window_sec: int) -> bool:
 def _note_auth_failure(e):
     """Separate an auth-infra outage (signing keys unreachable/misconfigured → ALL
     logins break) from ordinary bad/expired tokens, and watch for a 401 spike."""
+    if isinstance(e, AuthMisconfigured):
+        # Already alerted at the raise site in verify_claims, and its message
+        # contains "not configured", which would otherwise trip the auth_jwks
+        # branch below too - one broken secret paging both channels twice
+        # (CodeRabbit, PR #9). The 401-spike counter is skipped as well:
+        # a misconfiguration is not a credential-stuffing signal.
+        return
     msg = str(e)
     if "not configured" in msg or "JWK" in msg or "signing key" in msg or "Unable to find" in msg:
         notify_admin("auth_jwks", "Auth verification broken",
@@ -495,12 +550,12 @@ async def abuse_guard(request: Request, call_next):
         _blocked[ip] = time.time() + 600
         notify_admin("scan_probe", "Vulnerability scan blocked", f"{ip} hit 30 unknown paths in 5 min — blocked for 10 min.")
     if request.method == "DELETE" and 200 <= response.status_code < 300 and request.url.path != "/push/unsubscribe":
-        # Count verified deletes per account; the route already checked the
-        # signature (2xx), so an unverified decode here is safe for counting.
-        try:
-            sub = pyjwt.decode(request.headers.get("authorization", "")[7:], options={"verify_signature": False}).get("sub")
-        except Exception:
-            sub = None
+        # Verify rather than trust the 2xx. The old unverified decode was
+        # safe only while EVERY delete route authenticated; a future route
+        # that returned 2xx without auth would have let a forged token freeze
+        # someone else's account. Verifying removes that standing invariant.
+        claims = claims_if_valid(request.headers.get("authorization", ""))
+        sub = claims.get("sub") if claims else None
         # Group-delete in the Tracker issues one DELETE per ingredient, so a
         # real user removing two 22-item meals sends 44; 60 in 10 min is nobody legit.
         if sub and sub not in _frozen and _spike(f"del:{sub}", 60, 600):
@@ -2447,11 +2502,11 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
     # A stolen session must not be able to nuke the account: require an actual
     # sign-in (Supabase `amr` timestamp, not `iat` — refreshes renew iat but
     # not amr) within the last 5 minutes.
+    claims = claims_if_valid(authorization) or {}
     try:
-        claims = pyjwt.decode(authorization.replace("Bearer ", "").strip(), options={"verify_signature": False})
         last_auth = max((int(a.get("timestamp", 0)) for a in claims.get("amr", [])), default=0)
     except Exception:
-        last_auth = 0
+        last_auth = 0          # malformed amr -> 0 -> re-auth required (fails closed)
     if time.time() - last_auth > 300:
         raise HTTPException(status_code=403, detail={"error_type": "reauth_required",
             "message": "For safety, sign out and sign back in, then delete your account within 5 minutes."})
