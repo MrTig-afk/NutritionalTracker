@@ -16,6 +16,9 @@ import os
 import sys
 
 os.environ["DATABASE_URL"] = os.environ.get("NUTRI_TEST_DATABASE_URL", "")
+# Same trick for the Supabase admin key: DELETE /account and freeze_user call
+# the real admin API with it, and a test must never reach production.
+os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import main  # noqa: E402

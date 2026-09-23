@@ -15,6 +15,9 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from google import genai
 from google.genai import types
 from groq import Groq
@@ -27,6 +30,7 @@ import re
 import threading
 import urllib.request
 import contextvars
+import sys
 
 from log_service import (entry_macros, sum_macros, rounded, load_nutrition, _parse_num,
                          KJ_PER_KCAL, KJ_HEURISTIC_THRESHOLD)
@@ -535,6 +539,7 @@ def freeze_user(user_id: str, reason: str):
     Undo: docs/nutriscan-ops.md "Unfreeze an account"."""
     _frozen.add(user_id)  # instant, in-process; the durable ban below must not block the event loop
     def _ban_and_notify():
+        api_v1.revoke_all(user_id)
         banned = False
         if SUPABASE_SERVICE_ROLE_KEY:
             try:
@@ -573,15 +578,24 @@ async def abuse_guard(request: Request, call_next):
         # that returned 2xx without auth would have let a forged token freeze
         # someone else's account. Verifying removes that standing invariant.
         claims = claims_if_valid(request.headers.get("authorization", ""))
-        sub = claims.get("sub") if claims else None
+        sub = claims.get("sub") if claims else api_v1.cached_user_id(request.headers.get("authorization", ""))
         # Group-delete in the Tracker issues one DELETE per ingredient, so a
         # real user removing two 22-item meals sends 44; 60 in 10 min is nobody legit.
         if sub and sub not in _frozen and _spike(f"del:{sub}", 60, 600):
             freeze_user(sub, "60 deletes in 10 minutes (possible hijacked session)")
     return response
 
+class _AppCORS(CORSMiddleware):
+    """CORS for the app's own origins. /v1 is for servers and scripts, not web
+    pages, so it answers no browser origin at all (no CORS headers)."""
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith("/v1/"):
+            return await self.app(scope, receive, send)
+        return await super().__call__(scope, receive, send)
+
+
 app.add_middleware(
-    CORSMiddleware,
+    _AppCORS,
     allow_origins=[
         "https://nutritional-tracker-delta.vercel.app",
         "http://localhost:5173",
@@ -922,6 +936,97 @@ def _reset_pool():
     _pool = None
     return get_pool()
 
+# ---------- NEON BUDGET ESTIMATE ----------
+# Neon's free plan cannot report its own usage over the API, so the server
+# estimates it: every connection keeps the compute awake until 5 minutes after
+# the last query, and awake time x a fixed 0.25 CU is the CU-hours spent. The
+# estimate misses SQL-editor sessions; the 90% cut-off leaves room for them.
+NEON_CU, NEON_FREE_CU_HOURS, NEON_SUSPEND_SEC = 0.25, 100.0, 300
+NEON_PERIOD_START_DAY = min(max(int(os.getenv("NEON_PERIOD_START_DAY", "1")), 1), 28)
+# saved_at starts "now" so nothing is saved before startup's _load_budget has run
+_budget = {"period": None, "seconds": 0.0, "awake_until": 0.0, "alerted_70": False, "saved_at": time.time()}
+_budget_lock = threading.Lock()
+
+
+def neon_period_start(today: date) -> date:
+    if today.day >= NEON_PERIOD_START_DAY:
+        return today.replace(day=NEON_PERIOD_START_DAY)
+    return (today.replace(day=1) - timedelta(days=1)).replace(day=NEON_PERIOD_START_DAY)
+
+
+def neon_next_period_start(today: date) -> date:
+    return (neon_period_start(today).replace(day=28) + timedelta(days=4)).replace(day=NEON_PERIOD_START_DAY)
+
+
+def budget_used() -> float:
+    """Estimated share of the month's free CU-hours spent, 0..1+."""
+    return _budget["seconds"] / 3600 * NEON_CU / NEON_FREE_CU_HOURS
+
+
+def db_awake() -> bool:
+    return time.time() < _budget["awake_until"]
+
+
+def _note_db_use(now: Optional[float] = None):
+    now = now or time.time()
+    with _budget_lock:
+        period = neon_period_start(datetime.utcfromtimestamp(now).date())
+        if _budget["period"] != period:
+            _budget.update(period=period, seconds=0.0, alerted_70=False)
+        _budget["seconds"] += NEON_SUSPEND_SEC - max(0.0, _budget["awake_until"] - now)
+        _budget["awake_until"] = now + NEON_SUSPEND_SEC
+        alert = budget_used() >= 0.7 and not _budget["alerted_70"]
+        _budget["alerted_70"] |= alert
+        save = now - _budget["saved_at"] > 300
+        if save:
+            _budget["saved_at"] = now
+    if alert:
+        notify_admin("neon_budget_70", "Neon budget at 70%",
+                     "Estimated Neon compute use passed 70% of the free month. At 90% the /v1 API pauses until the period resets; the app keeps working.")
+    if save:  # the database is awake right now, so saving costs no extra wake-up
+        threading.Thread(target=_save_budget, daemon=True).start()
+
+
+def _save_budget():
+    conn = None
+    try:
+        conn = get_db("__system__")
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO ops_budget (period_start, awake_seconds, alerted_70, paused, updated_at)
+            VALUES (%s, %s, %s, %s, now())
+            ON CONFLICT (period_start) DO UPDATE SET awake_seconds = GREATEST(ops_budget.awake_seconds, EXCLUDED.awake_seconds),
+                alerted_70 = ops_budget.alerted_70 OR EXCLUDED.alerted_70, paused = EXCLUDED.paused, updated_at = now()
+        """, [_budget["period"], _budget["seconds"], _budget["alerted_70"], budget_used() >= 0.9])
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.warning(f"ops_budget save skipped: {e}")
+    finally:
+        if conn:
+            release_db(conn)
+
+
+def _load_budget():
+    """Carry the estimate across restarts (Render redeploys reset memory)."""
+    conn = None
+    try:
+        conn = get_db("__system__")
+        cur = conn.cursor()
+        cur.execute("SELECT awake_seconds, alerted_70 FROM ops_budget WHERE period_start = %s", [_budget["period"]])
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            with _budget_lock:
+                _budget["seconds"] = max(_budget["seconds"], row[0])
+                _budget["alerted_70"] = _budget["alerted_70"] or row[1]
+    except Exception as e:
+        logger.warning(f"ops_budget load skipped (run backend/api_v1.sql?): {e}")
+    finally:
+        if conn:
+            release_db(conn)
+
+
 def get_db(user_id: Optional[str] = None):
     global _pool
     try:
@@ -941,6 +1046,7 @@ def get_db(user_id: Optional[str] = None):
             notify_admin("db_unreachable", "Database unreachable",
                          f"Connection pool reset failed — Neon is likely down or at its connection limit, so requests are failing. Detail: {str(e)[:120]}")
             raise
+    _note_db_use()
     # RLS: bind the request's user to a transaction-local GUC so Postgres
     # row-level security policies enforce per-user isolation in the DB itself.
     uid = user_id or _current_user_id.get()
@@ -1335,6 +1441,8 @@ def startup():
         _webpush_all(list(_admin_subs), "🔴 NutriScan Startup Failed", f"DB init error ({type(e).__name__}).")
         raise
     _load_admin_subs()
+    _load_budget()
+    api_v1.load_prefixes()
     threading.Thread(target=_purge_recycle_bin, daemon=True).start()  # also daily from the scheduler
     if MEAL_REMINDERS_ENABLED and _webpush_ok and VAPID_PRIVATE_KEY:
         threading.Thread(target=_meal_reminder_loop, daemon=True).start()
@@ -2467,6 +2575,7 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
 
 
 _ACCOUNT_TABLES = [
+    "api_tokens", "api_token_usage", "api_idempotency", "api_audit",
     "push_subscriptions", "notification_prefs", "meal_template_items",
     "meal_templates", "folder_items", "folders", "daily_log", "user_goals",
     "image_records", "api_usage", "users",
@@ -2494,7 +2603,9 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
         # stand down for this transaction (recycle_bin.sql reads app.skip_bin).
         cur.execute("SELECT set_config('app.skip_bin', '1', true)")
         for t in _ACCOUNT_TABLES:
-            cur.execute(f"DELETE FROM {t} WHERE user_id = %s", [user_id])
+            cur.execute("SELECT to_regclass(%s)", [t])   # api_* tables exist only once api_v1.sql has run
+            if cur.fetchone()[0] is not None:
+                cur.execute(f"DELETE FROM {t} WHERE user_id = %s", [user_id])
         conn.commit(); cur.close(); release_db(conn)
     except Exception as e:
         raise _db_error(e)
@@ -2512,6 +2623,7 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
             logger.warning(f"Supabase user delete failed (data already gone): {e}")
 
     _mark_schedule_dirty()
+    api_v1.forget_token(user_id=user_id)
     logger.info(f"🗑️ Account deleted: {user_id[:8]}")
     notify_admin("account_deleted", "🗑️ Account Deleted", f"User {user_id[:8]} deleted their account")
     return {"deleted": True}
@@ -2692,10 +2804,41 @@ async def generic_exception_handler(request, exc):
     logger.error(f"❌ Unhandled: {exc}")
     notify_admin("unhandled_500", "Unhandled server error",
                  f"{request.method} {request.url.path} crashed with an unexpected error ({type(exc).__name__}). Stack trace in Sentry.")
+    if request.url.path.startswith("/v1/"):
+        return api_v1.problem_response(api_v1.Problem(500, "internal_error", "An unexpected error occurred."))
     return JSONResponse(
         status_code=500,
         content={"error_type": "internal_error", "retryable": True, "message": "An unexpected error occurred. Please try again."},
     )
+
+
+# =============================================================================
+# PUBLIC API /v1 (api_v1.py). Imported last so it can use everything above.
+# =============================================================================
+import api_v1  # noqa: E402
+api_v1.m = sys.modules[__name__]   # this module, whether run as main or __main__
+app.include_router(api_v1.router)
+app.include_router(api_v1.settings_router)
+app.middleware("http")(api_v1.v1_middleware)   # outermost: body cap and headers before anything else
+
+
+@app.exception_handler(api_v1.Problem)
+async def v1_problem_handler(request, exc):
+    return api_v1.problem_response(exc)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_as_problem(request, exc):
+    if request.url.path.startswith("/v1/"):
+        return api_v1.problem_response(api_v1.from_http_exception(exc.status_code, exc.detail, exc.headers))
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_as_problem(request, exc):
+    if not request.url.path.startswith("/v1/"):
+        return await request_validation_exception_handler(request, exc)
+    return api_v1.problem_response(api_v1.validation_problem(exc.errors()))
 
 
 # ---------- RUN ----------
