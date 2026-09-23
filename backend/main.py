@@ -1460,9 +1460,6 @@ def startup():
     if MEAL_REMINDERS_ENABLED and _webpush_ok and VAPID_PRIVATE_KEY:
         threading.Thread(target=_meal_reminder_loop, daemon=True).start()
         logger.info("⏰ Meal reminder scheduler started")
-    logger.info("\n📋 Registered Routes:")
-    for route in app.routes:
-        logger.info(f"   {getattr(route, 'methods', {'GET'})} {route.path}")
 
 
 # =============================================================================
