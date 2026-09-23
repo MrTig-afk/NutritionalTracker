@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../lib/api";
+import { todayLocal } from "../lib/nutrition";
 import { Icon, Spin } from "./Icon";
 
 function renderInline(text, key) {
@@ -156,7 +157,7 @@ export default function ChatAssistant({ open }) {
     setMessages(prev => [...prev, { role: "user", text }]);
     setLoading(true);
     try {
-      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages.filter(m => !m.greeting) }) });
+      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages.filter(m => !m.greeting), client_date: todayLocal() }) });
       setMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");
