@@ -1,0 +1,1747 @@
+{
+ "components": {
+  "schemas": {
+   "Batch": {
+    "additionalProperties": false,
+    "properties": {
+     "changes": {
+      "items": {
+       "discriminator": {
+        "mapping": {
+         "create_template": "#/components/schemas/CreateTemplateChange",
+         "delete_entry": "#/components/schemas/DeleteEntryChange",
+         "delete_meal": "#/components/schemas/DeleteMealChange",
+         "log_entry": "#/components/schemas/LogEntryChange",
+         "log_meal": "#/components/schemas/LogMealChange",
+         "log_template": "#/components/schemas/LogTemplateChange",
+         "save_food": "#/components/schemas/SaveFoodChange",
+         "update_entry": "#/components/schemas/UpdateEntryChange",
+         "update_template": "#/components/schemas/UpdateTemplateChange"
+        },
+        "propertyName": "type"
+       },
+       "oneOf": [
+        {
+         "$ref": "#/components/schemas/LogEntryChange"
+        },
+        {
+         "$ref": "#/components/schemas/LogMealChange"
+        },
+        {
+         "$ref": "#/components/schemas/LogTemplateChange"
+        },
+        {
+         "$ref": "#/components/schemas/UpdateEntryChange"
+        },
+        {
+         "$ref": "#/components/schemas/DeleteEntryChange"
+        },
+        {
+         "$ref": "#/components/schemas/DeleteMealChange"
+        },
+        {
+         "$ref": "#/components/schemas/CreateTemplateChange"
+        },
+        {
+         "$ref": "#/components/schemas/UpdateTemplateChange"
+        },
+        {
+         "$ref": "#/components/schemas/SaveFoodChange"
+        }
+       ]
+      },
+      "maxItems": 10,
+      "minItems": 1,
+      "title": "Changes",
+      "type": "array"
+     }
+    },
+    "required": [
+     "changes"
+    ],
+    "title": "Batch",
+    "type": "object"
+   },
+   "CreateTemplateChange": {
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/Item"
+      },
+      "maxItems": 25,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+     },
+     "name": {
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "type": {
+      "const": "create_template",
+      "default": "create_template",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "items"
+    ],
+    "title": "CreateTemplateChange",
+    "type": "object"
+   },
+   "DeleteEntryChange": {
+    "additionalProperties": false,
+    "properties": {
+     "if_match": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "If Match",
+      "type": "string"
+     },
+     "log_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Log Id",
+      "type": "string"
+     },
+     "type": {
+      "const": "delete_entry",
+      "default": "delete_entry",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "log_id",
+     "if_match"
+    ],
+    "title": "DeleteEntryChange",
+    "type": "object"
+   },
+   "DeleteMealChange": {
+    "additionalProperties": false,
+    "properties": {
+     "group_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Group Id",
+      "type": "string"
+     },
+     "if_match": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "If Match",
+      "type": "string"
+     },
+     "type": {
+      "const": "delete_meal",
+      "default": "delete_meal",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "group_id",
+     "if_match"
+    ],
+    "title": "DeleteMealChange",
+    "type": "object"
+   },
+   "EntryPatch": {
+    "additionalProperties": false,
+    "properties": {
+     "date": {
+      "anyOf": [
+       {
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Date"
+     },
+     "macros": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/Macros"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "name": {
+      "anyOf": [
+       {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "portion": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Portion"
+     },
+     "servings": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "maximum": 100.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Servings"
+     }
+    },
+    "title": "EntryPatch",
+    "type": "object"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "title": "Detail",
+      "type": "array"
+     }
+    },
+    "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "Item": {
+    "additionalProperties": false,
+    "properties": {
+     "macros": {
+      "$ref": "#/components/schemas/Macros"
+     },
+     "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "portion": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Portion"
+     },
+     "save_to_library": {
+      "default": false,
+      "title": "Save To Library",
+      "type": "boolean"
+     },
+     "servings": {
+      "default": 1,
+      "exclusiveMinimum": 0.0,
+      "maximum": 100.0,
+      "title": "Servings",
+      "type": "number"
+     }
+    },
+    "required": [
+     "name",
+     "macros"
+    ],
+    "title": "Item",
+    "type": "object"
+   },
+   "ItemChange": {
+    "additionalProperties": false,
+    "properties": {
+     "item_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Item Id",
+      "type": "string"
+     },
+     "macros": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/Macros"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "portion": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Portion"
+     },
+     "servings": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "maximum": 100.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Servings"
+     }
+    },
+    "required": [
+     "item_id"
+    ],
+    "title": "ItemChange",
+    "type": "object"
+   },
+   "LogEntryChange": {
+    "additionalProperties": false,
+    "properties": {
+     "date": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Date",
+      "type": "string"
+     },
+     "macros": {
+      "$ref": "#/components/schemas/Macros"
+     },
+     "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "portion": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Portion"
+     },
+     "save_to_library": {
+      "default": false,
+      "title": "Save To Library",
+      "type": "boolean"
+     },
+     "servings": {
+      "default": 1,
+      "exclusiveMinimum": 0.0,
+      "maximum": 100.0,
+      "title": "Servings",
+      "type": "number"
+     },
+     "type": {
+      "const": "log_entry",
+      "default": "log_entry",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "macros",
+     "date"
+    ],
+    "title": "LogEntryChange",
+    "type": "object"
+   },
+   "LogMealChange": {
+    "additionalProperties": false,
+    "properties": {
+     "date": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Date",
+      "type": "string"
+     },
+     "items": {
+      "items": {
+       "$ref": "#/components/schemas/Item"
+      },
+      "maxItems": 25,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+     },
+     "label": {
+      "maxLength": 40,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+     },
+     "type": {
+      "const": "log_meal",
+      "default": "log_meal",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "date",
+     "label",
+     "items"
+    ],
+    "title": "LogMealChange",
+    "type": "object"
+   },
+   "LogTemplateChange": {
+    "additionalProperties": false,
+    "properties": {
+     "add": {
+      "items": {
+       "$ref": "#/components/schemas/Item"
+      },
+      "maxItems": 25,
+      "title": "Add",
+      "type": "array"
+     },
+     "changes": {
+      "items": {
+       "$ref": "#/components/schemas/ItemChange"
+      },
+      "maxItems": 25,
+      "title": "Changes",
+      "type": "array"
+     },
+     "date": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Date",
+      "type": "string"
+     },
+     "remove": {
+      "items": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "maxItems": 25,
+      "title": "Remove",
+      "type": "array"
+     },
+     "template_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Template Id",
+      "type": "string"
+     },
+     "type": {
+      "const": "log_template",
+      "default": "log_template",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "template_id",
+     "date"
+    ],
+    "title": "LogTemplateChange",
+    "type": "object"
+   },
+   "Macros": {
+    "additionalProperties": false,
+    "properties": {
+     "calories": {
+      "maximum": 5000.0,
+      "minimum": 0.0,
+      "title": "Calories",
+      "type": "number"
+     },
+     "carbs_g": {
+      "maximum": 1000.0,
+      "minimum": 0.0,
+      "title": "Carbs G",
+      "type": "number"
+     },
+     "fat_g": {
+      "maximum": 1000.0,
+      "minimum": 0.0,
+      "title": "Fat G",
+      "type": "number"
+     },
+     "fibre_g": {
+      "maximum": 1000.0,
+      "minimum": 0.0,
+      "title": "Fibre G",
+      "type": "number"
+     },
+     "protein_g": {
+      "maximum": 1000.0,
+      "minimum": 0.0,
+      "title": "Protein G",
+      "type": "number"
+     },
+     "sat_fat_g": {
+      "anyOf": [
+       {
+        "maximum": 1000.0,
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sat Fat G"
+     },
+     "sodium_mg": {
+      "anyOf": [
+       {
+        "maximum": 100000.0,
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sodium Mg"
+     },
+     "sugars_g": {
+      "anyOf": [
+       {
+        "maximum": 1000.0,
+        "minimum": 0.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Sugars G"
+     }
+    },
+    "required": [
+     "calories",
+     "protein_g",
+     "carbs_g",
+     "fat_g",
+     "fibre_g"
+    ],
+    "title": "Macros",
+    "type": "object"
+   },
+   "SaveFoodChange": {
+    "additionalProperties": false,
+    "properties": {
+     "macros": {
+      "$ref": "#/components/schemas/Macros"
+     },
+     "name": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+     },
+     "portion": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Portion"
+     },
+     "type": {
+      "const": "save_food",
+      "default": "save_food",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "macros"
+    ],
+    "title": "SaveFoodChange",
+    "type": "object"
+   },
+   "TemplateLog": {
+    "additionalProperties": false,
+    "properties": {
+     "add": {
+      "items": {
+       "$ref": "#/components/schemas/Item"
+      },
+      "maxItems": 25,
+      "title": "Add",
+      "type": "array"
+     },
+     "changes": {
+      "items": {
+       "$ref": "#/components/schemas/ItemChange"
+      },
+      "maxItems": 25,
+      "title": "Changes",
+      "type": "array"
+     },
+     "date": {
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "title": "Date",
+      "type": "string"
+     },
+     "remove": {
+      "items": {
+       "maxLength": 64,
+       "minLength": 1,
+       "type": "string"
+      },
+      "maxItems": 25,
+      "title": "Remove",
+      "type": "array"
+     }
+    },
+    "required": [
+     "date"
+    ],
+    "title": "TemplateLog",
+    "type": "object"
+   },
+   "TemplatePatch": {
+    "additionalProperties": false,
+    "properties": {
+     "items": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/Item"
+        },
+        "maxItems": 25,
+        "minItems": 1,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Items"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     }
+    },
+    "title": "TemplatePatch",
+    "type": "object"
+   },
+   "UpdateEntryChange": {
+    "additionalProperties": false,
+    "properties": {
+     "date": {
+      "anyOf": [
+       {
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Date"
+     },
+     "if_match": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "If Match",
+      "type": "string"
+     },
+     "log_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Log Id",
+      "type": "string"
+     },
+     "macros": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/Macros"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "name": {
+      "anyOf": [
+       {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "portion": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Portion"
+     },
+     "servings": {
+      "anyOf": [
+       {
+        "exclusiveMinimum": 0.0,
+        "maximum": 100.0,
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Servings"
+     },
+     "type": {
+      "const": "update_entry",
+      "default": "update_entry",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "log_id",
+     "if_match"
+    ],
+    "title": "UpdateEntryChange",
+    "type": "object"
+   },
+   "UpdateTemplateChange": {
+    "additionalProperties": false,
+    "properties": {
+     "if_match": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "If Match",
+      "type": "string"
+     },
+     "items": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/Item"
+        },
+        "maxItems": 25,
+        "minItems": 1,
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Items"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "template_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Template Id",
+      "type": "string"
+     },
+     "type": {
+      "const": "update_template",
+      "default": "update_template",
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "template_id",
+     "if_match"
+    ],
+    "title": "UpdateTemplateChange",
+    "type": "object"
+   },
+   "ValidationError": {
+    "properties": {
+     "ctx": {
+      "title": "Context",
+      "type": "object"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "title": "Location",
+      "type": "array"
+     },
+     "msg": {
+      "title": "Message",
+      "type": "string"
+     },
+     "type": {
+      "title": "Error Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError",
+    "type": "object"
+   }
+  }
+ },
+ "info": {
+  "description": "Public API v1. Auth: `Authorization: Bearer nsk_live_...` (a personal access token) or an app login. Errors: RFC 9457 application/problem+json with `error_type`. Writes: `?preview=true` first, then the real write with an `Idempotency-Key` (POST) or `If-Match` (PATCH/DELETE).",
+  "title": "NutriScan API",
+  "version": "1"
+ },
+ "openapi": "3.1.0",
+ "paths": {
+  "/v1/batch": {
+   "post": {
+    "operationId": "batch_v1_batch_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "idempotency-key",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Batch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Batch"
+   }
+  },
+  "/v1/context": {
+   "get": {
+    "description": "The one call a conversation starts with.",
+    "operationId": "context_v1_context_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "date",
+      "required": true,
+      "schema": {
+       "title": "Date",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Include",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Context"
+   }
+  },
+  "/v1/days": {
+   "get": {
+    "operationId": "days_v1_days_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "from",
+      "required": true,
+      "schema": {
+       "title": "From",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "to",
+      "required": true,
+      "schema": {
+       "title": "To",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Include",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 31,
+       "maximum": 31,
+       "minimum": 1,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "cursor",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Cursor"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Days"
+   }
+  },
+  "/v1/entries": {
+   "post": {
+    "operationId": "post_entry_v1_entries_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "idempotency-key",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LogEntryChange"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Post Entry"
+   }
+  },
+  "/v1/entries/{log_id}": {
+   "delete": {
+    "operationId": "delete_entry_v1_entries__log_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "log_id",
+      "required": true,
+      "schema": {
+       "title": "Log Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete Entry"
+   },
+   "get": {
+    "operationId": "get_entry_v1_entries__log_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "log_id",
+      "required": true,
+      "schema": {
+       "title": "Log Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Entry"
+   },
+   "patch": {
+    "operationId": "patch_entry_v1_entries__log_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "log_id",
+      "required": true,
+      "schema": {
+       "title": "Log Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/EntryPatch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Patch Entry"
+   }
+  },
+  "/v1/goals": {
+   "get": {
+    "operationId": "get_goals_v1_goals_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Get Goals"
+   }
+  },
+  "/v1/me": {
+   "get": {
+    "operationId": "me_v1_me_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Me"
+   }
+  },
+  "/v1/meals": {
+   "post": {
+    "operationId": "post_meal_v1_meals_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "idempotency-key",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LogMealChange"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Post Meal"
+   }
+  },
+  "/v1/meals/{group_id}": {
+   "delete": {
+    "operationId": "delete_meal_v1_meals__group_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "group_id",
+      "required": true,
+      "schema": {
+       "title": "Group Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Delete Meal"
+   },
+   "get": {
+    "operationId": "get_meal_v1_meals__group_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "group_id",
+      "required": true,
+      "schema": {
+       "title": "Group Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Meal"
+   }
+  },
+  "/v1/templates": {
+   "post": {
+    "operationId": "post_template_v1_templates_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "idempotency-key",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CreateTemplateChange"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Post Template"
+   }
+  },
+  "/v1/templates/{template_id}": {
+   "get": {
+    "operationId": "get_template_v1_templates__template_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "template_id",
+      "required": true,
+      "schema": {
+       "title": "Template Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Template"
+   },
+   "patch": {
+    "operationId": "patch_template_v1_templates__template_id__patch",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "template_id",
+      "required": true,
+      "schema": {
+       "title": "Template Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "if-match",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "If-Match"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TemplatePatch"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Patch Template"
+   }
+  },
+  "/v1/templates/{template_id}/log": {
+   "post": {
+    "operationId": "post_template_log_v1_templates__template_id__log_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "template_id",
+      "required": true,
+      "schema": {
+       "title": "Template Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "preview",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Preview",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "idempotency-key",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Idempotency-Key"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TemplateLog"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Post Template Log"
+   }
+  }
+ }
+}

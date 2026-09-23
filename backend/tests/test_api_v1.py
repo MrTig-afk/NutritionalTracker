@@ -31,7 +31,7 @@ class V1Case(unittest.TestCase):
     """Fresh limits and caches per test; the DB is whatever FakeConn the test sets."""
 
     def setUp(self):
-        for d in (api_v1._token_cache, api_v1._calls, api_v1._daily, api_v1._usage):
+        for d in (api_v1._token_cache, api_v1._calls, api_v1._daily, api_v1._usage, api_v1._read_cache):
             d.clear()
         main._blocked.clear()
         p = mock.patch.object(api_v1, "_live_prefixes", None)
@@ -368,6 +368,18 @@ class Hygiene(V1Case):
     def test_account_wipe_covers_the_api_tables(self):
         for t in ("api_tokens", "api_token_usage", "api_idempotency", "api_audit"):
             self.assertIn(t, main._ACCOUNT_TABLES)
+
+    def test_published_openapi_matches_the_code(self):
+        import json
+        import os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "openapi-v1.json")
+        with open(path, encoding="utf-8") as f:
+            published = json.load(f)
+        self.assertEqual(published, json.loads(json.dumps(api_v1.openapi_v1())),
+                         "regenerate backend/openapi-v1.json from api_v1.openapi_v1()")
+        routes = sum(len(ops) for ops in published["paths"].values())
+        self.assertEqual(routes, 16)   # the PRD's route table
+        self.assertFalse([p for p in published["paths"] if not p.startswith("/v1/")])
 
     def test_no_internal_fields_in_me(self):
         self.assertEqual(set(self.get("/v1/me").json()), {"token_name", "scopes", "requests_left_today", "resets_at"})

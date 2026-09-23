@@ -572,7 +572,11 @@ async def abuse_guard(request: Request, call_next):
     if response.status_code == 404 and _spike(f"404:{ip}", 30, 300):   # /wp-admin, /.env walk, id guessing
         _blocked[ip] = time.time() + 600
         notify_admin("scan_probe", "Vulnerability scan blocked", f"{ip} hit 30 unknown paths in 5 min — blocked for 10 min.")
-    if request.method == "DELETE" and 200 <= response.status_code < 300 and request.url.path != "/push/unsubscribe":
+    if (request.method == "DELETE" and 200 <= response.status_code < 300 and request.url.path != "/push/unsubscribe"
+            # A /v1 preview deletes nothing. Only /v1 honours ?preview: an app route
+            # would really delete, so there the flag must not skip the count.
+            and not (request.url.path.startswith("/v1/")
+                     and request.query_params.get("preview", "").lower() in ("true", "1", "yes", "on", "t", "y"))):   # FastAPI's truthy spellings
         # Verify rather than trust the 2xx. The old unverified decode was
         # safe only while EVERY delete route authenticated; a future route
         # that returned 2xx without auth would have let a forged token freeze
@@ -1382,6 +1386,15 @@ def _purge_recycle_bin():
         conn.commit(); cur.close()
     except Exception as e:
         logger.warning(f"recycle_bin purge skipped: {e}")
+    finally:
+        if conn: release_db(conn)
+    conn = None
+    try:   # /v1 idempotency receipts (24 h) and audit rows (90 days); see api_v1.sql
+        conn = get_db("__system__"); cur = conn.cursor()
+        cur.execute("SELECT purge_api_rows()")
+        conn.commit(); cur.close()
+    except Exception as e:
+        logger.warning(f"api row purge skipped: {e}")
     finally:
         if conn: release_db(conn)
 

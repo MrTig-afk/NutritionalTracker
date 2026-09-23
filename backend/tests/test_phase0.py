@@ -29,9 +29,11 @@ class FakeCursor:
 
     def execute(self, sql, params=None):
         self.conn.executed.append((" ".join(sql.split()), params))
+        self.description = None
         for needle, rows in self.conn.script:
             if needle in sql:
-                self._rows = list(rows)
+                self._rows = list(rows(sql, params) if callable(rows) else rows)
+                self.description = [("col",)]
                 return
         self._rows = []
 
@@ -49,12 +51,13 @@ class FakeConn:
     def __init__(self, script=()):
         self.script = list(script)   # [(sql substring, rows)], first match wins
         self.executed = []
+        self.commits = 0
 
     def cursor(self):
         return FakeCursor(self)
 
     def commit(self):
-        pass
+        self.commits += 1
 
     def rollback(self):
         pass

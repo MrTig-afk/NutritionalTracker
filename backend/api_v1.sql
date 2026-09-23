@@ -89,13 +89,14 @@ BEGIN
   END LOOP;
 END $$;
 
--- The prefixes (first 12 characters, 3 of them random) of live tokens. The
--- server keeps them in memory so a guessed token that matches no prefix is
--- refused without a query: guesses must not be able to keep Neon awake.
+-- The prefixes (first 12 characters, 3 of them random) of every token, revoked
+-- and expired included, so those still get their precise 401. The server keeps
+-- them in memory so a guessed token that matches no prefix is refused without a
+-- query: guesses must not be able to keep Neon awake.
 CREATE OR REPLACE FUNCTION api_token_prefixes()
 RETURNS SETOF varchar
 LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
-  SELECT prefix FROM api_tokens WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > now());
+  SELECT DISTINCT prefix FROM api_tokens;
 $$;
 REVOKE ALL ON FUNCTION api_token_prefixes() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION api_token_prefixes() TO nutriscan_app;
@@ -121,15 +122,21 @@ END $$;
 REVOKE ALL ON FUNCTION resolve_api_token(text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION resolve_api_token(text, text) TO nutriscan_app;
 
--- Deleted API rows are kept 30 days like every other user table.
-DO $$
-DECLARE t text;
-BEGIN
-  FOREACH t IN ARRAY ARRAY['api_tokens', 'api_audit'] LOOP
-    EXECUTE format('DROP TRIGGER IF EXISTS recycle_bin_trg ON %I;', t);
-    EXECUTE format('CREATE TRIGGER recycle_bin_trg BEFORE DELETE ON %I FOR EACH ROW EXECUTE FUNCTION to_recycle_bin();', t);
-  END LOOP;
-END $$;
+-- A deleted token row is kept 30 days like every other user table. (Audit and
+-- idempotency rows expire by design, so they are not binned.)
+DROP TRIGGER IF EXISTS recycle_bin_trg ON api_audit;   -- an earlier draft of this file binned audit rows
+DROP TRIGGER IF EXISTS recycle_bin_trg ON api_tokens;
+CREATE TRIGGER recycle_bin_trg BEFORE DELETE ON api_tokens FOR EACH ROW EXECUTE FUNCTION to_recycle_bin();
+
+-- Retention, called daily by the server. Cross-user, so it runs with owner
+-- rights; the windows are fixed here so the app role cannot shorten them.
+CREATE OR REPLACE FUNCTION purge_api_rows() RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  DELETE FROM api_idempotency WHERE created_at < now() - interval '24 hours';
+  DELETE FROM api_audit WHERE created_at < now() - interval '90 days';
+$$;
+REVOKE ALL ON FUNCTION purge_api_rows() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION purge_api_rows() TO nutriscan_app;
 
 -- Verify:
 --   SELECT tablename, policyname FROM pg_policies WHERE tablename LIKE 'api_%';
