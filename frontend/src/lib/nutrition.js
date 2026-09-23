@@ -71,6 +71,11 @@ export function formatDisplayDate(isoDate) {
   return `${String(day).padStart(2, "0")}-${String(month).padStart(2, "0")}-${year} (${dayName})`;
 }
 
+export function todayLocal() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function addDays(isoDate, n) {
   const [year, month, day] = isoDate.split("-").map(Number);
   const d = new Date(year, month - 1, day + n);

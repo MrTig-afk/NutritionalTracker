@@ -33,7 +33,9 @@ export default function EditLogModal({ entry, onClose, onSaved }) {
 
   const buildNutrition = () => {
     if (mode === "serving") return entry.nutrition;
-    return { per_serving: { size: `${gramsNum}g`, calories: Math.round(cal), fat: `${fat.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, protein: `${prot.toFixed(1)}g`, fibre: `${getVal("fibre").toFixed(1)}g` } };
+    // Keep the hidden `_` tags (_meal_group, _meal_label, _source, _kcal...) or the item drops out of its meal.
+    const tags = Object.fromEntries(Object.entries(entry.nutrition || {}).filter(([k]) => k.startsWith("_")));
+    return { ...tags, per_serving: { size: `${gramsNum}g`, calories: Math.round(cal), fat: `${fat.toFixed(1)}g`, carbohydrates: `${carb.toFixed(1)}g`, protein: `${prot.toFixed(1)}g`, fibre: `${getVal("fibre").toFixed(1)}g` } };
   };
 
   const save = async () => {

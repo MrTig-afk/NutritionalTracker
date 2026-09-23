@@ -1,4 +1,6 @@
 [
+  { "v": 21, "text": "Editing a meal ingredient by weight keeps it inside its meal instead of splitting it out" },
+  { "v": 21, "text": "The AI assistant sees today's log first thing in the morning, not yesterday's" },
   { "v": 20, "text": "Scan only accepts real JPEG, PNG or WebP photos now; anything else is refused with a clear message instead of a failed scan" },
   { "v": 20, "text": "Rapid-fire scanning is rate limited for a minute; the daily scan limit is unchanged" },
   { "v": 19, "text": "Deleting a folder, meal template or log entry now asks you to confirm first - no more accidental one-tap wipes" },
