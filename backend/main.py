@@ -60,6 +60,9 @@ MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 # 1 MB of multipart overhead. The server never reads past Content-Length.
 _SCAN_BODY_CAP = {"/analyze-label": (MAX_UPLOAD_MB + 1) * 1024 * 1024,
                   "/analyze-labels": (10 * MAX_UPLOAD_MB + 1) * 1024 * 1024}
+APP_BODY_CAP = 64 * 1024   # every other app write (a real nutrition object is under 1 KB); /v1 has its own 64 KB cap
+# /chat carries the whole conversation (the frontend sends every message), so a long session needs room.
+_BODY_CAP = {**_SCAN_BODY_CAP, "/chat": 256 * 1024}
 MAX_DECODED_PIXELS    = 30_000_000  # decoded-pixel cap (~90 MB RGB): MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
 ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}  # what this Pillow decodes; the PWA sends canvas JPEGs (HEIC needs pillow-heif)
 SCAN_BURST_USER = 8   # scan requests per user per minute, before the paid Gemini call (the PWA retries a flaky call up to 3x per tap)
@@ -573,17 +576,20 @@ async def abuse_guard(request: Request, call_next):
     if _spike(f"req:{ip}", 300, 60):                       # app-level flood / scraping
         _blocked[ip] = time.time() + 600
         notify_admin("ip_flood", "IP flood blocked", f"{ip} sent 300+ requests in a minute — blocked for 10 min.")
-    cap = _SCAN_BODY_CAP.get(request.url.path) if request.method == "POST" else None
-    # Refuse on the declared size, before the multipart body is read or spooled (after the
-    # flood counter, so probing the limit still counts). No length (a proxy may re-chunk):
-    # fall through to the per-file checks in the route.
+    writes = request.method in ("POST", "PUT", "PATCH") and not request.url.path.startswith("/v1/")
+    cap = _BODY_CAP.get(request.url.path, APP_BODY_CAP) if writes else None
+    # Refuse on the declared size, before the body is read or spooled (after the flood
+    # counter, so probing the limit still counts). No length (a proxy may re-chunk): fall
+    # through to the route's own checks.
     declared = request.headers.get("content-length", "") if cap else ""
     if declared.isdigit() and int(declared) > cap:
         if _spike("oversize", 10, 600):
-            notify_admin("oversize", "Oversized uploads",
-                         "Over 10 too-large image uploads in 10 minutes — someone may be probing the upload limit.")
-        return JSONResponse({"detail": {"error_type": "file_too_large", "retryable": False,
-                                        "message": f"Upload too large (max {MAX_UPLOAD_MB} MB per image)."}}, status_code=413)
+            notify_admin("oversize", "Oversized requests",
+                         "Over 10 too-large uploads or requests in 10 minutes — someone may be probing the size limits.")
+        scan = request.url.path in _SCAN_BODY_CAP
+        return JSONResponse({"detail": {"error_type": "file_too_large" if scan else "payload_too_large", "retryable": False,
+                                        "message": f"Upload too large (max {MAX_UPLOAD_MB} MB per image)." if scan
+                                        else "Request too large."}}, status_code=413)
     response = await call_next(request)
     if response.status_code == 404 and _spike(f"404:{ip}", 30, 300):   # /wp-admin, /.env walk, id guessing
         _blocked[ip] = time.time() + 600

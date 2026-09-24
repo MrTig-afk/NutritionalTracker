@@ -27,3 +27,9 @@ ALERTS = []                           # (title, message), if a test ever wants t
 REAL_ADMIN_PUSH = main._admin_push    # test_phase0 tests the real one
 main._admin_push = lambda title, message: ALERTS.append((title, message))
 main.send_push_to_user = lambda user_id, title, message: ALERTS.append((title, message))
+
+# No real model calls either: importing main builds live Groq/Gemini clients from
+# backend/.env, and a /chat test without its own stub once reached api.groq.com.
+# Tests that need a model patch in a stand-in, as they already do.
+main.groq_client = None
+main.gemini_client = None
