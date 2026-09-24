@@ -589,10 +589,7 @@ async def abuse_guard(request: Request, call_next):
         if _spike("oversize", 10, 600):
             notify_admin("oversize", "Oversized requests",
                          "Over 10 too-large uploads or requests in 10 minutes — someone may be probing the size limits.")
-        scan = request.url.path in _SCAN_BODY_CAP
-        return JSONResponse({"detail": {"error_type": "file_too_large" if scan else "payload_too_large", "retryable": False,
-                                        "message": f"Upload too large (max {MAX_UPLOAD_MB} MB per image)." if scan
-                                        else "Request too large."}}, status_code=413)
+        return JSONResponse({"detail": _too_large(request.url.path)}, status_code=413)
     response = await call_next(request)
     if response.status_code == 404 and _spike(f"404:{ip}", 30, 300):   # /wp-admin, /.env walk, id guessing
         _blocked[ip] = time.time() + 600
@@ -613,6 +610,40 @@ async def abuse_guard(request: Request, call_next):
         if sub and sub not in _frozen and _spike(f"del:{sub}", 60, 600):
             freeze_user(sub, "60 deletes in 10 minutes (possible hijacked session)")
     return response
+
+def _too_large(path: str) -> dict:
+    if path in _SCAN_BODY_CAP:
+        return {"error_type": "file_too_large", "retryable": False, "message": f"Upload too large (max {MAX_UPLOAD_MB} MB per image)."}
+    return {"error_type": "payload_too_large", "retryable": False, "message": "Request too large."}
+
+
+class _BodyStreamCap:
+    """Counts request-body bytes as they arrive, so a chunked or length-less body is
+    refused past its cap too (abuse_guard's early check only sees Content-Length).
+    Raised from inside the read, so reading stops at the cap and the route never runs.
+    FastAPI reports any failed body read as 400 "error parsing the body"; only such
+    clients see that - a declared oversize gets abuse_guard's clean 413 first."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if not (scope["type"] == "http" and scope["method"] in ("POST", "PUT", "PATCH")
+                and not scope["path"].startswith("/v1/")):   # /v1 has its own cap
+            return await self.app(scope, receive, send)
+        cap, seen = _BODY_CAP.get(scope["path"], APP_BODY_CAP), 0
+
+        async def counted():
+            nonlocal seen
+            message = await receive()
+            seen += len(message.get("body", b""))
+            if seen > cap:
+                raise HTTPException(status_code=413, detail=_too_large(scope["path"]))
+            return message
+        await self.app(scope, counted, send)
+
+
+app.add_middleware(_BodyStreamCap)
+
 
 class _AppCORS(CORSMiddleware):
     """CORS for the app's own origins. /v1 is for servers and scripts, not web
@@ -1790,7 +1821,6 @@ async def analyze_label(
 
     user_id, email = get_user_info(authorization)
     _scan_burst_check(user_id, _client_ip(request))
-    check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)
     image_id  = str(uuid.uuid4())
     if (file.size or 0) > MAX_UPLOAD_BYTES or len(raw_bytes := await file.read()) > MAX_UPLOAD_BYTES:
         if _spike("oversize", 10, 600):
@@ -1802,6 +1832,7 @@ async def analyze_label(
         })
 
     processed_bytes = validate_and_decode_image(raw_bytes)   # 415/422 on anything that is not a clean image
+    check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)   # a rejected upload uses no scan
     raw_url, processed_url = "", await upload_processed(processed_bytes, user_id, image_id)
 
     image_part = types.Part.from_bytes(data=processed_bytes, mime_type="image/jpeg")
@@ -1863,7 +1894,6 @@ async def analyze_labels(
 
     user_id, email = get_user_info(authorization)
     _scan_burst_check(user_id, _client_ip(request))
-    check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)
 
     processed_images = []
     image_ids        = []
@@ -1880,6 +1910,7 @@ async def analyze_labels(
             })
         processed_images.append(validate_and_decode_image(raw_bytes))  # every file is validated before anything is stored or sent
         image_ids.append(str(uuid.uuid4()))
+    check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)   # only once every file passed
 
     upload_results = await asyncio.gather(*[
         upload_processed(pb, user_id, iid) for pb, iid in zip(processed_images, image_ids)

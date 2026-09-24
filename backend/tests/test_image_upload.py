@@ -263,6 +263,15 @@ class Routes(unittest.TestCase):
                 self.post(big)
         self.assertIn("oversize", alerts)
 
+    def test_a_rejected_upload_uses_no_scan(self):
+        counted = []
+        main.check_and_track = lambda *a, **k: counted.append(1)
+        self.assertEqual(self.post(HTML_NAMED_JPG).status_code, 415)
+        r = self.client.post("/analyze-labels", headers={"Authorization": "Bearer x"},
+                             files=[("files", ("a.jpg", jpeg_bytes(), "image/jpeg")), ("files", ("b.jpg", HTML_NAMED_JPG, "image/jpeg"))])
+        self.assertEqual(r.status_code, 415)
+        self.assertEqual(counted, [])   # the daily quota is only charged once every file passed
+
     def test_one_oversize_file_in_a_batch_is_413(self):
         big = b"\xff" * (main.MAX_UPLOAD_MB * 1024 * 1024 + 1)   # under the batch cap, over the per-image cap
         r = self.client.post("/analyze-labels", headers={"Authorization": "Bearer x"},
