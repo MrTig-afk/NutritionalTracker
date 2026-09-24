@@ -59,6 +59,43 @@ def entry_macros(nutrition_raw, servings) -> dict:
     return out
 
 
+# "1,500" as well as "1500.5"; never starts mid-number, so "15,00" matches nothing rather than "00"
+_NUM = r"(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+_KCAL_NUM = re.compile(_NUM + r"\s*(?:kcal|kilocalories?)", re.I)
+_KJ_NUM = re.compile(_NUM + r"\s*(?:kj|kilojoules?)", re.I)
+
+
+def settle_kcal(nutrition, legacy_guess: bool) -> dict:
+    """Store-time settlement: a copy whose calories are kcal, tagged `_kcal: true`.
+
+    A value with a unit uses the number next to that unit: kcal if present,
+    else kJ converted ("358 kcal / 1500 kJ" is 358, "1500 kJ" is 358.5). `legacy_guess` is for
+    untagged data already in the database (template items copied into the log,
+    the one-time migration): there a bare number over 900 is read as kJ, exactly
+    as entry_macros() shows it today. A number from a client is taken as kcal.
+    """
+    n = load_nutrition(nutrition)
+    if n.get("_kcal") is True:
+        return n
+    out = dict(n)
+    sections = [k for k in ("per_serving", "per_100g") if isinstance(out.get(k), dict)] or [None]
+    for k in sections:
+        sec = out if k is None else dict(out[k])
+        v = sec.get("calories")
+        s = v if isinstance(v, str) else ""
+        kcal, kj = _KCAL_NUM.search(s), _KJ_NUM.search(s)
+        if kcal:
+            sec["calories"] = float(kcal.group(1).replace(",", ""))
+        elif kj:
+            sec["calories"] = round(float(kj.group(1).replace(",", "")) / KJ_PER_KCAL, 1)
+        elif legacy_guess and _parse_num(v) > KJ_HEURISTIC_THRESHOLD:
+            sec["calories"] = round(_parse_num(v) / KJ_PER_KCAL, 1)
+        if k:
+            out[k] = sec
+    out["_kcal"] = True
+    return out
+
+
 def sum_macros(rows) -> dict:
     """rows: iterable of (servings, nutrition_raw). Unrounded totals."""
     t = dict.fromkeys(MACRO_KEYS, 0.0)
@@ -79,4 +116,13 @@ if __name__ == "__main__":
     assert round(entry_macros({"per_serving": {"calories": 950}}, 1)["calories"], 1) == 227.1
     # the heuristic looks at the per-serving value, not the multiplied one
     assert entry_macros({"per_serving": {"calories": 500}}, 2)["calories"] == 1000
+    # store-time settlement: typed 950 stays kcal; a legacy untagged 950 becomes 227.1; "1500 kJ" always converts
+    assert settle_kcal({"per_serving": {"calories": 950}}, False) == {"per_serving": {"calories": 950}, "_kcal": True}
+    assert settle_kcal({"per_serving": {"calories": 950}}, True)["per_serving"]["calories"] == 227.1
+    assert settle_kcal({"per_serving": {"calories": "1500 kJ"}}, False)["per_serving"]["calories"] == 358.5
+    assert settle_kcal({"per_serving": {"calories": "358 kcal / 1500 kJ"}}, False)["per_serving"]["calories"] == 358.0
+    assert settle_kcal({"per_serving": {"calories": "1500kJ (358 kcal)"}}, True)["per_serving"]["calories"] == 358.0
+    assert settle_kcal({"per_serving": {"calories": "1,500 kJ"}}, False)["per_serving"]["calories"] == 358.5
+    assert settle_kcal({"per_serving": {"calories": "1,050 kcal"}}, False)["per_serving"]["calories"] == 1050.0
+    assert entry_macros(settle_kcal({"per_serving": {"calories": 950}}, True), 1)["calories"] == 227.1
     print("ok")
