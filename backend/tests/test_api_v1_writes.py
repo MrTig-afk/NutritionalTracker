@@ -181,6 +181,14 @@ class Writes(V1Case):
         self.assertEqual((n["_meal_group"], n["_meal_label"], n["_kcal"]), ("g1", "Meal 1", True))
         self.assertEqual(out["diff"][0]["kcal_change"], 65.0)
 
+    def test_weak_etag_from_the_proxy_still_matches(self):
+        row = self.entry_row()
+        self.conn.script.insert(1, ("FROM daily_log WHERE log_id", [row]))
+        etag = "W/" + api_v1.etag_of(*row[1:])   # what Cloudflare hands back after compressing
+        r = self.client.patch("/v1/entries/l1", headers={"Authorization": f"Bearer {TOKEN}", "If-Match": etag},
+                              json={"servings": 2})
+        self.assertEqual(r.status_code, 200, r.text)
+
     def test_new_portion_needs_new_macros(self):
         row = self.entry_row()
         self.conn.script.insert(1, ("FROM daily_log WHERE log_id", [row]))
