@@ -59,6 +59,34 @@ def entry_macros(nutrition_raw, servings) -> dict:
     return out
 
 
+_KJ_UNIT = re.compile(r"kj|kilojoule", re.I)
+
+
+def settle_kcal(nutrition, legacy_guess: bool) -> dict:
+    """Store-time settlement: a copy whose calories are kcal, tagged `_kcal: true`.
+
+    A value labelled kJ ("1500 kJ") is always converted. `legacy_guess` is for
+    untagged data already in the database (template items copied into the log,
+    the one-time migration): there a bare number over 900 is read as kJ, exactly
+    as entry_macros() shows it today. A number from a client is taken as kcal.
+    """
+    n = load_nutrition(nutrition)
+    if n.get("_kcal") is True:
+        return n
+    out = dict(n)
+    sections = [k for k in ("per_serving", "per_100g") if isinstance(out.get(k), dict)] or [None]
+    for k in sections:
+        sec = out if k is None else dict(out[k])
+        v = sec.get("calories")
+        num = _parse_num(v)
+        if (isinstance(v, str) and _KJ_UNIT.search(v)) or (legacy_guess and num > KJ_HEURISTIC_THRESHOLD):
+            sec["calories"] = round(num / KJ_PER_KCAL, 1)
+        if k:
+            out[k] = sec
+    out["_kcal"] = True
+    return out
+
+
 def sum_macros(rows) -> dict:
     """rows: iterable of (servings, nutrition_raw). Unrounded totals."""
     t = dict.fromkeys(MACRO_KEYS, 0.0)
@@ -79,4 +107,9 @@ if __name__ == "__main__":
     assert round(entry_macros({"per_serving": {"calories": 950}}, 1)["calories"], 1) == 227.1
     # the heuristic looks at the per-serving value, not the multiplied one
     assert entry_macros({"per_serving": {"calories": 500}}, 2)["calories"] == 1000
+    # store-time settlement: typed 950 stays kcal; a legacy untagged 950 becomes 227.1; "1500 kJ" always converts
+    assert settle_kcal({"per_serving": {"calories": 950}}, False) == {"per_serving": {"calories": 950}, "_kcal": True}
+    assert settle_kcal({"per_serving": {"calories": 950}}, True)["per_serving"]["calories"] == 227.1
+    assert settle_kcal({"per_serving": {"calories": "1500 kJ"}}, False)["per_serving"]["calories"] == 358.5
+    assert entry_macros(settle_kcal({"per_serving": {"calories": 950}}, True), 1)["calories"] == 227.1
     print("ok")
