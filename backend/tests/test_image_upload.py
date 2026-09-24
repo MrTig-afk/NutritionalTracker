@@ -1,4 +1,4 @@
-"""Upload hardening: every byte that reaches S3 or Gemini went through
+"""Upload hardening: every byte that reaches Gemini went through
 validate_and_decode_image, and every model answer through validate_label_json.
 
 Run:  venv/Scripts/python -m unittest backend.tests.test_image_upload -v
@@ -217,16 +217,15 @@ class LabelSchema(unittest.TestCase):
 class Routes(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(main.app)
-        self._saved = (main.get_user_info, main.check_and_track, main.gemini_client, main.s3_client,
+        self._saved = (main.get_user_info, main.check_and_track, main.gemini_client,
                        main.call_gemini_with_retry)
         main.get_user_info = lambda auth=None: ("user-1", "u@example.com")
         main.check_and_track = lambda *a, **k: None
         main.gemini_client = object()
-        main.s3_client = None
         main._scan_burst_log.clear(); main._blocked.clear()
 
     def tearDown(self):
-        (main.get_user_info, main.check_and_track, main.gemini_client, main.s3_client,
+        (main.get_user_info, main.check_and_track, main.gemini_client,
          main.call_gemini_with_retry) = self._saved
         main._scan_burst_log.clear(); main._blocked.clear()
 
