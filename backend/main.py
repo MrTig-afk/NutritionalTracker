@@ -25,6 +25,9 @@ from dotenv import load_dotenv
 from typing import List, Optional
 import logging
 from PIL import Image
+from pillow_heif import register_heif_opener
+
+register_heif_opener()   # iPhone HEIC photos: browsers that cannot decode them upload the original file
 from pydantic import BaseModel, Field
 import re
 import threading
@@ -56,7 +59,7 @@ FALLBACK_MODEL = "gemini-3.6-flash"  # gemini-2.0-flash was retired (404); this 
 MAX_IMAGE_PX   = 1024
 MAX_UPLOAD_MB  = 15  # reject oversized uploads before they hit memory/Gemini
 MAX_DECODED_PIXELS    = 30_000_000  # decoded-pixel cap (~90 MB RGB): MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
-ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}  # what this Pillow decodes; the PWA sends canvas JPEGs (HEIC needs pillow-heif)
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP", "HEIF"}  # the PWA sends canvas JPEGs; HEIF arrives when the browser cannot decode it
 SCAN_BURST_USER = 8   # scan requests per user per minute, before the paid Gemini call (the PWA retries a flaky call up to 3x per tap)
 SCAN_BURST_IP   = 20  # scan requests per IP per minute -> the abuse_guard 10-minute penalty box
 Image.MAX_IMAGE_PIXELS = MAX_DECODED_PIXELS  # Pillow's own hard stop (DecompressionBombError above 2x)
@@ -1466,6 +1469,9 @@ def startup():
 # STORAGE LAYER
 # =============================================================================
 
+_HEIF_BRANDS = {b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx", b"mif1", b"msf1"}   # the ISO BMFF brands HEIC/HEIF photos carry
+
+
 def _sniff_image_format(b: bytes):
     """Real container from magic bytes; the client's content_type is never consulted."""
     if b[:3] == b"\xff\xd8\xff":
@@ -1474,6 +1480,12 @@ def _sniff_image_format(b: bytes):
         return "PNG"
     if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
         return "WEBP"
+    if b[4:8] == b"ftyp":
+        # major brand, then the compatible brands after the 4-byte minor version (some
+        # Samsung/camera files name heic only as compatible); the box is short, cap the scan
+        end = min(int.from_bytes(b[:4], "big"), len(b), 64)
+        if {b[8:12], *(b[i:i + 4] for i in range(16, end - 3, 4))} & _HEIF_BRANDS:
+            return "HEIF"
     return None
 
 
@@ -1490,7 +1502,7 @@ def validate_and_decode_image(image_bytes: bytes) -> bytes:
     fmt = _sniff_image_format(image_bytes)
     if fmt not in ALLOWED_IMAGE_FORMATS:
         raise _reject_image(415, "unsupported_image",
-                            "That file is not a supported image. Please upload a JPEG, PNG or WebP photo of the label.")
+                            "That file is not a supported image. Please upload a JPEG, PNG, WebP or HEIC photo of the label.")
     try:
         probe = Image.open(io.BytesIO(image_bytes))
         pillow_fmt = "JPEG" if probe.format == "MPO" else probe.format  # iPhone multi-picture JPEGs open as MPO
