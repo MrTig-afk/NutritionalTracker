@@ -83,8 +83,8 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS user_isolation ON %I;', t);
     EXECUTE format($f$
       CREATE POLICY user_isolation ON %I
-        USING      (user_id = current_setting('app.user_id', true))
-        WITH CHECK (user_id = current_setting('app.user_id', true));
+        USING      (user_id = NULLIF(current_setting('app.user_id', true), ''))
+        WITH CHECK (user_id = NULLIF(current_setting('app.user_id', true), ''));
     $f$, t);
   END LOOP;
 END $$;

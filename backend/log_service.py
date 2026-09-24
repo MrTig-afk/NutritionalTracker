@@ -37,11 +37,7 @@ def load_nutrition(nutrition_raw) -> dict:
 
 def per_serving_section(n: dict) -> dict:
     """per_serving if filled, else per_100g, else the object itself."""
-    if n.get("per_serving"):
-        return n["per_serving"]
-    if n.get("per_100g"):
-        return n["per_100g"]
-    return n
+    return n.get("per_serving") or n.get("per_100g") or n
 
 
 def entry_macros(nutrition_raw, servings) -> dict:

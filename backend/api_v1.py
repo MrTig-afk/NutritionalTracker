@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
 
 import log_service
 
@@ -228,7 +228,7 @@ def _zulu(dt: datetime) -> str:
 def take_request(caller: Caller, is_write: bool, now=None) -> dict:
     """Count one request against the caller's limits, or raise 429.
     Per user across all tokens; in memory, so checking never touches Neon.
-    ponytail: in-memory like every other guard here; one Render process."""
+    In memory like every other guard here, which holds while Render runs one process."""
     now = now or time.time()
     today = melbourne_today(now)
     reset = next_melbourne_midnight(now)
@@ -346,7 +346,7 @@ def me(caller: Caller = Depends(need())):
 
 
 # ---------------------------------------------------------------- reads (Phase 2)
-# Appended to api_v1.py. Everything here filters by caller.user_id AND runs
+# Everything here filters by caller.user_id AND runs
 # with app.user_id bound to it (RLS), so another user's id is a plain 404.
 
 MAX_RANGE_DAYS, MAX_ENTRY_DAYS, RESPONSE_CAP = 31, 7, 32 * 1024
@@ -369,7 +369,7 @@ def invalidate(user_id: Optional[str]):
 
 
 def cached_read(caller: Caller, key: str, build):
-    """The body for `key`, built at most once per write. ponytail: in-memory, one Render process."""
+    """The body for `key`, built at most once per write. In memory: fine while Render runs one process."""
     with _read_lock:
         hit = _read_cache[caller.user_id].get(key)
         gen = _read_gen[caller.user_id]
@@ -409,15 +409,12 @@ def compact_entry(log_id, name, servings, nutrition, entry_date) -> dict:
             "etag": etag_of(name, servings, n, str(entry_date))}
 
 
-_UNITS_MG = re.compile(r"mg", re.I)
-
-
 def _full_macros(n: dict, servings) -> dict:
     """The detail view: the five main macros plus sugars, saturated fat and sodium."""
     ps = log_service.per_serving_section(n)
     s = float(servings or 0)
     sodium = ps.get("sodium")
-    sodium_mg = log_service._parse_num(sodium) * (1000 if isinstance(sodium, str) and not _UNITS_MG.search(sodium) else 1)
+    sodium_mg = log_service._parse_num(sodium) * (1000 if isinstance(sodium, str) and "mg" not in sodium.lower() else 1)
     return {**_macros5(log_service.entry_macros(n, s)),
             "sugars_g": round(log_service._parse_num(ps.get("sugars")) * s, 1),
             "sat_fat_g": round(log_service._parse_num(ps.get("saturated_fat")) * s, 1),
@@ -430,10 +427,16 @@ def _rows(caller: Caller, sql: str, params: list):
         return cur.fetchall()
 
 
-def _goals(caller: Caller) -> dict:
-    r = _rows(caller, "SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = %s", [caller.user_id])
-    g = r[0] if r else (2000.0, 150.0, 250.0, 65.0, 30.0)   # the app's defaults for a user who never set goals
+GOALS_SQL = "SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = %s"
+
+
+def goals_from(rows) -> dict:
+    g = rows[0] if rows else (2000.0, 150.0, 250.0, 65.0, 30.0)   # the app's defaults for a user who never set goals
     return {"calories": g[0], "protein_g": g[1], "carbs_g": g[2], "fat_g": g[3], "fibre_g": g[4] or 0.0}
+
+
+def _goals(caller: Caller) -> dict:
+    return goals_from(_rows(caller, GOALS_SQL, [caller.user_id]))
 
 
 def _meals(entries_rows) -> tuple:
@@ -747,24 +750,30 @@ class ItemChange(Strict):
     macros: Optional[Macros] = None
 
 
-class LogTemplateChange(Strict):
-    type: Literal["log_template"] = "log_template"
-    template_id: Id
+class TemplateLog(Strict):
     date: LogDate
     changes: list[ItemChange] = Field(default_factory=list, max_length=MAX_ITEMS)
     add: list[Item] = Field(default_factory=list, max_length=MAX_ITEMS)
     remove: list[Id] = Field(default_factory=list, max_length=MAX_ITEMS)
 
 
-class UpdateEntryChange(Strict):
-    type: Literal["update_entry"] = "update_entry"
-    log_id: Id
-    if_match: ETag
+class LogTemplateChange(TemplateLog):
+    type: Literal["log_template"] = "log_template"
+    template_id: Id
+
+
+class EntryPatch(Strict):
     name: Optional[Name] = None
     portion: Optional[Portion] = None
     servings: Optional[Servings] = None
     macros: Optional[Macros] = None
     date: Optional[LogDate] = None
+
+
+class UpdateEntryChange(EntryPatch):
+    type: Literal["update_entry"] = "update_entry"
+    log_id: Id
+    if_match: ETag
 
 
 class DeleteEntryChange(Strict):
@@ -785,12 +794,15 @@ class CreateTemplateChange(Strict):
     items: list[Item] = Field(min_length=1, max_length=MAX_ITEMS)
 
 
-class UpdateTemplateChange(Strict):
+class TemplatePatch(Strict):
+    name: Optional[Label] = None
+    items: Optional[list[Item]] = Field(None, min_length=1, max_length=MAX_ITEMS)
+
+
+class UpdateTemplateChange(TemplatePatch):
     type: Literal["update_template"] = "update_template"
     template_id: Id
     if_match: ETag
-    name: Optional[Label] = None
-    items: Optional[list[Item]] = Field(None, min_length=1, max_length=MAX_ITEMS)
 
 
 class SaveFoodChange(Strict):
@@ -1107,9 +1119,7 @@ class _Run:
     def day_summary(self) -> dict:
         if not self.dates:
             return {}
-        goals = self.q("SELECT calories, protein, carbs, fat, fibre FROM user_goals WHERE user_id = %s", [self.uid])
-        g = goals[0] if goals else (2000.0, 150.0, 250.0, 65.0, 30.0)
-        goal = {"calories": g[0], "protein_g": g[1], "carbs_g": g[2], "fat_g": g[3], "fibre_g": g[4] or 0.0}
+        goal = goals_from(self.q(GOALS_SQL, [self.uid]))
         rows = self.q("SELECT date, servings, nutrition FROM daily_log WHERE user_id = %s AND date = ANY(%s)",
                       [self.uid, sorted(self.dates)])
         out = {}
@@ -1246,24 +1256,12 @@ def post_template(body: CreateTemplateChange, request: Request, preview: bool = 
     return _created(status, out, "template", "template_id", "templates")
 
 
-class TemplatePatch(Strict):
-    name: Optional[Label] = None
-    items: Optional[list[Item]] = Field(None, min_length=1, max_length=MAX_ITEMS)
-
-
 @router.patch("/templates/{template_id}")
 def patch_template(template_id: str, body: TemplatePatch, request: Request, preview: bool = PreviewQ,
                    if_match: Optional[str] = Header(None), caller: Caller = Depends(WRITE)):
     change = _change(UpdateTemplateChange, template_id=template_id, if_match=_if_match(if_match),
                      **body.model_dump(exclude_none=True))
     return _single(*run_changes(request, caller, [change], preview, None))
-
-
-class TemplateLog(Strict):
-    date: LogDate
-    changes: list[ItemChange] = Field(default_factory=list, max_length=MAX_ITEMS)
-    add: list[Item] = Field(default_factory=list, max_length=MAX_ITEMS)
-    remove: list[Id] = Field(default_factory=list, max_length=MAX_ITEMS)
 
 
 @router.post("/templates/{template_id}/log", status_code=201)
@@ -1286,14 +1284,6 @@ def post_entry(body: LogEntryChange, request: Request, preview: bool = PreviewQ,
                idempotency_key: Optional[str] = Header(None), caller: Caller = Depends(WRITE)):
     status, out = run_changes(request, caller, [body], preview, idempotency_key, 201)
     return _created(status, out, "entry", "log_id", "entries")
-
-
-class EntryPatch(Strict):
-    name: Optional[Name] = None
-    portion: Optional[Portion] = None
-    servings: Optional[Servings] = None
-    macros: Optional[Macros] = None
-    date: Optional[LogDate] = None
 
 
 @router.patch("/entries/{log_id}")
@@ -1329,19 +1319,10 @@ def openapi_v1() -> dict:
 
 
 # ---------------------------------------------------------------- token management (app login only)
-class TokenCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=40)
+class TokenCreate(Strict):
+    name: Label
     scopes: list[Literal[SCOPES]] = Field(min_length=1, max_length=len(SCOPES))
     expires: Literal[tuple(EXPIRY_DAYS)]
-
-    @field_validator("name")
-    @classmethod
-    def _clean_name(cls, v):
-        v = _CONTROL.sub("", v).strip()
-        if not v:
-            raise ValueError("name is empty")
-        return v
 
 
 def _admin_login(authorization: Optional[str]) -> str:

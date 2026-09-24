@@ -206,7 +206,7 @@ def _allow_provider_check(ip: str) -> bool:
 
 # ---------- SCAN BURST LIMITER (per user + per IP, before the paid call) ----------
 # The daily quota lives in Postgres; this is the short-window cap in front of it.
-# ponytail: in-memory like every other guard here, one Render process.
+# In memory like every other guard here, which holds while Render runs one process.
 _scan_burst_log: dict = defaultdict(list)  # "u:<user>" / "ip:<ip>" -> [timestamps]
 
 def _scan_burst_check(user_id: str, ip: str):
