@@ -22,7 +22,8 @@ from http import HTTPStatus
 from typing import Annotated, Literal, Optional, Union
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError
@@ -202,7 +203,7 @@ def resolve_caller(request: Request) -> Caller:
         if row["user_id"] in m._frozen:
             raise Problem(423, "account_locked", "This account is locked after unusual activity.")
         return Caller(row["user_id"], row["token_id"], row["name"], row["scopes"])
-    return Caller(m.get_user_id(auth))   # app login: every scope; raises 401/423 itself
+    return Caller(m.get_user_id(auth, allow_client=True))   # app login: every scope; raises 401/423 itself
 
 
 # ---------------------------------------------------------------- limits
@@ -306,7 +307,8 @@ async def v1_middleware(request: Request, call_next):
     """Body cap, JSON-only, and the headers every /v1 answer carries."""
     if not request.url.path.startswith("/v1/"):
         response = await call_next(request)
-        if request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400:
+        if (request.method not in ("GET", "HEAD", "OPTIONS") and response.status_code < 400
+                and request.url.path != "/mcp"):   # an MCP POST is a read: keep the cache get_context filled
             # a write through the app: the /v1 read cache must not serve the old numbers
             claims = m.claims_if_valid(request.headers.get("authorization", ""))
             invalidate(claims and claims.get("sub"))
@@ -1418,3 +1420,134 @@ def revoke_all(user_id: str):
     except Exception as e:
         m.logger.warning(f"token revoke on freeze failed for {user_id[:8]}: {e}")
     forget_token(user_id=user_id)   # after the commit, or a request in between re-caches the live row
+
+
+# ---------------------------------------------------------------- /mcp: a minimal remote MCP server for claude.ai
+# On its own router, off `router`, so openapi_v1() (router.routes only) is unaffected. Phase 5 test scope: one
+# read-only tool. Revocation on the next call is NOT handled here (research implication 5): a connector token
+# stays valid until exp (up to 1h) once minted, because nothing looks up the Supabase session.
+MCP_URL = "https://nutritionaltracker.onrender.com/mcp"          # PRM resource: must equal the pasted URL exactly
+MCP_PRM_URL = "https://nutritionaltracker.onrender.com/.well-known/oauth-protected-resource/mcp"
+MCP_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")         # first = the one we offer
+MCP_ORIGINS = ("https://claude.ai", "https://claude.com")
+CONNECTOR_SCOPES = SCOPES   # PRD: one access level, the six "Read + log" scopes; named so it is never app-login by accident
+
+MCP_TOOL = {
+    "name": "get_context", "title": "Read a day's food log",
+    "description": "The user's NutriScan food log for one day: entries grouped by meal, the day's totals, goals and "
+                   "what is left, their meal templates and the foods they log most. Energy is kcal. Read-only. "
+                   "Call it first when the user talks about what they ate. Say the date in words (\"Thu 24 Sep\") "
+                   "when you report a day. If more than one entry matches what the user means, list them and ask; "
+                   "never guess.",
+    "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"date": {"type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD. Leave out for today (Australia/Melbourne)."}}},
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
+
+mcp_router = APIRouter()
+
+
+def mcp_issuer() -> str:
+    return f"{m.SUPABASE_URL.rstrip('/')}/auth/v1"
+
+
+@mcp_router.get("/.well-known/oauth-protected-resource/mcp")
+@mcp_router.get("/.well-known/oauth-protected-resource")
+def protected_resource() -> dict:
+    return {"resource": MCP_URL, "authorization_servers": [mcp_issuer()], "scopes_supported": ["email"],
+            "bearer_methods_supported": ["header"], "resource_name": "NutriScan"}
+
+
+def _mcp_challenge() -> Problem:
+    return Problem(401, "unauthorized", "Connect through claude.ai to use NutriScan.",
+                   headers={"WWW-Authenticate": f'Bearer resource_metadata="{MCP_PRM_URL}"'})
+
+
+def mcp_caller(request: Request) -> tuple:
+    """(Caller, client_id) for a valid connector bearer token, or raises the 401 challenge.
+    What gets the 401: a missing token, a bad one, an expired one, an app login (no client_id), and a PAT."""
+    auth = request.headers.get("authorization") or ""
+    claims = m.claims_if_valid(auth) if auth.startswith("Bearer ") else None
+    aud = claims.get("aud") if claims else None
+    aud_ok = aud == "authenticated" or (isinstance(aud, list) and "authenticated" in aud)
+    if not (claims and claims.get("client_id") and claims.get("iss") == mcp_issuer() and aud_ok):
+        m.logger.info(f"mcp 401 method={request.method} proto={request.headers.get('mcp-protocol-version', '-')} "
+                      f"ua={(request.headers.get('user-agent') or '')[:60]}")
+        raise _mcp_challenge()
+    try:
+        user_id = m.get_user_id(auth, allow_client=True)   # the frozen (423) and owner-only (403) checks
+    except m.HTTPException as e:
+        raise from_http_exception(e.status_code, e.detail) from e
+    return Caller(user_id, name="Claude", scopes=CONNECTOR_SCOPES), claims["client_id"]
+
+
+def _mcp_rpc_result(id_, result) -> JSONResponse:
+    return JSONResponse({"jsonrpc": "2.0", "id": id_, "result": result})
+
+
+def _mcp_rpc_error(id_, code: int, message: str) -> JSONResponse:
+    return JSONResponse({"jsonrpc": "2.0", "id": id_, "error": {"code": code, "message": message}})
+
+
+@mcp_router.api_route("/mcp", methods=["GET", "POST", "DELETE"])
+async def mcp(request: Request):
+    # The body is read raw and parsed only after the origin and auth checks: a declared JSON body would
+    # 422 before them, and a tokenless probe would never see the 401 challenge. Capped at 64 KB upstream.
+    raw = await request.body()
+    return await run_in_threadpool(_mcp, request, raw)   # sync work: JWKS fetch, Postgres
+
+
+def _mcp(request: Request, raw: bytes):
+    origin = request.headers.get("origin")
+    if origin and origin not in MCP_ORIGINS:
+        m.logger.info(f"mcp origin refused: {origin}")
+        raise Problem(403, "forbidden_origin", "This origin may not call /mcp.")
+    caller, client_id = mcp_caller(request)
+    if request.method != "POST":
+        return Response(status_code=405, headers={"Allow": "POST"})
+    version = request.headers.get("mcp-protocol-version")
+    if version and version not in MCP_VERSIONS:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32022,
+                             "message": "Unsupported protocol version", "data": {"supported": list(MCP_VERSIONS)}}},
+                            status_code=400)
+    try:
+        payload = json.loads(raw)
+    except (ValueError, RecursionError):   # bad JSON, bad UTF-8, or nesting past the recursion limit
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+                            status_code=400)
+    if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0":
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid request"}},
+                            status_code=400)
+    method = payload.get("method")
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    log_line = f"mcp rpc={method} proto={version or '-'} client={client_id} user={caller.user_id[:8]}"
+    if method == "initialize":
+        info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
+        log_line += f" req_proto={params.get('protocolVersion')} client_info={info.get('name')}/{info.get('version')}"
+    m.logger.info(log_line)
+    if "id" not in payload:   # a notification, e.g. notifications/initialized
+        return Response(status_code=202)
+    id_ = payload.get("id")
+    if method == "initialize":
+        proto = params.get("protocolVersion")
+        return _mcp_rpc_result(id_, {"protocolVersion": proto if proto in MCP_VERSIONS else MCP_VERSIONS[0],
+                                     "capabilities": {"tools": {}}, "serverInfo": {"name": "nutriscan", "version": "1"}})
+    if method == "ping":
+        return _mcp_rpc_result(id_, {})
+    if method == "tools/list":
+        return _mcp_rpc_result(id_, {"tools": [MCP_TOOL]})
+    if method == "tools/call":
+        name = params.get("name")
+        if name != "get_context":
+            return _mcp_rpc_error(id_, -32602, f"Unknown tool: {name}")
+        args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        try:
+            budget_gate()
+            take_request(caller, False)
+            body = context(date_=args.get("date") or melbourne_today().isoformat(), include="", caller=caller)
+            return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": json.dumps(body, default=str)}], "isError": False})
+        except (Problem, m.HTTPException) as e:   # db() raises HTTPException 500: still a tool error, not transport
+            p = e if isinstance(e, Problem) else from_http_exception(e.status_code, e.detail)
+            return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": p.detail}], "isError": True})
+    return _mcp_rpc_error(id_, -32601, "Method not found")

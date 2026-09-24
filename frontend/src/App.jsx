@@ -9,6 +9,7 @@ import AddToLogModal from "./components/AddToLogModal";
 import EditLogModal from "./components/EditLogModal";
 import ChatAssistant from "./components/ChatAssistant";
 import LoginScreen from "./components/LoginScreen";
+import AllowPage from "./components/AllowPage";
 import ConfirmHost from "./components/ConfirmDialog";
 import ScanTab from "./tabs/ScanTab";
 import LibraryTab from "./tabs/LibraryTab";
@@ -19,6 +20,25 @@ import SettingsTab from "./tabs/SettingsTab";
 // PUBLIC DEMO build flag: statically false in normal builds, so demo-only
 // branches below are tree-shaken out of the real app.
 const IS_DEMO = import.meta.env.VITE_DEMO === "1";
+
+// The claude.ai Allow page (H4): Supabase's OAuth authorization redirect lands
+// on "/" with ?authorization_id=... (spec OPEN QUESTION 1). Kept in
+// sessionStorage because Google sign-in returns to the bare origin, dropping
+// the query string, while sessionStorage survives that same-tab round trip.
+const AUTHZ_KEY = "ns-authorization-id";
+function readAuthzId() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("authorization_id")) {
+    const id = params.get("authorization_id");
+    if (id) sessionStorage.setItem(AUTHZ_KEY, id);
+    else sessionStorage.removeItem(AUTHZ_KEY);   // or "Open NutriScan" would bring back an older request
+    return id;
+  }
+  return sessionStorage.getItem(AUTHZ_KEY);
+}
+// null = normal app. "" (an empty param) = the expired message.
+const AUTHZ_ID = IS_DEMO ? null : readAuthzId();
+const clearAuthzId = () => sessionStorage.removeItem(AUTHZ_KEY);
 
 const TABS = [
   { id: "scan",     label: "Scan",     icon: "document_scanner" },
@@ -88,7 +108,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!uid) return;
+    // The Allow page shows no energy, and apiFetch's 401 would sign the user
+    // out in the middle of consent.
+    if (!uid || AUTHZ_ID !== null) return;
     let live = true;
     apiFetch("/settings/energy-unit")
       .then(r => { if (live && unitChosen.current !== uid) setUnitPref({ uid, unit: r.unit === "kJ" ? "kJ" : "kcal" }); })
@@ -163,7 +185,7 @@ export default function App() {
   }, []);
 
   const offlineBar = !online && (
-    <div role="status" style={{ position: "sticky", top: session ? "calc(60px + env(safe-area-inset-top, 0px))" : 0, zIndex: 41, background: "var(--orange-lt)", color: "var(--orange)", fontSize: 12, fontWeight: 700, padding: "6px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+    <div role="status" style={{ position: "sticky", top: session && AUTHZ_ID === null ? "calc(60px + env(safe-area-inset-top, 0px))" : 0, zIndex: 41, background: "var(--orange-lt)", color: "var(--orange)", fontSize: 12, fontWeight: 700, padding: "6px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
       <Icon n="cloud_off" size={16} /> You're offline
     </div>
   );
@@ -190,7 +212,18 @@ export default function App() {
             Update available — tap to refresh
           </button>
         )}
-        <LoginScreen />
+        <LoginScreen subtitle={AUTHZ_ID !== null ? "Sign in to connect Claude" : undefined} />
+      </>
+    );
+  }
+
+  if (AUTHZ_ID !== null) {
+    return (
+      <>
+        <style>{PALETTE_CSS}</style>
+        {offlineBar}
+        <AllowPage authorizationId={AUTHZ_ID} email={session.user.email} online={online}
+          onDone={clearAuthzId} />
       </>
     );
   }

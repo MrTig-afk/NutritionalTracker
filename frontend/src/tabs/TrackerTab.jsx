@@ -2,29 +2,21 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/api";
 import { addDays, useEnergyUnit, toUnit, fromUnit } from "../lib/nutrition";
 import { card, cardHeader, inputStyle, labelStyle, primaryBtn, errorBanner } from "../styles";
-import { Icon, Spin } from "../components/Icon";
+import { Icon, Spin, Spark } from "../components/Icon";
 import MacroBar from "../components/MacroBar";
 import DatePicker from "../components/DatePicker";
 import { confirm } from "../lib/confirm";
 
-// Approved D3 spark (design/userflow.artifact.html, class="pill p-claude"). Only
-// TrackerTab uses it; lane H (Connected apps) comes in a later batch.
-const ViaClaude = () => {
-  const long = [0, 45, 90, 135, 180, 225, 270, 315];
-  const short = [22, 67, 112, 157, 202, 247, 292, 337];
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, borderRadius: 8, padding: "1px 6px",
-      fontSize: 10, fontWeight: 800, background: "var(--purp-lt)", color: "var(--purple)", flexShrink: 0,
-      whiteSpace: "nowrap" }}>
-      <svg viewBox="0 0 24 24" width={10} height={10} fill="currentColor" aria-hidden="true">
-        {long.map(a => <path key={`l${a}`} d="M12 12 L10.3 3.4 Q12 1.2 13.7 3.4 Z" transform={`rotate(${a} 12 12)`} />)}
-        {short.map(a => <path key={`s${a}`} d="M12 12 L10.9 5.6 Q12 4.4 13.1 5.6 Z" transform={`rotate(${a} 12 12)`} />)}
-        <circle cx="12" cy="12" r="1.6" />
-      </svg>
-      via Claude
-    </span>
-  );
-};
+// Approved D3 spark (design/userflow.artifact.html, class="pill p-claude"). The
+// spark itself is Icon.jsx's Spark (AllowPage and, later, Connected apps use it too).
+const ViaClaude = () => (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 3, borderRadius: 8, padding: "1px 6px",
+    fontSize: 10, fontWeight: 800, background: "var(--purp-lt)", color: "var(--purple)", flexShrink: 0,
+    whiteSpace: "nowrap" }}>
+    <Spark size={10} />
+    via Claude
+  </span>
+);
 
 export default function TrackerTab({ refreshKey, onEditEntry }) {
   const unit = useEnergyUnit();

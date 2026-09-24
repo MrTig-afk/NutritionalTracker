@@ -33,6 +33,7 @@ export const PALETTE_CSS = `
     --danger:    #BA1A1A;
     --danger-lt: #FFDAD6;
     --on-danger: #FFFFFF;
+    --claude:    #D97757;
   }
   :root[data-theme="dark"] {
     --teal:      #006D77;

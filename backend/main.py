@@ -333,7 +333,20 @@ def claims_if_valid(authorization: Optional[str]) -> Optional[dict]:
         return None
 
 
-def get_user_id(authorization: Optional[str] = None) -> str:
+def _refuse_connected_app(payload: dict, user_id: str, allow_client: bool = False) -> None:
+    """A connected app's key (a Supabase OAuth token: it carries client_id) reaches only /v1 and /mcp,
+    and only on the owner's account until Phase 6 (PRD 'Claude chat first')."""
+    if not payload.get("client_id"):
+        return
+    if not allow_client:
+        raise HTTPException(status_code=403, detail={"error_type": "connected_app_not_allowed",
+            "message": "Connected apps can only use the NutriScan API."})
+    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
+        raise HTTPException(status_code=403, detail={"error_type": "feature_unavailable",
+            "message": "Connecting apps is not available on this account yet."})
+
+
+def get_user_id(authorization: Optional[str] = None, allow_client: bool = False) -> str:
     """Extract user ID from Supabase JWT. Supports both HS256 and RS256."""
     if not authorization:
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Missing authorization header"})
@@ -343,6 +356,7 @@ def get_user_id(authorization: Optional[str] = None) -> str:
         user_id = payload.get("sub")
         if not user_id:
             raise Exception("No sub claim in JWT")
+        _refuse_connected_app(payload, user_id, allow_client)
         if user_id in _frozen:
             raise HTTPException(status_code=423, detail={"error_type": "account_locked",
                 "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
@@ -367,6 +381,7 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         user_id = payload.get("sub")
         if not user_id:
             raise Exception("No sub claim in JWT")
+        _refuse_connected_app(payload, user_id)
         if user_id in _frozen:
             raise HTTPException(status_code=423, detail={"error_type": "account_locked",
                 "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
@@ -2945,6 +2960,7 @@ import api_v1  # noqa: E402
 api_v1.m = sys.modules[__name__]   # this module, whether run as main or __main__
 app.include_router(api_v1.router)
 app.include_router(api_v1.settings_router)
+app.include_router(api_v1.mcp_router)
 app.middleware("http")(api_v1.v1_middleware)   # outermost: body cap and headers before anything else
 
 

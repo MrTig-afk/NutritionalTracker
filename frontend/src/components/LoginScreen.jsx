@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { supabase, API_URL } from "../lib/api";
 import { Icon, Spin } from "./Icon";
 
-export default function LoginScreen() {
+export default function LoginScreen({ subtitle = "Track your nutrition with ease" }) {
   const [email, setEmail]                   = useState("");
   const [sending, setSending]               = useState(false);
   const [sent, setSent]                     = useState(false);
@@ -80,7 +80,7 @@ export default function LoginScreen() {
             <Icon n="nutrition" size={30} style={{ color: "var(--mint)" }} />
           </div>
           <div style={{ fontSize: 30, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.8px" }}>NutriScan</div>
-          <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>Track your nutrition with ease</div>
+          <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>{subtitle}</div>
         </div>
 
         <div style={{ background: "var(--surface)", borderRadius: 24, padding: 28, display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 2px 16px rgba(0,0,0,0.08), 0 0 0 1px var(--border)" }}>
