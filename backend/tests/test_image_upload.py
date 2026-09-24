@@ -12,6 +12,7 @@ import os
 import struct
 import sys
 import unittest
+from unittest import mock
 import zlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -225,6 +226,37 @@ class Routes(unittest.TestCase):
         self.assertEqual(r.status_code, 415)
         r = self.post(png_with_declared_canvas(30000, 30000), ctype="text/plain")
         self.assertEqual(r.status_code, 422)
+
+    def test_oversize_is_refused_before_the_body_is_read_or_counted(self):
+        counted = []
+        main.check_and_track = lambda *a, **k: counted.append(1)
+        r = self.post(b"\xff" * ((main.MAX_UPLOAD_MB + 1) * 1024 * 1024 + 1))
+        self.assertEqual((r.status_code, r.json()["detail"]["error_type"]), (413, "file_too_large"))
+        self.assertEqual(counted, [])   # refused on Content-Length: no scan used up
+
+    def test_probing_the_upload_limit_still_alerts(self):
+        alerts = []
+        big = b"\xff" * ((main.MAX_UPLOAD_MB + 1) * 1024 * 1024 + 1)
+        with mock.patch.object(main, "notify_admin", lambda key, *a: alerts.append(key)), \
+             mock.patch.dict(main._event_windows, clear=True):
+            for _ in range(11):
+                self.post(big)
+        self.assertIn("oversize", alerts)
+
+    def test_a_rejected_upload_uses_no_scan(self):
+        counted = []
+        main.check_and_track = lambda *a, **k: counted.append(1)
+        self.assertEqual(self.post(HTML_NAMED_JPG).status_code, 415)
+        r = self.client.post("/analyze-labels", headers={"Authorization": "Bearer x"},
+                             files=[("files", ("a.jpg", jpeg_bytes(), "image/jpeg")), ("files", ("b.jpg", HTML_NAMED_JPG, "image/jpeg"))])
+        self.assertEqual(r.status_code, 415)
+        self.assertEqual(counted, [])   # the daily quota is only charged once every file passed
+
+    def test_one_oversize_file_in_a_batch_is_413(self):
+        big = b"\xff" * (main.MAX_UPLOAD_MB * 1024 * 1024 + 1)   # under the batch cap, over the per-image cap
+        r = self.client.post("/analyze-labels", headers={"Authorization": "Bearer x"},
+                             files=[("files", ("a.jpg", jpeg_bytes(), "image/jpeg")), ("files", ("b.jpg", big, "image/jpeg"))])
+        self.assertEqual((r.status_code, r.json()["detail"]["error_type"]), (413, "file_too_large"))
 
     def test_batch_rejects_one_bad_file_before_any_call(self):
         called = []

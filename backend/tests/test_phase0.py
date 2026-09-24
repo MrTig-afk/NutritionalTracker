@@ -4,6 +4,7 @@ Run:  venv/Scripts/python -m unittest backend.tests.test_phase0 -v
 No database: every route here runs against FakeConn, which answers each query
 from a script and records what was executed.
 """
+import json
 import os
 import sys
 import unittest
@@ -227,6 +228,52 @@ class AdminAlerts(unittest.TestCase):
     def test_ntfy_is_gone(self):
         self.assertFalse(hasattr(main, "send_to_ntfy"))
         self.assertFalse(hasattr(main, "NTFY_TOPIC"))
+
+
+class BodyCap(unittest.TestCase):
+    """App writes are refused on a declared body over 64 KB, before the JSON is read."""
+
+    def test_huge_nutrition_is_413_and_touches_nothing(self):
+        conn = FakeConn()
+        client = route(self, conn)
+        with mock.patch.object(main, "_check_goal_and_push", lambda *a: None):
+            r = client.post("/log", json={"name": "x", "servings": 1, "nutrition": {"pad": "x" * 70_000}})
+            self.assertEqual((r.status_code, r.json()["detail"]["error_type"]), (413, "payload_too_large"))
+            self.assertEqual(conn.executed, [])
+            ok = client.post("/log", json={"name": "x", "servings": 1, "nutrition": {"per_serving": {"calories": 100}}})
+            self.assertEqual(ok.status_code, 200)   # positive control: a normal write still goes through
+
+    def test_a_chunked_body_is_counted_too(self):
+        # no Content-Length (a generator body goes out chunked): the stream counter still stops it
+        conn = FakeConn()
+        client = route(self, conn)
+        big = json.dumps({"name": "x", "servings": 1, "nutrition": {"pad": "x" * 70_000}}).encode()
+        with mock.patch.object(main, "_check_goal_and_push", lambda *a: None):
+            r = client.post("/log", content=iter([big[i:i + 8192] for i in range(0, len(big), 8192)]),
+                            headers={"Content-Type": "application/json"})
+            self.assertEqual(r.status_code, 400)   # FastAPI's answer to a body read that raised; the route never ran
+            self.assertEqual(conn.executed, [])
+            small = json.dumps({"name": "x", "servings": 1, "nutrition": {"per_serving": {"calories": 100}}}).encode()
+            ok = client.post("/log", content=iter([small]), headers={"Content-Type": "application/json"})
+            self.assertEqual(ok.status_code, 200)   # positive control: a small chunked write still goes through
+
+    def test_a_long_chat_history_still_fits(self):
+        # ~100 KB of history: over the 64 KB default, inside /chat's own cap, so it reaches the route
+        history = [{"role": "assistant", "text": "x" * 1000}] * 100
+        reached = []
+
+        class Groq:   # stand-in model: no real (paid) call, and proof the route ran
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(**kw):
+                        reached.append(1)
+                        return mock.Mock(choices=[mock.Mock(message=mock.Mock(content="hi"))])
+        client = route(self, FakeConn())
+        with mock.patch.object(main, "groq_client", Groq), mock.patch.object(main, "_allow_chat", lambda u: True):
+            r = client.post("/chat", json={"message": "hi", "history": history})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(reached)
 
 
 class ImmediateThread:
