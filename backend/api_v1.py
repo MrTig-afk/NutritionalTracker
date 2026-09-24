@@ -1209,7 +1209,9 @@ def _if_match(value: Optional[str]) -> str:
     if not value:
         raise Problem(422, "validation_error", "If-Match header required: send the ETag you read.",
                       errors=[{"field": "If-Match", "message": "required"}])
-    return value.strip()
+    # Cloudflare (in front of Render) weakens ETag to W/"..." when it compresses a
+    # response, so the header a client read back carries a W/ our etags never have.
+    return value.strip().removeprefix("W/")
 
 
 PreviewQ = Query(False, alias="preview")
