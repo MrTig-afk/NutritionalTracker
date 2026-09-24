@@ -163,7 +163,7 @@ export default function App() {
   }, []);
 
   const offlineBar = !online && (
-    <div role="status" style={{ background: "var(--orange-lt)", color: "var(--orange)", fontSize: 12, fontWeight: 700, padding: "6px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+    <div role="status" style={{ position: "sticky", top: session ? "calc(60px + env(safe-area-inset-top, 0px))" : 0, zIndex: 41, background: "var(--orange-lt)", color: "var(--orange)", fontSize: 12, fontWeight: 700, padding: "6px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
       <Icon n="cloud_off" size={16} /> You're offline
     </div>
   );

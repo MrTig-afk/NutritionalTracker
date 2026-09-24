@@ -91,7 +91,10 @@ export default function SettingsTab({ setEnergyUnit }) {
     if (u === energyUnit || unitSaving) return;   // one save at a time, so the server keeps the last tap
     setEnergyUnit(u); setUnitErr(false); setUnitSaving(true);
     apiFetch("/settings/energy-unit", { method: "PUT", body: JSON.stringify({ unit: u }) })
-      .catch(() => { setEnergyUnit(energyUnit); setUnitErr(true); })
+      .catch(() => {
+        setUnitErr(true);
+        apiFetch("/settings/energy-unit").then(r => setEnergyUnit(r.unit === "kJ" ? "kJ" : "kcal")).catch(() => setEnergyUnit(energyUnit));
+      })
       .finally(() => setUnitSaving(false));
   };
 

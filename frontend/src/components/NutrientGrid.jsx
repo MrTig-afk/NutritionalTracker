@@ -48,6 +48,7 @@ export default function NutrientGrid({ data, activeTab, per100gData }) {
           const { display, adjusted, baseDisplay } = getDisplay(key, value);
           const isKcal = key === "calories" && unit === "kJ";
           let shownValue = typeof display === "string" ? (parseNumeric(display) ?? display) : display;
+          if (typeof display === "string" && display.trim().startsWith("<") && typeof shownValue === "number") shownValue = `<${shownValue}`;   // "<1g" is not "1g"
           if (isKcal && typeof shownValue === "number") shownValue = toUnit(shownValue, unit);
           const shownUnit = isKcal ? unit : meta.unit;
           let shownBase = baseDisplay;
