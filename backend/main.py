@@ -32,7 +32,7 @@ import urllib.request
 import contextvars
 import sys
 
-from log_service import (entry_macros, sum_macros, rounded, load_nutrition, _parse_num,
+from log_service import (entry_macros, sum_macros, rounded, load_nutrition, settle_kcal, _parse_num,
                          KJ_PER_KCAL, KJ_HEURISTIC_THRESHOLD)
 
 try:
@@ -2046,7 +2046,7 @@ async def add_folder_item(
         cur  = conn.cursor()
         cur.execute(
             "INSERT INTO folder_items (item_id, folder_id, user_id, image_id, name, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            [item_id, folder_id, user_id, body.image_id, body.name, json.dumps(body.nutrition), datetime.now()],
+            [item_id, folder_id, user_id, body.image_id, body.name, json.dumps(settle_kcal(body.nutrition, False)), datetime.now()],
         )
         conn.commit()
         cur.close()
@@ -2172,7 +2172,7 @@ async def add_log_entry(
         cur  = conn.cursor()
         cur.execute(
             "INSERT INTO daily_log (log_id, user_id, date, name, servings, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            [log_id, user_id, today, body.name, body.servings, json.dumps(body.nutrition), datetime.now()],
+            [log_id, user_id, today, body.name, body.servings, json.dumps(settle_kcal(body.nutrition, False)), datetime.now()],
         )
         conn.commit()
         cur.close()
@@ -2321,7 +2321,7 @@ async def update_log_entry(
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Log entry not found"})
         cur.execute(
             "UPDATE daily_log SET name=%s, servings=%s, nutrition=%s WHERE log_id=%s AND user_id=%s",
-            [body.name, body.servings, json.dumps(body.nutrition), log_id, user_id],
+            [body.name, body.servings, json.dumps(settle_kcal(body.nutrition, False)), log_id, user_id],
         )
         conn.commit()
         cur.close()
@@ -2454,7 +2454,7 @@ async def add_meal_template_item(template_id: str, body: MealTemplateItemCreate,
         item_id = str(uuid.uuid4())
         cur.execute(
             "INSERT INTO meal_template_items (item_id, template_id, user_id, name, nutrition, servings, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            [item_id, template_id, user_id, body.name, json.dumps(body.nutrition), body.servings, datetime.now()],
+            [item_id, template_id, user_id, body.name, json.dumps(settle_kcal(body.nutrition, False)), body.servings, datetime.now()],
         )
         conn.commit(); cur.close(); release_db(conn)
     except HTTPException:
@@ -2517,7 +2517,7 @@ async def log_meal_template(template_id: str, log_date: Optional[str] = None, au
         # group tags live inside the nutrition JSON, so no schema change is needed.
         group_id = str(uuid.uuid4())
         for name, nutrition, servings in items:
-            n = nutrition if isinstance(nutrition, dict) else json.loads(nutrition or "{}")
+            n = settle_kcal(nutrition, True)   # an untagged template item predates kcal storage
             n["_meal_group"] = group_id
             n["_meal_label"] = template_name
             log_id = str(uuid.uuid4())
