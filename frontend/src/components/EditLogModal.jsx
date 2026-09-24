@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { apiFetch } from "../lib/api";
-import { extractServingGrams, parseNumeric } from "../lib/nutrition";
+import { extractServingGrams, parseNumeric, useEnergyUnit, toUnit } from "../lib/nutrition";
 import { overlayBg, modalBox, modalHeader, modalTitle, inputStyle, labelStyle, primaryBtn, pillRow, macroCells } from "../styles";
 import { Icon, Spin } from "./Icon";
 
 export default function EditLogModal({ entry, onClose, onSaved }) {
+  const unit = useEnergyUnit();
   const [mode, setMode] = useState("serving");
   const [servings, setServings] = useState(String(entry.servings || 1));
   const [grams, setGrams] = useState("");
@@ -90,7 +91,7 @@ export default function EditLogModal({ entry, onClose, onSaved }) {
         {scalingInfo && <p style={{ fontSize: 11, color: scalingInfo.warn ? "var(--orange)" : "var(--muted)" }}>{scalingInfo.warn ? "⚠ No size data" : `Base: ${scalingInfo.baseLabel}${scalingInfo.targetLabel ? ` → ${scalingInfo.targetLabel}` : ""}${mode === "serving" && servingsNum !== 1 ? ` × ${servingsNum}` : ""}`}</p>}
         <div style={{ display: "flex", gap: 8 }}>
           {macroCells([
-            { label: "Cal",   value: cal,  unit: "kcal", color: "var(--orange)" },
+            { label: "Cal",   value: toUnit(cal, unit),  unit, digits: unit === "kJ" ? 0 : 1, color: "var(--orange)" },
             { label: "Prot",  value: prot, unit: "g",    color: "var(--accent)"   },
             { label: "Carbs", value: carb, unit: "g",    color: "var(--purple)" },
             { label: "Fat",   value: fat,  unit: "g",    color: "var(--brown)"  },

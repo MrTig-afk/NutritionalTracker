@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch, supabase } from "../lib/api";
-import { card, cardHeader, inputStyle } from "../styles";
+import { card, cardHeader, inputStyle, ghostBtn, pillRow, errorBanner } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 import { pushSupported, getPermission, getSubscribed, enablePush, disablePush } from "../lib/push";
+import { useEnergyUnit } from "../lib/nutrition";
 
 const LINKS = {
-  email:    "mailto:theimpracticalguy007@gmail.com",
+  email:    "mailto:kaushiknaru2002@gmail.com",
   linkedin: "https://www.linkedin.com/in/kaushikn2002/",
   github:   "https://github.com/MrTig-afk",
 };
@@ -67,7 +68,10 @@ function Toggle({ on, onChange, disabled, label }) {
   );
 }
 
-export default function SettingsTab() {
+export default function SettingsTab({ setEnergyUnit }) {
+  const energyUnit = useEnergyUnit();
+  const [unitErr, setUnitErr]         = useState(false);
+  const [unitSaving, setUnitSaving]   = useState(false);
   const [permission, setPermission]   = useState(getPermission());
   const [subscribed, setSubscribed]   = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
@@ -78,6 +82,27 @@ export default function SettingsTab() {
   const [error, setError]             = useState(null);
   const [timeDrafts, setTimeDrafts]   = useState({});
   const [timeErrors, setTimeErrors]   = useState({});
+  const [health, setHealth]           = useState(null);
+  const [alertState, setAlertState]   = useState(null); // null | "sending" | "sent" | "failed"
+
+  useEffect(() => { apiFetch("/settings/admin/health").then(setHealth).catch(() => {}); }, []);
+
+  const chooseUnit = (u) => {
+    if (u === energyUnit || unitSaving) return;   // one save at a time, so the server keeps the last tap
+    setEnergyUnit(u); setUnitErr(false); setUnitSaving(true);
+    apiFetch("/settings/energy-unit", { method: "PUT", body: JSON.stringify({ unit: u }) })
+      .catch(() => {
+        setUnitErr(true);
+        apiFetch("/settings/energy-unit").then(r => setEnergyUnit(r.unit === "kJ" ? "kJ" : "kcal")).catch(() => setEnergyUnit(energyUnit));
+      })
+      .finally(() => setUnitSaving(false));
+  };
+
+  const sendTestAlert = async () => {
+    setAlertState("sending");
+    try { await apiFetch("/settings/admin/test-alert", { method: "POST" }); setAlertState("sent"); }
+    catch { setAlertState("failed"); }
+  };
 
   useEffect(() => {
     getSubscribed().then(setSubscribed).catch(() => {});
@@ -145,6 +170,30 @@ export default function SettingsTab() {
 
   return (
     <div style={{ maxWidth: 560, margin: "0 auto", padding: "0 16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* Display */}
+      <div style={card}>
+        <div style={{ ...cardHeader, background: "var(--off)" }}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Display</span>
+        </div>
+        <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Energy unit</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>How calories are shown. Stored the same either way.</div>
+          </div>
+          <div style={{ ...pillRow, background: "var(--off)" }}>
+            {["kcal", "kJ"].map(u => (
+              <button key={u} onClick={() => chooseUnit(u)} aria-pressed={energyUnit === u} disabled={unitSaving}
+                style={energyUnit === u
+                  ? { flex: 1, padding: "7px", background: "var(--teal)", color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }
+                  : { flex: 1, padding: "7px", background: "transparent", color: "var(--muted)", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                {u}
+              </button>
+            ))}
+          </div>
+          {unitErr && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 6 }}>Couldn't save. Try again.</div>}
+        </div>
+      </div>
 
       {/* Contact */}
       <div style={card}>
@@ -220,6 +269,42 @@ export default function SettingsTab() {
           </div>
         ))}
       </div>
+
+      {/* Admin (owner only): renders nothing until GET /settings/admin/health returns 200 */}
+      {health && (
+        <div style={card}>
+          <div style={{ ...cardHeader, background: "var(--off)" }}>
+            <Icon n="admin_panel_settings" size={16} style={{ color: "var(--accent)" }} />
+            <span style={{ fontSize: 14, fontWeight: 700, flex: 1, marginLeft: 8 }}>Admin</span>
+            <span style={{ background: "var(--teal-lt)", color: "var(--accent)", borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>only you</span>
+          </div>
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div style={{ background: "var(--off)", borderRadius: 10, padding: "8px 10px" }}>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>API requests left today</div>
+                {/* 200 is api_v1.DAILY_CAP */}
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{health.requests_left_today} / 200</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>resets {new Date(health.resets_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+              </div>
+              <div style={{ background: "var(--off)", borderRadius: 10, padding: "8px 10px" }}>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>Neon budget used</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{health.neon_budget_percent}%</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>resets {new Date(health.budget_period_resets + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</div>
+              </div>
+            </div>
+            {health.api_paused
+              ? <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--orange-lt)", color: "var(--orange)" }}>API paused: Neon budget at 90%</div>
+              : <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--off)", color: "var(--mint-dk)" }}>API running</div>}
+            <div style={{ fontSize: 11, color: "var(--muted)" }}>At 90% of the Neon budget the Claude API pauses itself; the app keeps working.</div>
+            <button onClick={sendTestAlert} disabled={alertState === "sending"} style={{ ...ghostBtn, opacity: alertState === "sending" ? 0.6 : 1 }}>
+              {alertState === "sending" ? <Spin size={14} /> : <Icon n="notifications_active" size={14} />}
+              Send test alert
+            </button>
+            {alertState === "sent" && <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mint-dk)" }}>Sent. It should arrive on every device with notifications on.</div>}
+            {alertState === "failed" && <div style={errorBanner}>Couldn't send the test alert.</div>}
+          </div>
+        </div>
+      )}
 
       {/* Danger zone */}
       <div style={{ ...card, border: "1px solid var(--danger)" }}>

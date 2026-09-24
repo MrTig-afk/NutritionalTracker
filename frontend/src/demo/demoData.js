@@ -98,7 +98,9 @@ export function buildDiary() {
     // Breakfast: most days the "Usual Breakfast" template (grouped block).
     if (rand() < 0.8) {
       const gid = `demo-breakfast-${date}`;
-      const g = { _meal_group: gid, _meal_label: "Usual Breakfast" };
+      // D3: tag the breakfast group as Claude-logged on the most recent
+      // occurrence so the "via Claude" chip has something to show.
+      const g = { _meal_group: gid, _meal_label: "Usual Breakfast", ...(off >= -1 && { _source: "claude" }) };
       add(date, FOODS.granola, 1, g);
       add(date, FOODS.yoghurt, 1, g);
       add(date, FOODS.oatmilk, 1, g);
@@ -108,7 +110,7 @@ export function buildDiary() {
     }
 
     // Lunch.
-    add(date, LUNCHES[Math.floor(rand() * LUNCHES.length)], 1);
+    add(date, LUNCHES[Math.floor(rand() * LUNCHES.length)], 1, today ? { _source: "claude" } : {});
 
     // Today is caught mid-afternoon: breakfast + lunch + a snack, no dinner yet.
     add(date, SNACKS[Math.floor(rand() * SNACKS.length)], 1);

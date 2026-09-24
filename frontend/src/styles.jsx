@@ -106,10 +106,10 @@ export const modalHeader = { display: "flex", alignItems: "center", justifyConte
 export const modalTitle  = { fontSize: 15, fontWeight: 700, color: "var(--text)", display: "flex", alignItems: "center", gap: 8 };
 export const pillRow     = { display: "flex", padding: 4, background: "var(--off2)", borderRadius: 10, gap: 3 };
 
-export const macroCells = (vals) => vals.map(({ label, value, unit, color }) => (
+export const macroCells = (vals) => vals.map(({ label, value, unit, color, digits = 1 }) => (
   <div key={label} style={{ flex: 1, background: "var(--off)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 6px", textAlign: "center" }}>
     <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}</div>
-    <div style={{ fontSize: 16, fontWeight: 800, color, marginTop: 2 }}>{value.toFixed(1)}</div>
+    <div style={{ fontSize: 16, fontWeight: 800, color, marginTop: 2 }}>{value.toFixed(digits)}</div>
     <div style={{ fontSize: 10, color: "var(--muted)" }}>{unit}</div>
   </div>
 ));

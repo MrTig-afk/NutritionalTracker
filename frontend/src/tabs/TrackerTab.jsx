@@ -1,13 +1,33 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/api";
-import { addDays } from "../lib/nutrition";
+import { addDays, useEnergyUnit, toUnit, fromUnit } from "../lib/nutrition";
 import { card, cardHeader, inputStyle, labelStyle, primaryBtn, errorBanner } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 import MacroBar from "../components/MacroBar";
 import DatePicker from "../components/DatePicker";
 import { confirm } from "../lib/confirm";
 
+// Approved D3 spark (design/userflow.artifact.html, class="pill p-claude"). Only
+// TrackerTab uses it; lane H (Connected apps) comes in a later batch.
+const ViaClaude = () => {
+  const long = [0, 45, 90, 135, 180, 225, 270, 315];
+  const short = [22, 67, 112, 157, 202, 247, 292, 337];
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, borderRadius: 8, padding: "1px 6px",
+      fontSize: 10, fontWeight: 800, background: "var(--purp-lt)", color: "var(--purple)", flexShrink: 0,
+      whiteSpace: "nowrap" }}>
+      <svg viewBox="0 0 24 24" width={10} height={10} fill="currentColor" aria-hidden="true">
+        {long.map(a => <path key={`l${a}`} d="M12 12 L10.3 3.4 Q12 1.2 13.7 3.4 Z" transform={`rotate(${a} 12 12)`} />)}
+        {short.map(a => <path key={`s${a}`} d="M12 12 L10.9 5.6 Q12 4.4 13.1 5.6 Z" transform={`rotate(${a} 12 12)`} />)}
+        <circle cx="12" cy="12" r="1.6" />
+      </svg>
+      via Claude
+    </span>
+  );
+};
+
 export default function TrackerTab({ refreshKey, onEditEntry }) {
+  const unit = useEnergyUnit();
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const [goals, setGoals] = useState({ calories: 2000, protein: 150, carbs: 250, fat: 65 });
@@ -15,6 +35,8 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [selectedDate, setSelectedDate] = useState(today);
   const [editingGoals, setEditingGoals] = useState(false);
   const [goalDraft, setGoalDraft] = useState({});
+  // The draft holds calories in the unit it was opened in; a unit change closes it rather than save it wrongly.
+  useEffect(() => { setEditingGoals(false); }, [unit]);
   const [loadedFor, setLoadedFor] = useState(null); // key of the data now in state
   const [savingGoals, setSavingGoals] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -54,7 +76,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const loadData = useCallback(async () => {
     const seq = ++reqSeq.current;
     try { const [g, l] = await Promise.all([apiFetch("/goals"), apiFetch(`/log?log_date=${selectedDate}`)]); if (seq !== reqSeq.current) return; setGoals(g); setLogData(l); }
-    catch (e) { if (seq !== reqSeq.current) return; console.error("Tracker load failed:", e); setErr("Couldn't load your log. Pull to refresh or try again."); }
+    catch (e) { if (seq !== reqSeq.current) return; console.error("Tracker load failed:", e); setErr("Couldn't load your log. Try again."); }
     finally { if (seq === reqSeq.current) setLoadedFor(dataKey); }
   }, [selectedDate, dataKey]);
 
@@ -62,7 +84,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
 
   const saveGoals = async () => {
     setSavingGoals(true);
-    try { const updated = await apiFetch("/goals", { method: "POST", body: JSON.stringify(goalDraft) }); setGoals(updated); setEditingGoals(false); }
+    try { const updated = await apiFetch("/goals", { method: "POST", body: JSON.stringify(unit === "kJ" ? { ...goalDraft, calories: Math.round(fromUnit(goalDraft.calories || 0, unit)) } : goalDraft) }); setGoals(updated); setEditingGoals(false); }
     catch (e) { console.error(e); setErr("Couldn't save your goals. Try again."); }
     finally { setSavingGoals(false); }
   };
@@ -93,9 +115,12 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
     <div key={entry.log_id} style={{ display: "flex", alignItems: "center", gap: 12, padding: indent ? "10px 16px 10px 40px" : "12px 16px", borderTop: topBorder }}>
       <div style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--teal)", flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.name}</div>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "2px 6px", minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, maxWidth: "100%" }}>{entry.name}</div>
+          {entry.nutrition?._source === "claude" && <ViaClaude />}
+        </div>
         <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-          ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {entry.contribution.calories.toFixed(0)} kcal · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
+          ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {toUnit(entry.contribution.calories, unit).toFixed(0)} {unit} · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
         </div>
       </div>
       <button onClick={() => onEditEntry && onEditEntry(entry)} aria-label={`Edit ${entry.name}`}
@@ -127,7 +152,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
             <Icon n="my_location" size={14} style={{ color: "var(--accent)" }} /> Daily Goals
           </div>
-          <button onClick={() => { setGoalDraft({ ...goals }); setEditingGoals(v => !v); }}
+          <button onClick={() => { setGoalDraft({ ...goals, calories: toUnit(goals.calories, unit) }); setEditingGoals(v => !v); }}
             style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}>
             {editingGoals ? "Cancel" : "Edit"}
           </button>
@@ -139,7 +164,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
                 <div key={key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <label style={{ ...labelStyle, width: 60, marginBottom: 0 }}>{key}</label>
                   <input type="number" min="0" value={goalDraft[key] || ""} onChange={e => setGoalDraft(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))} style={{ ...inputStyle, flex: 1 }} />
-                  <span style={{ fontSize: 11, color: "var(--muted)", width: 32 }}>{key === "calories" ? "kcal" : "g"}</span>
+                  <span style={{ fontSize: 11, color: "var(--muted)", width: 32 }}>{key === "calories" ? unit : "g"}</span>
                 </div>
               ))}
               <button onClick={saveGoals} disabled={savingGoals} style={{ ...primaryBtn, opacity: savingGoals ? 0.45 : 1 }}>
@@ -148,7 +173,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
             </>
           ) : (
             <>
-              <MacroBar label="Calories" current={totals.calories}    goal={goals.calories} color="var(--orange)" />
+              <MacroBar label="Calories" current={toUnit(totals.calories, unit)} goal={toUnit(goals.calories, unit)} digits={unit === "kJ" ? 0 : 1} suffix={unit === "kJ" ? " kJ" : ""} color="var(--orange)" />
               <MacroBar label="Protein"  current={totals.protein}     goal={goals.protein}  color="var(--teal)"   />
               <MacroBar label="Carbs"    current={totals.carbs}       goal={goals.carbs}    color="var(--purple)" />
               <MacroBar label="Fat"      current={totals.fat}         goal={goals.fat}      color="var(--brown)"  />
@@ -160,7 +185,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
         {[
-          { label: "Calories", val: totals.calories, unit: "kcal", color: "var(--orange)" },
+          { label: unit === "kJ" ? "Energy" : "Calories", val: toUnit(totals.calories, unit), unit, color: "var(--orange)" },
           { label: "Protein",  val: totals.protein,  unit: "g",    color: "var(--accent)"   },
           { label: "Carbs",    val: totals.carbs,    unit: "g",    color: "var(--purple)"  },
           { label: "Fat",      val: totals.fat,      unit: "g",    color: "var(--brown)"  },
@@ -223,9 +248,12 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }} onClick={() => toggleGroup(block.gid)}>
                     <Icon n="restaurant_menu" size={16} style={{ color: "var(--accent)", flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{block.label}</div>
+                      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "2px 6px", minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, maxWidth: "100%" }}>{block.label}</div>
+                        {block.items.some(it => it.nutrition?._source === "claude") && <ViaClaude />}
+                      </div>
                       <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                        {block.items.length} item{block.items.length !== 1 ? "s" : ""} · {sum.calories.toFixed(0)} kcal · P {sum.protein.toFixed(1)}g · C {sum.carbs.toFixed(1)}g · F {sum.fat.toFixed(1)}g
+                        {block.items.length} item{block.items.length !== 1 ? "s" : ""} · {toUnit(sum.calories, unit).toFixed(0)} {unit} · P {sum.protein.toFixed(1)}g · C {sum.carbs.toFixed(1)}g · F {sum.fat.toFixed(1)}g
                       </div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid} aria-label={`Delete ${block.label}`}

@@ -13,7 +13,7 @@
  * back onto this file). Mirrors api.js's full export surface.
  */
 
-import { normalizeResult, parseNumeric } from "../lib/nutrition";
+import { normalizeResult, parseNumeric, toUnit } from "../lib/nutrition";
 import { SCAN_FIXTURES, FIXTURE_NAMES, buildInitialState, localISO, newId } from "./demoData";
 
 export const API_URL = "";
@@ -21,6 +21,10 @@ export const API_URL = "";
 const state = buildInitialState();
 
 const delay = (ms = 180) => new Promise(r => setTimeout(r, ms));
+
+// Display-only energy unit (mirrors /settings/energy-unit). Not part of
+// `state` because it's never reset by anything else in this file.
+let demoEnergyUnit = "kcal";
 
 // ── Fake Supabase auth: the demo is always signed in as the demo user ───────
 
@@ -89,10 +93,11 @@ function dayLog(logDate) {
 
 // ── Scripted demo assistant (no AI behind it) ────────────────────────────────
 
-function chatReply(message) {
+function chatReply(message, unit = "kcal") {
   const today = dayLog(localISO(0));
   const t = today.totals;
   const g = state.goals;
+  const E = v => Math.round(toUnit(v, unit));
   const left = k => Math.max(0, Math.round((g[k] || 0) - (t[k] || 0)));
   const week = [];
   for (let i = 6; i >= 0; i--) week.push(dayLog(localISO(-i)).totals);
@@ -103,13 +108,13 @@ function chatReply(message) {
     return `You're at ${Math.round(t.protein)}g protein today, so ${left("protein")}g to go on your ${g.protein}g goal. Your 7-day average is ${avg("protein")}g. Something like Blue Creek Cottage Cheese (~12g) or a Peak Trail bar (~12g) would close the gap nicely. (Scripted demo reply — the real app answers with a live AI that knows your log.)`;
   }
   if (/calorie|kcal|left|remaining|budget/.test(m)) {
-    return `Today you've logged ${Math.round(t.calories)} kcal of your ${g.calories} kcal goal, so about ${left("calories")} kcal left — comfortable room for dinner. This week you're averaging ${avg("calories")} kcal a day. (Scripted demo reply.)`;
+    return `Today you've logged ${E(t.calories)} ${unit} of your ${E(g.calories)} ${unit} goal, so about ${E(left("calories"))} ${unit} left — comfortable room for dinner. This week you're averaging ${E(avg("calories"))} ${unit} a day. (Scripted demo reply.)`;
   }
   if (/dinner|eat|meal|suggest|tonight/.test(m)) {
-    return `With ${left("calories")} kcal and ${left("protein")}g protein left today, the Golden Wok Veggie Stir-fry (~452 kcal, 20g protein) fits well — or the Ember Grill Chicken Wrap if you want more protein. (Scripted demo reply.)`;
+    return `With ${E(left("calories"))} ${unit} and ${left("protein")}g protein left today, the Golden Wok Veggie Stir-fry (~${E(452)} ${unit}, 20g protein) fits well — or the Ember Grill Chicken Wrap if you want more protein. (Scripted demo reply.)`;
   }
   if (/week|trend|average|summary|how am i/.test(m)) {
-    return `Over the last 7 days you've averaged ${avg("calories")} kcal, ${avg("protein")}g protein, ${avg("carbs")}g carbs and ${avg("fat")}g fat a day — steady, and protein is trending at ${Math.round((avg("protein") / g.protein) * 100)}% of goal. (Scripted demo reply.)`;
+    return `Over the last 7 days you've averaged ${E(avg("calories"))} ${unit}, ${avg("protein")}g protein, ${avg("carbs")}g carbs and ${avg("fat")}g fat a day — steady, and protein is trending at ${Math.round((avg("protein") / g.protein) * 100)}% of goal. (Scripted demo reply.)`;
   }
   return `This is NutriScan's assistant tab. In the demo my replies are scripted from the synthetic diary — try asking about your protein, calories left, dinner ideas, or your week. In the real app this is a live AI that knows your actual log and goals.`;
 }
@@ -245,7 +250,18 @@ export async function apiFetch(path, options = {}) {
   // /chat
   if (rawPath === "/chat") {
     await delay(700); // thinking…
-    return { reply: chatReply(body?.message) };
+    return { reply: chatReply(body?.message, body?.energy_unit === "kJ" ? "kJ" : "kcal") };
+  }
+
+  // /settings/energy-unit
+  if (rawPath === "/settings/energy-unit") {
+    if (method === "PUT") demoEnergyUnit = body?.unit === "kJ" ? "kJ" : "kcal";
+    return { unit: demoEnergyUnit };
+  }
+
+  // /settings/admin/*: not available in the demo, so the Admin card never renders.
+  if (seg[0] === "settings" && seg[1] === "admin") {
+    throw new Error("API tokens are not available on this account yet.");
   }
 
   // /settings/notifications

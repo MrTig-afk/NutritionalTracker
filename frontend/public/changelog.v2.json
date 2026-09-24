@@ -1,4 +1,9 @@
 [
+  { "v": 24, "text": "Show energy in kcal or kJ: pick it in Settings and the Tracker, Trends, Scan, Library and the AI assistant follow" },
+  { "v": 24, "text": "Entries added by Claude show a small 'via Claude' tag in the Tracker" },
+  { "v": 24, "text": "A HEIC photo your browser can't display now shows a placeholder and still scans, instead of a spinner that never ends" },
+  { "v": 24, "text": "A slim bar tells you when you're offline" },
+  { "v": 24, "text": "Trends highlights today by your own date, and the contact email in Settings is updated" },
   { "v": 23, "text": "Scan accepts iPhone HEIC photos, even in browsers that cannot open them" },
   { "v": 22, "text": "Calories you type are always taken as kcal: a big 950 kcal meal now shows 950 instead of being read as kilojoules" },
   { "v": 21, "text": "Editing a meal ingredient by weight keeps it inside its meal instead of splitting it out" },

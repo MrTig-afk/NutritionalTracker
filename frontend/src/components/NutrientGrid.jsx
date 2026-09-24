@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { NUTRIENT_META, getFallbackMeta, parseNumeric, extractServingGrams } from "../lib/nutrition";
+import { NUTRIENT_META, getFallbackMeta, parseNumeric, extractServingGrams, useEnergyUnit, toUnit } from "../lib/nutrition";
 import { inputStyle } from "../styles";
 import { Icon } from "./Icon";
 
 export default function NutrientGrid({ data, activeTab, per100gData }) {
+  const unit = useEnergyUnit();
   const [customGrams, setCustomGrams] = useState("");
   if (!data || Object.keys(data).length === 0) {
     return <div style={{ padding: "48px 16px", textAlign: "center", border: "2px dashed var(--border)", borderRadius: 16, color: "var(--muted)", fontSize: 13, fontStyle: "italic" }}>No data extracted for this view</div>;
@@ -45,15 +46,22 @@ export default function NutrientGrid({ data, activeTab, per100gData }) {
         {entries.map(([key, value]) => {
           const meta = NUTRIENT_META[key] ?? getFallbackMeta(key);
           const { display, adjusted, baseDisplay } = getDisplay(key, value);
+          const isKcal = key === "calories" && unit === "kJ";
+          let shownValue = typeof display === "string" ? (parseNumeric(display) ?? display) : display;
+          if (typeof display === "string" && display.trim().startsWith("<") && typeof shownValue === "number") shownValue = `<${shownValue}`;   // "<1g" is not "1g"
+          if (isKcal && typeof shownValue === "number") shownValue = toUnit(shownValue, unit);
+          const shownUnit = isKcal ? unit : meta.unit;
+          let shownBase = baseDisplay;
+          if (isKcal) { const baseNum = parseNumeric(baseDisplay); shownBase = baseNum !== null ? toUnit(baseNum, unit) : baseDisplay; }
           return (
             <div key={key} style={{ background: adjusted ? "var(--teal-lt)" : "var(--white)", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
               <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", lineHeight: 1.3 }}>{meta.label}</div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
-                <span style={{ fontSize: 20, fontWeight: 800, color: meta.color, lineHeight: 1.1 }}>{typeof display === "string" ? (parseNumeric(display) ?? display) : display}</span>
-                {meta.unit && <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{meta.unit}</span>}
+                <span style={{ fontSize: 20, fontWeight: 800, color: meta.color, lineHeight: 1.1 }}>{shownValue}</span>
+                {shownUnit && <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600 }}>{shownUnit}</span>}
                 {adjusted && <span style={{ fontSize: 10, color: "var(--accent)", marginLeft: 2 }}>adj.</span>}
               </div>
-              {adjusted && <div style={{ fontSize: 10, color: "var(--muted)" }}>base: {baseDisplay}</div>}
+              {adjusted && <div style={{ fontSize: 10, color: "var(--muted)" }}>base: {shownBase}</div>}
             </div>
           );
         })}
