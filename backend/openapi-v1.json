@@ -473,8 +473,8 @@
      }
     },
     "required": [
-     "template_id",
-     "date"
+     "date",
+     "template_id"
     ],
     "title": "LogTemplateChange",
     "type": "object"
