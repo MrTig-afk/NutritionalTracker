@@ -67,5 +67,20 @@ class NewWritesAreKcal(unittest.TestCase):
                          [(True, 358.5, "Breakfast"), (True, 950, "Breakfast")])
 
 
+class Hardening(unittest.TestCase):
+    """CodeRabbit on PR #37."""
+
+    def test_a_client_kcal_tag_does_not_skip_settling(self):
+        conn = FakeConn()
+        with mock.patch.object(main, "_check_goal_and_push", lambda *a: None):
+            route(self, conn).post("/log", json={"name": "x", "servings": 1,
+                                                 "nutrition": {"_kcal": True, "per_serving": {"calories": "1500 kJ"}}})
+        self.assertEqual(stored(conn, "daily_log")["per_serving"]["calories"], 358.5)
+
+    def test_migration_preview_survives_a_malformed_section(self):
+        import migrate_kcal
+        self.assertEqual(migrate_kcal._cals({"per_serving": "junk", "per_100g": {"calories": 600}}), [None, 600])
+
+
 if __name__ == "__main__":
     unittest.main()
