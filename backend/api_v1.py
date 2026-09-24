@@ -1427,9 +1427,9 @@ def revoke_all(user_id: str):
 
 
 # ---------------------------------------------------------------- /mcp: a minimal remote MCP server for claude.ai
-# On its own router, off `router`, so openapi_v1() (router.routes only) is unaffected. Phase 5 test scope: one
-# read-only tool. Revocation on the next call is NOT handled here (research implication 5): a connector token
-# stays valid until exp (up to 1h) once minted, because nothing looks up the Supabase session.
+# On its own router, off `router`, so openapi_v1() (router.routes only) is unaffected. Revocation on the next call
+# is NOT handled here yet: a connector token stays valid until exp (up to 1h) once minted, because nothing looks up
+# the Supabase session.
 MCP_URL = "https://nutritionaltracker.onrender.com/mcp"          # PRM resource: must equal the pasted URL exactly
 MCP_PRM_URL = "https://nutritionaltracker.onrender.com/.well-known/oauth-protected-resource/mcp"
 MCP_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")         # first = the one we offer
@@ -1542,8 +1542,8 @@ def mcp_caller(request: Request) -> tuple:
     return Caller(user_id, name="Claude", scopes=CONNECTOR_SCOPES), claims["client_id"]
 
 
-# One-time confirm codes. ponytail: in memory because Render runs one process (ledger P0-CR-3); move to Postgres
-# if we ever run more than one. A restart just expires pending codes, which is safe.
+# One-time confirm codes, in memory: this holds while Render runs one process (like the limiter); move them to
+# Postgres if it ever runs more than one. A restart just expires pending codes, which is safe.
 PENDING_TTL, PENDING_MAX = 600, 20
 _pending: dict = {}   # code -> (user_id, client_id, [change], created_at, template etag or None)
 _pending_lock = threading.Lock()
