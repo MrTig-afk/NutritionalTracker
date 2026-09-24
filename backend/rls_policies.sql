@@ -27,7 +27,10 @@
 -- policy block below with the table added to the list.
 --
 -- Fail-closed: if app.user_id is unset, current_setting(..., true) returns NULL,
--- so `user_id = NULL` is false and no rows are visible.
+-- so `user_id = NULL` is false and no rows are visible. On a pooled connection
+-- that set it in an earlier transaction it reads '' instead, so the policies
+-- wrap it in NULLIF(..., ''): an empty setting matches nothing either.
+-- To apply this to a live database, re-run this file, then backend/api_v1.sql.
 --
 -- Run in the Neon SQL editor as neondb_owner. Idempotent (the role's password
 -- is only set on first creation).
@@ -61,8 +64,8 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS user_isolation ON %I;', t);
     EXECUTE format($f$
       CREATE POLICY user_isolation ON %I
-        USING      (user_id = current_setting('app.user_id', true))
-        WITH CHECK (user_id = current_setting('app.user_id', true));
+        USING      (user_id = NULLIF(current_setting('app.user_id', true), ''))
+        WITH CHECK (user_id = NULLIF(current_setting('app.user_id', true), ''));
     $f$, t);
   END LOOP;
 END $$;
