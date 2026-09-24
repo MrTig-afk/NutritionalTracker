@@ -34,7 +34,7 @@ TABLES = {"daily_log": ("log_id", "date"), "meal_template_items": ("item_id", "t
 
 
 def _cals(n: dict) -> list:
-    return [(n.get(k) or {}).get("calories") for k in ("per_serving", "per_100g")] if (
+    return [n[k].get("calories") if isinstance(n.get(k), dict) else None for k in ("per_serving", "per_100g")] if (
         isinstance(n.get("per_serving"), dict) or isinstance(n.get("per_100g"), dict)) else [n.get("calories")]
 
 

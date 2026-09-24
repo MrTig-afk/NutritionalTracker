@@ -12,14 +12,18 @@ MACRO_KEYS = ("calories", "protein", "carbs", "fat", "fibre")
 _NUTRIENT_OF = {"protein": "protein", "carbs": "carbohydrates", "fat": "fat", "fibre": "fibre"}
 
 
+# "1,500" as well as "1500.5"; never starts mid-number, so "15,00" matches "15" rather than "00"
+_NUM = r"(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"   # ".5" too
+
+
 def _parse_num(v) -> float:
     if v is None:
         return 0.0
     if isinstance(v, (int, float)):
         return float(v)
-    m = re.search(r"[\d.]+", str(v))
+    m = re.search(_NUM, str(v))
     try:
-        return float(m.group()) if m else 0.0
+        return float(m.group().replace(",", "")) if m else 0.0
     except ValueError:  # "." alone, or "1.2.3"
         return 0.0
 
@@ -59,8 +63,6 @@ def entry_macros(nutrition_raw, servings) -> dict:
     return out
 
 
-# "1,500" as well as "1500.5"; never starts mid-number, so "15,00" matches nothing rather than "00"
-_NUM = r"(?<![\d,.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
 _KCAL_NUM = re.compile(_NUM + r"\s*(?:kcal|kilocalories?)", re.I)
 _KJ_NUM = re.compile(_NUM + r"\s*(?:kj|kilojoules?)", re.I)
 
@@ -75,7 +77,7 @@ def settle_kcal(nutrition, legacy_guess: bool) -> dict:
     as entry_macros() shows it today. A number from a client is taken as kcal.
     """
     n = load_nutrition(nutrition)
-    if n.get("_kcal") is True:
+    if n.get("_kcal") is True and legacy_guess:   # our own stored tag; a client's tag is not trusted
         return n
     out = dict(n)
     sections = [k for k in ("per_serving", "per_100g") if isinstance(out.get(k), dict)] or [None]
@@ -124,5 +126,11 @@ if __name__ == "__main__":
     assert settle_kcal({"per_serving": {"calories": "1500kJ (358 kcal)"}}, True)["per_serving"]["calories"] == 358.0
     assert settle_kcal({"per_serving": {"calories": "1,500 kJ"}}, False)["per_serving"]["calories"] == 358.5
     assert settle_kcal({"per_serving": {"calories": "1,050 kcal"}}, False)["per_serving"]["calories"] == 1050.0
+    # a client's _kcal tag is not trusted (its unit strings still settle); our own stored tag is
+    assert settle_kcal({"_kcal": True, "per_serving": {"calories": "1500 kJ"}}, False)["per_serving"]["calories"] == 358.5
+    assert settle_kcal({"_kcal": True, "per_serving": {"calories": 1500}}, True)["per_serving"]["calories"] == 1500
+    # bare comma-grouped numbers read in full
+    assert _parse_num("1,500") == 1500 and _parse_num("15,00") == 15 and _parse_num("250 kcal") == 250
+    assert _parse_num(".5 g") == 0.5 and _parse_num("0.5g") == 0.5 and _parse_num("1.2.3") == 1.2
     assert entry_macros(settle_kcal({"per_serving": {"calories": 950}}, True), 1)["calories"] == 227.1
     print("ok")
