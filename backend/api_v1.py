@@ -1408,6 +1408,26 @@ def revoke_token(token_id: str, authorization: Optional[str] = Header(default=No
     return {"revoked": True}
 
 
+@settings_router.get("/settings/admin/health")
+def admin_health(authorization: Optional[str] = Header(default=None)):
+    """The Admin panel's API health, from memory only: reading it never wakes Neon."""
+    user_id = _admin_login(authorization)
+    used = m.budget_used()
+    return {"requests_left_today": requests_left(user_id), "resets_at": _zulu(next_melbourne_midnight()),
+            "neon_budget_percent": round(used * 100, 1), "api_paused": used >= 0.9,
+            "budget_period_resets": m.neon_next_period_start(datetime.now(timezone.utc).date()).isoformat()}
+
+
+@settings_router.post("/settings/admin/test-alert")
+def admin_test_alert(authorization: Optional[str] = Header(default=None)):
+    """Sends through the in-memory device list, the path a 'Neon is down' alert takes."""
+    _admin_login(authorization)
+    # No device count: the send thread reloads an empty list first, so a count
+    # taken here could say 0 for an alert that then arrives.
+    m._admin_push("Test alert", "NutriScan admin alerts reach this device.")
+    return {"sent": True}
+
+
 def revoke_all(user_id: str):
     """Freezing an account also revokes its API tokens: the freeze's durable half
     is a Supabase ban, which a token never consults."""
