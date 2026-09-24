@@ -202,6 +202,30 @@ class Confirm(PreviewBase):
         self.assertIn("changed since the preview", text)
         self.assertEqual(self.statements("INSERT INTO daily_log"), [])
 
+    def test_template_edited_during_the_preview_is_refused(self):
+        real = api_v1.run_changes
+
+        def edit_mid_preview(*a, **k):   # the app saves an edit while the preview transaction runs
+            out = real(*a, **k)
+            self.template_rows[1] = ("i-oats", "Oats", 1.0, self.template_rows[1][3])
+            return out
+        with mock.patch.object(api_v1, "run_changes", edit_mid_preview):
+            code = self.preview({"template_id": "t1", "date": TODAY}, name="log_template")
+        is_err, text = self.confirm(code)
+        self.assertTrue(is_err)
+        self.assertIn("changed since the preview", text)
+
+    def test_template_retry_after_save_replays(self):
+        code = self.preview({"template_id": "t1", "date": TODAY}, name="log_template")
+        first = self.confirm(code)
+        self.assertFalse(first[0], first[1])
+        self.template_rows[1] = ("i-oats", "Oats", 1.0, self.template_rows[1][3])   # edited after the save
+        self.conn.executed.clear()
+        second = self.confirm(code)   # claude.ai retries a lost answer
+        self.assertFalse(second[0], second[1])
+        self.assertEqual(json.loads(second[1]), json.loads(first[1]))
+        self.assertEqual(self.statements("INSERT INTO daily_log"), [])
+
     def test_unchanged_template_is_logged(self):
         code = self.preview({"template_id": "t1", "date": TODAY}, name="log_template")
         is_err, text = self.confirm(code)

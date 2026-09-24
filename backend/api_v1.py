@@ -1564,9 +1564,10 @@ def _preview(request: Request, caller: Caller, client_id: str, name: str, args: 
         change = WRITE_TOOLS[name][0].model_validate(args)
     except ValidationError as e:   # validation_problem drops loc[0] (FastAPI's "body"): stand in for it
         raise validation_problem([{**err, "loc": ("arguments", *err["loc"])} for err in e.errors()])
-    _, body = run_changes(request, caller, [change], True, None)
-    # log_template carries no if_match, so remember the template the preview used; confirm refuses if it moved
+    # log_template carries no if_match, so remember the template the preview uses; confirm refuses if it moved.
+    # Read before the preview: an edit landing in between then shows as a mismatch, never as a silent swap.
     guard = _template_etag(caller, change.template_id) if change.type == "log_template" else None
+    _, body = run_changes(request, caller, [change], True, None)
     code, now = secrets.token_urlsafe(16), time.time()
     with _pending_lock:
         for k in [k for k, v in _pending.items() if now - v[3] > PENDING_TTL]:
@@ -1595,6 +1596,10 @@ def _confirm(request: Request, caller: Caller, client_id: str, code) -> str:
         if p.status in (404, 409, 412):
             raise Problem(p.status, p.error_type, "This changed since the preview. Ask again.") from p
         raise
+    if entry[4]:   # saved: a retry must replay the answer, not re-check a template edited since
+        with _pending_lock:
+            if code in _pending:
+                _pending[code] = (*entry[:4], None)
     return json.dumps({"saved": True, **jsonable_encoder(body)}, default=str)
 
 
