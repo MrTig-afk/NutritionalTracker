@@ -1,4 +1,5 @@
 [
+  { "v": 23, "text": "Scan accepts iPhone HEIC photos, even in browsers that cannot open them" },
   { "v": 22, "text": "Calories you type are always taken as kcal: a big 950 kcal meal now shows 950 instead of being read as kilojoules" },
   { "v": 21, "text": "Editing a meal ingredient by weight keeps it inside its meal instead of splitting it out" },
   { "v": 21, "text": "The AI assistant sees today's log first thing in the morning, not yesterday's" },
