@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api";
-import { parseNumeric } from "../lib/nutrition";
+import { parseNumeric, useEnergyUnit, toUnit } from "../lib/nutrition";
 import { card, inputStyle, primaryBtn, errorBanner } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 import { confirm } from "../lib/confirm";
 
 export default function LibraryTab({ onAddToLog, onLogAdded }) {
+  const unit = useEnergyUnit();
   // ── Folders ──────────────────────────────────────────────────────────────
   const [folders, setFolders]         = useState([]);
   const [openFolder, setOpenFolder]   = useState(null);
@@ -210,7 +211,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
     const prot = parseNumeric(n.protein)       || 0;
     const carb = parseNumeric(n.carbohydrates) || 0;
     const fat  = parseNumeric(n.fat)           || 0;
-    return `${cal}kcal · P ${prot}g · C ${carb}g · F ${fat}g`;
+    return `${toUnit(cal, unit)}${unit} · P ${prot}g · C ${carb}g · F ${fat}g`;
   };
 
   if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px 0" }}><Spin size={24} /></div>;

@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { apiFetch } from "../lib/api";
-import { resolveNutrition, extractServingGrams, parseNumeric } from "../lib/nutrition";
+import { resolveNutrition, extractServingGrams, parseNumeric, useEnergyUnit, fromUnit, toUnit } from "../lib/nutrition";
 import { overlayBg, modalBox, modalHeader, modalTitle, inputStyle, labelStyle, mintBtn, pillRow, macroCells } from "../styles";
 import { Icon, Spin } from "./Icon";
 
 export default function AddToLogModal({ item, onClose, onAdded }) {
+  const unit = useEnergyUnit();
   const [mode, setMode] = useState("serving");
   const [servings, setServings] = useState("1");
   const [grams, setGrams] = useState("");
@@ -35,7 +36,7 @@ export default function AddToLogModal({ item, onClose, onAdded }) {
 
   const factor = scalingInfo?.factor ?? 1;
   const getVal = (key) => (parseNumeric(scaledNutrition[key]) || 0) * factor;
-  const cal  = mode === "manual" ? (parseFloat(manualCal)   || 0) : getVal("calories");
+  const cal  = mode === "manual" ? fromUnit(parseFloat(manualCal) || 0, unit) : getVal("calories");
   const prot = mode === "manual" ? (parseFloat(manualProt)  || 0) : getVal("protein");
   const carb = mode === "manual" ? (parseFloat(manualCarb)  || 0) : getVal("carbohydrates");
   const fat  = mode === "manual" ? (parseFloat(manualFat)   || 0) : getVal("fat");
@@ -101,7 +102,7 @@ export default function AddToLogModal({ item, onClose, onAdded }) {
         {mode === "manual" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[["Calories (kcal)", manualCal, setManualCal], ["Protein (g)", manualProt, setManualProt], ["Carbs (g)", manualCarb, setManualCarb], ["Fat (g)", manualFat, setManualFat], ["Fibre (g)", manualFibre, setManualFibre]].map(([label, val, set]) => (
+              {[[`Calories (${unit})`, manualCal, setManualCal], ["Protein (g)", manualProt, setManualProt], ["Carbs (g)", manualCarb, setManualCarb], ["Fat (g)", manualFat, setManualFat], ["Fibre (g)", manualFibre, setManualFibre]].map(([label, val, set]) => (
                 <div key={label}>
                   <label style={{ ...labelStyle, fontSize: 10 }}>{label}</label>
                   <input type="number" min="0" step="any" value={val} onChange={e => set(e.target.value)} placeholder="0" style={inputStyle} />
@@ -118,7 +119,7 @@ export default function AddToLogModal({ item, onClose, onAdded }) {
         )}
         <div style={{ display: "flex", gap: 8 }}>
           {macroCells([
-            { label: "Cal",   value: cal,  unit: "kcal", color: "var(--orange)"  },
+            { label: "Cal",   value: toUnit(cal, unit),  unit, digits: unit === "kJ" ? 0 : 1, color: "var(--orange)"  },
             { label: "Prot",  value: prot, unit: "g",    color: "var(--accent)"    },
             { label: "Carbs", value: carb, unit: "g",    color: "var(--purple)"  },
             { label: "Fat",   value: fat,  unit: "g",    color: "var(--brown)"   },

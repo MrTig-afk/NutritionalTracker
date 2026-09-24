@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch } from "../lib/api";
+import { todayLocal, useEnergyUnit, toUnit } from "../lib/nutrition";
 import { Icon, Spin } from "../components/Icon";
 
 export default function TrendsTab() {
+  const unit = useEnergyUnit();
   const [range,     setRange]     = useState("weekly");
   const [trendData, setTrendData] = useState(null);
   const [loading,   setLoading]   = useState(true);   // the first fetch starts on mount
@@ -22,7 +24,7 @@ export default function TrendsTab() {
   }, [range]);
 
   const macros = [
-    { key: "calories", label: "Cal",     unit: "kcal", color: "var(--orange)", icon: "local_fire_department" },
+    { key: "calories", label: "Cal",     unit,         color: "var(--orange)", icon: "local_fire_department" },
     { key: "protein",  label: "Protein", unit: "g",    color: "var(--accent)",   icon: "fitness_center"        },
     { key: "carbs",    label: "Carbs",   unit: "g",    color: "var(--purple)", icon: "grain"                 },
     { key: "fat",      label: "Fat",     unit: "g",    color: "var(--brown)",  icon: "water_drop"            },
@@ -31,10 +33,12 @@ export default function TrendsTab() {
   const avgFor = key => {
     if (!trendData) return 0;
     const nz = trendData.map(d => d[key]).filter(v => v > 0);
-    return nz.length ? Math.round(nz.reduce((a, b) => a + b, 0) / nz.length) : 0;
+    if (!nz.length) return 0;
+    const avg = nz.reduce((a, b) => a + b, 0) / nz.length;
+    return Math.round(key === "calories" ? toUnit(avg, unit) : avg);
   };
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayLocal();
 
   return (
     <div style={{ maxWidth: 960, margin: "0 auto" }}>
@@ -102,7 +106,7 @@ export default function TrendsTab() {
                   {macros.map(m => (
                     <div key={m.key} style={{ textAlign: "center" }}>
                       <div style={{ fontSize: 14, fontWeight: 700, color: hasData && day[m.key] > 0 ? m.color : "var(--border)" }}>
-                        {day[m.key] > 0 ? Math.round(day[m.key]) : "—"}
+                        {day[m.key] > 0 ? Math.round(m.key === "calories" ? toUnit(day[m.key], unit) : day[m.key]) : "—"}
                       </div>
                       {day[m.key] > 0 && <div style={{ fontSize: 9, color: "var(--muted)" }}>{m.unit}</div>}
                     </div>

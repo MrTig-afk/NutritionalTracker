@@ -125,7 +125,7 @@ class KcalEverywhere(unittest.TestCase):
         day_query = [p for sql, p in conn.executed if "date = %s" in sql][0]
         self.assertEqual(day_query[1], "2026-09-25")
 
-    def _chat(self, conn, client_date):
+    def _chat(self, conn, client_date, energy_unit=None):
         seen = {}
 
         class Groq:
@@ -137,9 +137,24 @@ class KcalEverywhere(unittest.TestCase):
                         return mock.Mock(choices=[mock.Mock(message=mock.Mock(content="hi"))])
         client = route(self, conn)
         with mock.patch.object(main, "groq_client", Groq), mock.patch.object(main, "_allow_chat", lambda u: True):
-            r = client.post("/chat", json={"message": "how am I doing", "client_date": client_date})
+            r = client.post("/chat", json={"message": "how am I doing", "client_date": client_date,
+                                            **({"energy_unit": energy_unit} if energy_unit else {})})
         self.assertEqual(r.status_code, 200)
         return seen["system"]
+
+    def test_assistant_answers_in_kj(self):
+        conn = FakeConn([
+            ("FROM user_goals", [(2000, 150, 250, 65, 30)]),
+            ("date = %s", [("Big meal", 1.0, KCAL_950)]),
+            ("date >= %s", [("2026-09-24", 1.0, KCAL_950)]),
+        ])
+        system = self._chat(conn, "2026-09-24", energy_unit="kJ")
+        for s in ("Goals: 8368kJ", "Big meal (×1.0s): 3975kJ", "Today totals: 3975kJ",
+                  "Remaining today: 4393kJ", "7-day avg (1 days logged): 3975kJ", "Give energy in kJ only"):
+            self.assertIn(s, system)
+        self.assertNotIn("kcal /", system)
+        r = route(self, FakeConn()).post("/chat", json={"message": "hi", "energy_unit": "joules"})
+        self.assertEqual(r.status_code, 422)
 
 
 class TemplateDeleteOwnership(unittest.TestCase):

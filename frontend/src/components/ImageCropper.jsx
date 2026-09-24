@@ -13,9 +13,11 @@ export default function ImageCropper({ file, onConfirm, onCancel }) {
   const [imageLoaded, setImageLoaded] = useState(false);
 
   useEffect(() => {
+    let live = true;
     const url = URL.createObjectURL(file);
     const img = new window.Image();
     img.onload = () => {
+      if (!live) return;
       imgRef.current = img;
       const container = containerRef.current;
       const maxW = container ? container.clientWidth : 360;
@@ -26,9 +28,14 @@ export default function ImageCropper({ file, onConfirm, onCancel }) {
       setCropRect({ x: Math.round(cw * 0.1), y: Math.round(ch * 0.1), w: Math.round(cw * 0.8), h: Math.round(ch * 0.8) });
       setImageLoaded(true);
     };
+    // StrictMode runs this effect, cleans it up, then runs it again — the
+    // cleanup revokes the first image's blob URL, so that first image fails
+    // to load. Without `live`, every photo (decodable or not) would be added
+    // as undecodable in dev.
+    img.onerror = () => { if (live) onConfirm(null, true); };
     img.src = url;
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    return () => { live = false; URL.revokeObjectURL(url); };
+  }, [file, onConfirm]);
 
   useEffect(() => {
     if (!imageLoaded || !cropRect || !canvasRef.current) return;

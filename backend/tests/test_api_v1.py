@@ -107,6 +107,15 @@ class Tokens(V1Case):
             r = self.get("/v1/me")
         self.assertEqual((r.status_code, r.json()["error_type"]), (423, "account_locked"))
 
+    def test_frozen_account_message_names_the_contact_email(self):
+        want = "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."
+        with mock.patch.object(main, "_frozen", {"user-1"}), \
+             mock.patch.object(main, "verify_claims", lambda a: {"sub": "user-1", "email": "u@example.com"}):
+            for fn in (main.get_user_id, main.get_user_info):
+                with self.assertRaises(main.HTTPException) as cm:
+                    fn("Bearer login")
+                self.assertEqual((cm.exception.status_code, cm.exception.detail["message"]), (423, want), fn.__name__)
+
     def test_token_is_refused_on_app_routes(self):
         # PATs only reach /v1: the old routes verify a Supabase JWT, which a PAT is not
         for method, path in (("get", "/log"), ("delete", "/account"), ("get", "/settings/api-tokens")):

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Analytics } from "@vercel/analytics/react";
-import { supabase } from "./lib/api";
+import { supabase, apiFetch } from "./lib/api";
 import { PALETTE_CSS } from "./styles";
+import { EnergyUnitContext } from "./lib/nutrition";
 import { CHANGELOG_VERSION } from "./version";
 import { Icon, Spin } from "./components/Icon";
 import AddToLogModal from "./components/AddToLogModal";
@@ -52,6 +53,14 @@ export default function App() {
     || (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light")
   );
   const [keyboardUp, setKeyboardUp] = useState(false);
+  // The unit is kept with the account it belongs to, so another account on this
+  // device reads kcal until its own unit arrives.
+  const uid = session?.user?.id;
+  const [unitPref, setUnitPref] = useState({ uid: null, unit: "kcal" });
+  const energyUnit = unitPref.uid === uid ? unitPref.unit : "kcal";
+  const unitChosen = useRef(null);   // uid that chose in Settings: that choice beats the slower initial GET
+  const chooseEnergyUnit = useCallback((u) => { unitChosen.current = uid; setUnitPref({ uid, unit: u }); }, [uid]);
+  const [online, setOnline] = useState(() => navigator.onLine);
 
   // iOS pans the page when the keyboard opens, which drags the fixed bottom
   // nav into the middle of the screen. Hide it while any input has the
@@ -76,6 +85,23 @@ export default function App() {
       setSession(session);
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!uid) return;
+    let live = true;
+    apiFetch("/settings/energy-unit")
+      .then(r => { if (live && unitChosen.current !== uid) setUnitPref({ uid, unit: r.unit === "kJ" ? "kJ" : "kcal" }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [uid]);
+
+  useEffect(() => {
+    const onOnline = () => setOnline(true);
+    const onOffline = () => setOnline(false);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
   }, []);
 
   // Boot fallback: never leave the user on the spinner. If the auth server is
@@ -136,6 +162,12 @@ export default function App() {
     if (tabId === "library") setLibraryMountKey(k => k + 1);
   }, []);
 
+  const offlineBar = !online && (
+    <div role="status" style={{ background: "var(--orange-lt)", color: "var(--orange)", fontSize: 12, fontWeight: 700, padding: "6px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+      <Icon n="cloud_off" size={16} /> You're offline
+    </div>
+  );
+
   if (session === undefined) {
     return (
       <>
@@ -151,6 +183,7 @@ export default function App() {
     return (
       <>
         <style>{PALETTE_CSS}</style>
+        {offlineBar}
         {updateReady && (
           <button onClick={handleUpdate}
             style={{ position: "fixed", top: "calc(12px + env(safe-area-inset-top, 0px))", left: "50%", transform: "translateX(-50%)", zIndex: 100, background: "var(--teal)", color: "white", border: "none", borderRadius: 20, padding: "8px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(0,109,119,0.4)" }}>
@@ -166,7 +199,7 @@ export default function App() {
   const userInitial = (session?.user?.email || "U")[0].toUpperCase();
 
   return (
-    <>
+    <EnergyUnitContext.Provider value={energyUnit}>
       <style>{PALETTE_CSS}</style>
       <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex", flexDirection: "column" }}>
         <ConfirmHost />
@@ -222,6 +255,8 @@ export default function App() {
           </div>
         </div>
 
+        {offlineBar}
+
         {/* Update banner — kept out of the header so it never crowds it */}
         {updateReady && (
           <button onClick={() => setShowChangelog(true)}
@@ -243,7 +278,7 @@ export default function App() {
             <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
           </div>
           {activeMainTab === "trends" && <TrendsTab />}
-          {activeMainTab === "settings" && <SettingsTab />}
+          {activeMainTab === "settings" && <SettingsTab setEnergyUnit={chooseEnergyUnit} />}
         </div>
 
         {/* Bottom Navigation — AI is a normal tab like everything else.
@@ -310,6 +345,6 @@ export default function App() {
           Demo · synthetic data
         </div>
       )}
-    </>
+    </EnergyUnitContext.Provider>
   );
 }

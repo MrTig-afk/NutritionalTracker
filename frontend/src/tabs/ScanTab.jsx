@@ -67,12 +67,12 @@ export default function ScanTab({ onAddToLog }) {
     setCropperQueue(files); setCropperFile(files[0]);
   }, []);
 
-  const handleCropConfirm = useCallback(async (cropData) => {
+  const handleCropConfirm = useCallback(async (cropData, undecodable = false) => {
     const file = cropperFile; const remaining = cropperQueue.slice(1);
     setLoadingMsg("Processing...");
-    const previewUrl = createPreviewUrl(file);
-    const optimized  = await applyPipelineToFile(file, cropData);
-    const imageEntry = { file, preview: previewUrl, cropData, persistentUrl: null };
+    const previewUrl = undecodable ? null : createPreviewUrl(file);
+    const optimized  = undecodable ? file : await applyPipelineToFile(file, cropData);
+    const imageEntry = { file, preview: previewUrl, cropData, persistentUrl: null, undecodable };
     setImages(prev => [...prev, imageEntry]); setOptimizedFiles(prev => [...prev, optimized]);
     setResults(null); setError(null); setActiveIndex(0); setLoadingMsg("");
     accumulatedOptimizedRef.current = [...accumulatedOptimizedRef.current, optimized];
@@ -110,7 +110,8 @@ export default function ScanTab({ onAddToLog }) {
   }, [images, optimizedFiles, results, handleClear, switchToIndex]);
 
   const currentResult  = results?.[activeIndex] ?? null;
-  const currentPreview = images[activeIndex]?.preview || images[activeIndex]?.persistentUrl || accumulatedImages[activeIndex]?.preview || null;
+  const srcOf = useCallback((i) => images[i]?.undecodable ? null : (images[i]?.preview || images[i]?.persistentUrl || accumulatedImages[i]?.preview || null), [images, accumulatedImages]);
+  const currentPreview = srcOf(activeIndex);
   const allOptimized   = optimizedFiles.length === images.length && images.length > 0;
 
   return (
@@ -147,7 +148,15 @@ export default function ScanTab({ onAddToLog }) {
               <div style={{ position: "relative", border: "1px solid var(--border)", background: "var(--white)", borderRadius: 20, padding: 12, height: 280, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                 {currentPreview
                   ? <img src={currentPreview} alt="Preview" style={{ maxHeight: "100%", maxWidth: "100%", borderRadius: 12, objectFit: "contain" }} />
-                  : <div style={{ color: "var(--muted)", fontSize: 13 }}>No preview</div>
+                  : images[activeIndex]?.undecodable
+                    ? (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 16, background: "var(--off)", borderRadius: 12, width: "100%", height: "100%" }}>
+                        <Icon n="photo" size={28} style={{ color: "var(--accent)" }} />
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", wordBreak: "break-all", textAlign: "center" }}>{images[activeIndex]?.file?.name}</div>
+                        <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center" }}>This browser can't show HEIC photos, but NutriScan can still read it.</div>
+                      </div>
+                    )
+                    : <div style={{ color: "var(--muted)", fontSize: 13 }}>No preview</div>
                 }
                 {images.length > 1 && (
                   <>
@@ -164,7 +173,7 @@ export default function ScanTab({ onAddToLog }) {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {images.map((img, i) => {
-                  const thumbSrc = img.preview || img.persistentUrl || accumulatedImages[i]?.preview || null;
+                  const thumbSrc = srcOf(i);
                   return (
                     <div key={i} onClick={() => setActiveIndex(i)} style={{ position: "relative", width: 56, height: 56, borderRadius: 12, overflow: "hidden", border: `2px solid ${i === activeIndex ? "var(--teal)" : "var(--border)"}`, cursor: "pointer", flexShrink: 0, opacity: i === activeIndex ? 1 : 0.6 }}>
                       {thumbSrc ? <img src={thumbSrc} alt={`Thumb ${i+1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <div style={{ width: "100%", height: "100%", background: "var(--off)" }} />}
@@ -244,7 +253,7 @@ export default function ScanTab({ onAddToLog }) {
                   <p style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Select result</p>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {results.map((_, i) => {
-                      const thumbSrc = images[i]?.preview || images[i]?.persistentUrl || accumulatedImages[i]?.preview || null;
+                      const thumbSrc = srcOf(i);
                       return (
                         <button key={i} onClick={() => switchToIndex(i, results)}
                           style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 10, border: `1px solid ${activeIndex === i ? "var(--teal)" : "var(--border)"}`, background: activeIndex === i ? "var(--teal-lt)" : "var(--white)", cursor: "pointer" }}>

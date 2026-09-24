@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { apiFetch } from "../lib/api";
-import { todayLocal } from "../lib/nutrition";
+import { todayLocal, useEnergyUnit } from "../lib/nutrition";
 import { Icon, Spin } from "./Icon";
 
 function renderInline(text, key) {
@@ -105,6 +105,7 @@ function renderMarkdown(text) {
 }
 
 export default function ChatAssistant({ open }) {
+  const unit = useEnergyUnit();
   const [messages, setMessages] = useState([
     { role: "assistant", text: "Hey! What would you like to know about your nutrition today?", greeting: true }
   ]);
@@ -157,7 +158,7 @@ export default function ChatAssistant({ open }) {
     setMessages(prev => [...prev, { role: "user", text }]);
     setLoading(true);
     try {
-      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages.filter(m => !m.greeting), client_date: todayLocal() }) });
+      const data = await apiFetch("/chat", { method: "POST", body: JSON.stringify({ message: text, history: messages.filter(m => !m.greeting), client_date: todayLocal(), energy_unit: unit }) });
       setMessages(prev => [...prev, { role: "assistant", text: data.reply }]);
     } catch (e) {
       setError(e.message || "Something went wrong. Try again.");

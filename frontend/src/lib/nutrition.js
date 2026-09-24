@@ -1,5 +1,14 @@
+import { createContext, useContext } from "react";
+
 const MAX_IMAGE_PX = 1024;
 const JPEG_QUALITY = 0.85;
+
+const KJ_PER_KCAL = 4.184;
+// Energy is stored, sent and computed in kcal; kJ is display only (PRD change 2026-09-24).
+export const EnergyUnitContext = createContext("kcal");
+export const useEnergyUnit = () => useContext(EnergyUnitContext);
+export const toUnit = (kcal, unit) => (unit === "kJ" ? Math.round(kcal * KJ_PER_KCAL) : kcal);
+export const fromUnit = (value, unit) => (unit === "kJ" ? value / KJ_PER_KCAL : value);
 
 export const NUTRIENT_META = {
   calories:      { label: "Calories",       unit: "kcal", color: "var(--text)" },
