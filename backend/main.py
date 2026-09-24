@@ -55,6 +55,14 @@ PRIMARY_MODEL  = "gemini-2.5-flash"
 FALLBACK_MODEL = "gemini-3.6-flash"  # gemini-2.0-flash was retired (404); this is Google's redirect target and a separate capacity pool
 MAX_IMAGE_PX   = 1024
 MAX_UPLOAD_MB  = 15  # reject oversized uploads before they hit memory/Gemini
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+# Whole-request caps for the scan routes: a 15 MB image (10 for the batch) plus
+# 1 MB of multipart overhead. The server never reads past Content-Length.
+_SCAN_BODY_CAP = {"/analyze-label": (MAX_UPLOAD_MB + 1) * 1024 * 1024,
+                  "/analyze-labels": (10 * MAX_UPLOAD_MB + 1) * 1024 * 1024}
+APP_BODY_CAP = 64 * 1024   # every other app write (a real nutrition object is under 1 KB); /v1 has its own 64 KB cap
+# /chat carries the whole conversation (the frontend sends every message), so a long session needs room.
+_BODY_CAP = {**_SCAN_BODY_CAP, "/chat": 256 * 1024}
 MAX_DECODED_PIXELS    = 30_000_000  # decoded-pixel cap (~90 MB RGB): MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
 ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}  # what this Pillow decodes; the PWA sends canvas JPEGs (HEIC needs pillow-heif)
 SCAN_BURST_USER = 8   # scan requests per user per minute, before the paid Gemini call (the PWA retries a flaky call up to 3x per tap)
@@ -568,6 +576,20 @@ async def abuse_guard(request: Request, call_next):
     if _spike(f"req:{ip}", 300, 60):                       # app-level flood / scraping
         _blocked[ip] = time.time() + 600
         notify_admin("ip_flood", "IP flood blocked", f"{ip} sent 300+ requests in a minute — blocked for 10 min.")
+    writes = request.method in ("POST", "PUT", "PATCH") and not request.url.path.startswith("/v1/")
+    cap = _BODY_CAP.get(request.url.path, APP_BODY_CAP) if writes else None
+    # Refuse on the declared size, before the body is read or spooled (after the flood
+    # counter, so probing the limit still counts). No length (a proxy may re-chunk): fall
+    # through to the route's own checks.
+    declared = request.headers.get("content-length", "") if cap else ""
+    if declared.isdigit() and int(declared) > cap:
+        if _spike("oversize", 10, 600):
+            notify_admin("oversize", "Oversized requests",
+                         "Over 10 too-large uploads or requests in 10 minutes — someone may be probing the size limits.")
+        scan = request.url.path in _SCAN_BODY_CAP
+        return JSONResponse({"detail": {"error_type": "file_too_large" if scan else "payload_too_large", "retryable": False,
+                                        "message": f"Upload too large (max {MAX_UPLOAD_MB} MB per image)." if scan
+                                        else "Request too large."}}, status_code=413)
     response = await call_next(request)
     if response.status_code == 404 and _spike(f"404:{ip}", 30, 300):   # /wp-admin, /.env walk, id guessing
         _blocked[ip] = time.time() + 600
@@ -1757,8 +1779,7 @@ async def analyze_label(
     _scan_burst_check(user_id, _client_ip(request))
     check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)
     image_id  = str(uuid.uuid4())
-    raw_bytes = await file.read()
-    if len(raw_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+    if (file.size or 0) > MAX_UPLOAD_BYTES or len(raw_bytes := await file.read()) > MAX_UPLOAD_BYTES:
         if _spike("oversize", 10, 600):
             notify_admin("oversize", "Oversized uploads",
                          "Over 10 too-large image uploads in 10 minutes — someone may be probing the upload limit.")
@@ -1835,8 +1856,8 @@ async def analyze_labels(
     image_ids        = []
 
     for f in files:
-        raw_bytes       = await f.read()
-        if len(raw_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+        # size before read: one huge file inside the batch cap is refused without loading it
+        if (f.size or 0) > MAX_UPLOAD_BYTES or len(raw_bytes := await f.read()) > MAX_UPLOAD_BYTES:
             if _spike("oversize", 10, 600):
                 notify_admin("oversize", "Oversized uploads",
                              "Over 10 too-large image uploads in 10 minutes — someone may be probing the upload limit.")
