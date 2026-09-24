@@ -155,6 +155,7 @@ class Confirm(PreviewBase):
 
     def test_code_expires(self):
         code = self.preview()
+        api_v1._apps[("admin-1", "c1")] = [True, time.time() + api_v1.PENDING_TTL + 1]   # gate quiet at the moved clock
         with mock.patch.object(api_v1.time, "time", return_value=time.time() + api_v1.PENDING_TTL + 1):
             is_err, text = self.confirm(code)
         self.assertTrue(is_err)
@@ -163,6 +164,7 @@ class Confirm(PreviewBase):
 
     def test_other_client_cannot_use_code(self):
         code = self.preview()
+        api_v1._apps[("admin-1", "c2")] = [True, time.time()]   # a known second connection: the gate stays quiet
         is_err, _ = self.confirm(code, tok=token(client_id="c2"))
         self.assertTrue(is_err)
         self.assertEqual(self.conn.commits, 0)

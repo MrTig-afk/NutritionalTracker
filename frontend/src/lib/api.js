@@ -82,7 +82,9 @@ export async function apiFetch(path, options = {}) {
       await confirm(msg, { title: "Account locked", okLabel: "OK", cancel: false });
       await supabase.auth.signOut();
     }
-    throw new Error(msg);
+    const e = new Error(msg);
+    e.status = res.status;   // callers tell "not for this account" (403) from a failure
+    throw e;
   }
   return res.json();
 }

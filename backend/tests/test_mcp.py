@@ -35,6 +35,7 @@ class WithConnectorAuth:
             p = mock.patch.object(main, target, value)
             p.start()
             self.addCleanup(p.stop)
+        api_v1._apps[("admin-1", "c1")] = [True, time.time()]   # a known, active connection: the gate stays quiet
 
     def rpc(self, body, tok=None, headers=None):
         h = dict(headers or {})

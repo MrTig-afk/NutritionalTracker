@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { supabase } from "../lib/api";
+import { supabase, apiFetch } from "../lib/api";
 import { Icon, Spin, Spark } from "./Icon";
 
 // H4 · Allow (design/userflow.artifact.html, "H4 · Allow"). Reached at
@@ -18,6 +18,12 @@ function detailsFor(authorizationId) {
   return detailsCalls.get(authorizationId);
 }
 
+// Record (or revive) a connection in Connected apps. Best effort: if it fails, the server adopts a new connection
+// on Claude's first call, and a later reconnect through the already-consented branch revives a disconnected one.
+const recordConnection = (clientId) =>
+  apiFetch("/settings/connected-apps", { method: "POST", body: JSON.stringify({ client_id: clientId }) })
+    .catch((e) => console.error("recording the connection failed", e));
+
 const errorView = (message) => (
   <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex", flexDirection: "column",
     alignItems: "center", justifyContent: "center", padding: "24px 20px", gap: 14, textAlign: "center" }}>
@@ -29,6 +35,7 @@ const errorView = (message) => (
 export default function AllowPage({ authorizationId, email, online, onDone }) {
   const [view, setView] = useState(authorizationId ? "loading" : "expired");
   const [busy, setBusy] = useState(null); // "allow" | "deny" | null
+  const [clientId, setClientId] = useState(null);
 
   useEffect(() => {
     if (!authorizationId) return;
@@ -42,17 +49,26 @@ export default function AllowPage({ authorizationId, email, online, onDone }) {
         return;
       }
       if (data.redirect_url && !data.authorization_id) {
-        // Consent was already given: follow it, and stay on the spinner.
+        // Consent was already given: follow it (only back to Claude), and stay on the spinner. A live grant means
+        // consent, so every granted connection gets an active row first; this is what un-sticks a connection whose
+        // row was left disconnected (it would otherwise be refused on every reconnect).
         onDone();
-        window.location.assign(data.redirect_url);
-        return;
+        if (!CONNECTOR_ORIGINS.includes(new URL(data.redirect_url).origin)) { setView("failed"); return; }
+        return supabase.auth.oauth.listGrants()
+          .then(({ data: grants }) => Promise.all((grants || []).map((g) => recordConnection(g.client.id))))
+          .catch((e) => console.error("listing grants failed", e))
+          .finally(() => window.location.assign(data.redirect_url));
       }
       if (!CONNECTOR_ORIGINS.includes(new URL(data.redirect_uri).origin)) {   // a bad or missing URI throws: .catch
         onDone();
         setView("failed");
         return;
       }
-      setView("ready");
+      setClientId(data.client.id);
+      // H4b: only accounts that may connect see Allow (the list answers 403 for anyone else).
+      return apiFetch("/settings/connected-apps")
+        .then(() => { if (live) setView("ready"); })
+        .catch((e) => { if (!live) return; onDone(); setView(e.status === 403 ? "testing" : "failed"); });
     }).catch((e) => {
       // A thrown call (not an {error} result) must not leave the spinner up.
       if (!live) return;
@@ -66,19 +82,32 @@ export default function AllowPage({ authorizationId, email, online, onDone }) {
   const respond = async (action) => {
     setBusy(action);
     onDone();
-    const call = action === "allow" ? supabase.auth.oauth.approveAuthorization : supabase.auth.oauth.denyAuthorization;
     try {
-      const { error } = await call(authorizationId);
+      if (action === "allow") {
+        // Approve first without the automatic redirect, so a failed approval records nothing and sends no push.
+        const { data, error } = await supabase.auth.oauth.approveAuthorization(authorizationId, { skipBrowserRedirect: true });
+        if (error) {
+          console.error("oauth details failed", error.status, error.code, error.message);
+          setView("failed");
+          return;
+        }
+        // Only ever back to Claude; checked before anything is recorded or pushed.
+        if (!CONNECTOR_ORIGINS.includes(new URL(data.redirect_url).origin)) { setView("failed"); return; }
+        await recordConnection(clientId);
+        window.location.assign(data.redirect_url);
+        return;
+      }
+      const { error } = await supabase.auth.oauth.denyAuthorization(authorizationId);
       if (error) {
         console.error("oauth details failed", error.status, error.code, error.message);
         setView("failed");
       }
+      // No error: supabase-js itself navigates the tab to the returned redirect_url.
     } catch (e) {
       // A thrown call (not an {error} result) must not leave both buttons spinning.
       console.error("oauth details failed", e);
       setView("failed");
     }
-    // No error: supabase-js itself navigates the tab to the returned redirect_url.
   };
 
   if (view === "loading") {
@@ -91,6 +120,7 @@ export default function AllowPage({ authorizationId, email, online, onDone }) {
 
   if (view === "expired") return errorView("This connection request has expired. Start again from claude.ai.");
   if (view === "failed") return errorView("Couldn't connect Claude. Try again from claude.ai.");
+  if (view === "testing") return errorView("Connecting Claude is still in testing and isn't open to other accounts yet.");
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex", alignItems: "center",

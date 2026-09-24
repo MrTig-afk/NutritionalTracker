@@ -2658,7 +2658,7 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
 
 
 _ACCOUNT_TABLES = [
-    "api_tokens", "api_token_usage", "api_idempotency", "api_audit",
+    "connected_apps", "api_tokens", "api_token_usage", "api_idempotency", "api_audit",
     "push_subscriptions", "notification_prefs", "meal_template_items",
     "meal_templates", "folder_items", "folders", "daily_log", "user_goals",
     "image_records", "api_usage", "users",

@@ -157,6 +157,66 @@ def _lookup_token(h: str, user_agent: str) -> Optional[dict]:
     return row
 
 
+# Connected apps seen by /mcp: (user_id, client_id) -> [active, last touch]. In memory like the token cache:
+# Render runs one process. Disconnect, allow and account deletion drop entries so the next call re-reads the row.
+_apps: dict = {}
+_apps_lock = threading.Lock()
+_apps_gen = 0   # bumped by every forget: a gate lookup that overlapped one must not cache what it read
+
+
+def forget_app(user_id: str, client_id: Optional[str] = None):
+    global _apps_gen
+    with _apps_lock:
+        _apps_gen += 1
+        for k in [k for k in _apps if k[0] == user_id and client_id in (None, k[1])]:
+            del _apps[k]
+
+
+APP_TOUCH_SECS, APPS_MAX = 60, 1000
+CONNECT_PUSH = ("Claude connected to NutriScan", "Not you? Disconnect it in Settings.")
+
+
+def app_known_disconnected(user_id: str, client_id: str) -> bool:
+    with _apps_lock:
+        hit = _apps.get((user_id, client_id))
+    return bool(hit and not hit[0])
+
+
+def connected_app_gate(user_id: str, client_id: str) -> None:
+    """H7: a disconnected app gets the 401 challenge (claude.ai shows its own reconnect prompt). An unknown one is
+    adopted with the Q17 push: that is how a connection made before this table existed gets its row."""
+    key, now = (user_id, client_id), time.time()
+    with _apps_lock:
+        hit, gen = _apps.get(key), _apps_gen
+    if hit and not hit[0]:
+        raise _mcp_challenge()
+    # Never wake a paused Neon for a lookup or a stamp: while paused, budget_gate refuses every tool call anyway.
+    if (hit and now - hit[1] < APP_TOUCH_SECS) or m.budget_used() >= 0.9:
+        return
+    new = revoked = False
+    with db(user_id) as cur:
+        if not hit:
+            cur.execute("SELECT revoked_at FROM connected_apps WHERE user_id = %s AND client_id = %s", key)
+            row = cur.fetchone()
+            revoked = bool(row and row[0] is not None)
+            if row is None:
+                cur.execute("INSERT INTO connected_apps (user_id, client_id) VALUES (%s, %s) "
+                            "ON CONFLICT (user_id, client_id) DO NOTHING RETURNING user_id", key)
+                new = cur.fetchone() is not None   # a racing first call inserted nothing: one push, not two
+        if not revoked:
+            cur.execute("UPDATE connected_apps SET last_used_at = now() "
+                        "WHERE user_id = %s AND client_id = %s AND revoked_at IS NULL", key)
+    with _apps_lock:
+        if _apps_gen == gen:   # a disconnect or allow landed meanwhile: leave it uncached, the next call re-reads
+            if len(_apps) >= APPS_MAX:
+                _apps.clear()   # like the token cache: a full cache just re-reads rows
+            _apps[key] = [not revoked, now]
+    if revoked:
+        raise _mcp_challenge()
+    if new:
+        m.send_push_to_user(user_id, *CONNECT_PUSH)
+
+
 def forget_token(token_id: str = None, user_id: str = None):
     """Revocation, account deletion and freezing take effect on the next call,
     not after the cache expires. For a whole user, unsaved usage counts go too,
@@ -169,6 +229,7 @@ def forget_token(token_id: str = None, user_id: str = None):
         with _limit_lock:
             for k in [k for k in _usage if k[0] == user_id]:
                 del _usage[k]
+        forget_app(user_id)
 
 
 def cached_user_id(authorization: str) -> Optional[str]:
@@ -1395,6 +1456,90 @@ def revoke_token(token_id: str, authorization: Optional[str] = Header(default=No
     return {"revoked": True}
 
 
+# ---------------------------------------------------------------- connected apps (app login only, owner only)
+class AppConnect(Strict):
+    client_id: str = Field(min_length=1, max_length=64)
+
+
+class AppRename(Strict):
+    name: Label
+
+
+_APP_COLS = "id, client_id, name, connected_at, last_used_at"
+
+
+def _app_view(r) -> dict:
+    return dict(zip(("id", "client_id", "name", "connected_at", "last_used_at"), (str(r[0]), *r[1:])))
+
+
+def _app_missing():
+    return m.HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Connection not found"})
+
+
+def _app_uuid(app_id: str) -> str:
+    """A path id that is not a uuid is simply not found; a real one keeps the primary-key lookup."""
+    try:
+        return str(uuid.UUID(app_id))
+    except ValueError:
+        raise _app_missing()
+
+
+@settings_router.get("/settings/connected-apps")
+def list_apps(authorization: Optional[str] = Header(default=None)):
+    """Also the Allow page's first question: a 403 means this account sees H4b's 'still in testing' line."""
+    user_id = _admin_login(authorization)
+    with db(user_id) as cur:
+        cur.execute(f"SELECT {_APP_COLS} FROM connected_apps WHERE user_id = %s AND revoked_at IS NULL "
+                    "ORDER BY connected_at DESC", [user_id])
+        return [_app_view(r) for r in cur.fetchall()]
+
+
+@settings_router.post("/settings/connected-apps", status_code=201)
+def connect_app(body: AppConnect, authorization: Optional[str] = Header(default=None)):
+    """Called by the Allow page once Supabase approved: creates the row or revives a disconnected one (the push goes
+    only then). Also called for every live grant when Supabase skips the Allow page, so a live grant always has an
+    active row."""
+    user_id = _admin_login(authorization)
+    with db(user_id) as cur:
+        cur.execute("""INSERT INTO connected_apps (user_id, client_id) VALUES (%s, %s)
+                       ON CONFLICT (user_id, client_id)
+                       DO UPDATE SET revoked_at = NULL, connected_at = now() WHERE connected_apps.revoked_at IS NOT NULL
+                       RETURNING id""", [user_id, body.client_id])
+        changed = cur.fetchone() is not None
+    forget_app(user_id, body.client_id)
+    if changed:
+        m.send_push_to_user(user_id, *CONNECT_PUSH)
+    return {"connected": True}
+
+
+@settings_router.patch("/settings/connected-apps/{app_id}")
+def rename_app(app_id: str, body: AppRename, authorization: Optional[str] = Header(default=None)):
+    user_id = _admin_login(authorization)
+    app_uuid = _app_uuid(app_id)   # a malformed id is a 404 before any connection is borrowed
+    with db(user_id) as cur:
+        cur.execute(f"""UPDATE connected_apps SET name = %s WHERE id = %s AND user_id = %s
+                        AND revoked_at IS NULL RETURNING {_APP_COLS}""", [body.name, app_uuid, user_id])
+        row = cur.fetchone()
+    if not row:
+        raise _app_missing()
+    return _app_view(row)
+
+
+@settings_router.delete("/settings/connected-apps/{app_id}")
+def disconnect_app(app_id: str, authorization: Optional[str] = Header(default=None)):
+    """What cuts access: the gate re-reads the row on the next call and sends the 401 challenge."""
+    user_id = _admin_login(authorization)
+    app_uuid = _app_uuid(app_id)   # a malformed id is a 404 before any connection is borrowed
+    with db(user_id) as cur:
+        cur.execute("""UPDATE connected_apps SET revoked_at = now() WHERE id = %s AND user_id = %s
+                       AND revoked_at IS NULL RETURNING client_id""", [app_uuid, user_id])
+        row = cur.fetchone()
+    if not row:
+        raise _app_missing()
+    forget_app(user_id, row[0])
+    return {"disconnected": True}
+
+
 @settings_router.get("/settings/admin/health")
 def admin_health(authorization: Optional[str] = Header(default=None)):
     """The Admin panel's API health, from memory only: reading it never wakes Neon."""
@@ -1645,6 +1790,8 @@ def _mcp(request: Request, raw: bytes):
     caller, client_id = mcp_caller(request)
     if request.method != "POST":
         return Response(status_code=405, headers={"Allow": "POST"})
+    if app_known_disconnected(caller.user_id, client_id):   # memory only: protocol calls never wake Neon
+        raise _mcp_challenge()
     version = request.headers.get("mcp-protocol-version")
     if version and version not in MCP_VERSIONS:
         m.logger.info(f"mcp version refused: {version[:40]}")   # claude.ai tries newer versions, then falls back
@@ -1687,11 +1834,14 @@ def _mcp(request: Request, raw: bytes):
         mode = "confirm" if name == "confirm_change" else "preview" if name in WRITE_TOOLS else "read"
         where = f"mcp tool={name} mode={mode} client={client_id} user={caller.user_id[:8]}"   # never arguments
         try:
+            connected_app_gate(caller.user_id, client_id)   # before budget_gate: it skips the DB while paused
             budget_gate()
             text = _call_tool(request, caller, client_id, name, args)
             m.logger.info(f"{where} outcome=ok")
             return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": text}], "isError": False})
         except (Problem, m.HTTPException) as e:   # db() raises HTTPException 500: still a tool error, not transport
+            if isinstance(e, Problem) and e.status == 401:
+                raise   # a disconnected app: the 401 challenge is what makes claude.ai offer to reconnect
             p = e if isinstance(e, Problem) else from_http_exception(e.status_code, e.detail)
             m.logger.info(f"{where} outcome={p.error_type}")
             return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": p.detail}], "isError": True})

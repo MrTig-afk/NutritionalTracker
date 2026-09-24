@@ -4,6 +4,7 @@ import { card, cardHeader, inputStyle, ghostBtn, pillRow, errorBanner } from "..
 import { Icon, Spin } from "../components/Icon";
 import { pushSupported, getPermission, getSubscribed, enablePush, disablePush } from "../lib/push";
 import { useEnergyUnit } from "../lib/nutrition";
+import ConnectedAppsCard from "../components/ConnectedAppsCard";
 
 const LINKS = {
   email:    "mailto:kaushiknaru2002@gmail.com",
@@ -269,6 +270,8 @@ export default function SettingsTab({ setEnergyUnit }) {
           </div>
         ))}
       </div>
+
+      <ConnectedAppsCard />
 
       {/* Admin (owner only): renders nothing until GET /settings/admin/health returns 200 */}
       {health && (

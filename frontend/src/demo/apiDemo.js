@@ -264,6 +264,13 @@ export async function apiFetch(path, options = {}) {
     throw new Error("API tokens are not available on this account yet.");
   }
 
+  // /settings/connected-apps*: owner-only, so the demo account never sees the card.
+  if (seg[0] === "settings" && seg[1] === "connected-apps") {
+    const e = new Error("Connecting apps is not available on this account yet.");
+    e.status = 403;
+    throw e;
+  }
+
   // /settings/notifications
   if (rawPath === "/settings/notifications") {
     if (method === "PUT" && body?.prefs) state.prefs = { ...state.prefs, ...body.prefs };
