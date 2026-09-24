@@ -664,15 +664,19 @@ def template_detail(cur, user_id: str, template_id: str) -> Optional[dict]:
             "etag": etag_of(t[0], [(i[1], i[2], log_service.load_nutrition(i[3])) for i in items])}
 
 
-@router.get("/templates/{template_id}")
-def get_template(template_id: str, caller: Caller = Depends(need("templates:read"))):
+def template_body(template_id: str, caller: Caller) -> dict:
     def build():
         with db(caller.user_id) as cur:
             t = template_detail(cur, caller.user_id, template_id)
         if not t:
             raise _not_found("Template")
         return t
-    return _etagged(cached_read(caller, f"template:{template_id}", build))
+    return cached_read(caller, f"template:{template_id}", build)
+
+
+@router.get("/templates/{template_id}")
+def get_template(template_id: str, caller: Caller = Depends(need("templates:read"))):
+    return _etagged(template_body(template_id, caller))
 
 
 # ---------------------------------------------------------------- writes
@@ -1443,6 +1447,64 @@ MCP_TOOL = {
         "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD. Leave out for today (Australia/Melbourne)."}}},
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
 
+TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Show the user the change in words, with "
+              "the date in words (\"Thu 24 Sep\"), and ask yes or no. Only after an explicit yes, call confirm_change "
+              "with the code; never call it without the user's yes. If more than one entry matches what the user "
+              "means, list them and ask; never guess.")
+
+WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
+    "log_food": (LogEntryChange, "Log a food", "Add one food to the log on a date."),
+    "log_meal": (LogMealChange, "Log a meal", "Add several foods as one meal (a label such as Breakfast) on a date."),
+    "log_template": (LogTemplateChange, "Log a saved meal",
+                     "Log one of the user's meal templates on a date, optionally changing, adding or removing items. "
+                     "Item ids come from get_template."),
+    "edit_entry": (UpdateEntryChange, "Change a logged food",
+                   "Change one logged entry (servings, portion, macros, name or date). log_id and if_match (the "
+                   "entry's etag) come from get_context."),
+    "delete_entry": (DeleteEntryChange, "Delete a logged food",
+                     "Delete one logged entry. log_id and if_match (the entry's etag) come from get_context."),
+    "delete_meal": (DeleteMealChange, "Delete a whole meal",
+                    "Delete every item of one logged meal. Before previewing, ask the user: the whole meal or one "
+                    "item? For one item use delete_entry. group_id and if_match (the meal's etag) come from get_context."),
+    "save_template": (CreateTemplateChange, "Save a meal template", "Save a new meal template to log again later."),
+    "update_template": (UpdateTemplateChange, "Change a meal template",
+                        "Rename a meal template or replace its items. template_id and if_match (its etag) come from "
+                        "get_template."),
+    "save_to_library": (SaveFoodChange, "Save a food to the Library", "Save a food to the user's Library for later."),
+}
+DESTRUCTIVE_TOOLS = {"delete_entry", "delete_meal", "confirm_change"}
+
+
+def _write_schema(model) -> dict:
+    s = model.model_json_schema()
+    s["properties"].pop("type", None)   # fixed per tool
+    return s
+
+
+def _annotations(name: str) -> dict:
+    return {"readOnlyHint": False, "destructiveHint": name in DESTRUCTIVE_TOOLS,
+            "idempotentHint": False, "openWorldHint": False}
+
+
+GET_TEMPLATE_TOOL = {
+    "name": "get_template", "title": "Read a meal template",
+    "description": "One of the user's meal templates with its items (item ids) and its etag. Read-only.",
+    "inputSchema": {"type": "object", "additionalProperties": False, "required": ["template_id"],
+                    "properties": {"template_id": {"type": "string", "minLength": 1, "maxLength": 64}}},
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
+CONFIRM_TOOL = {
+    "name": "confirm_change", "title": "Save a previewed change",
+    "description": "Save exactly the change a preview tool showed, using its confirm_code. Call this only after "
+                   "the user said yes to that preview. Codes work once and expire after 10 minutes.",
+    "inputSchema": {"type": "object", "additionalProperties": False, "required": ["code"],
+                    "properties": {"code": {"type": "string", "minLength": 1, "maxLength": 64}}},
+    "annotations": _annotations("confirm_change")}
+MCP_TOOLS = [MCP_TOOL, GET_TEMPLATE_TOOL,
+             *({"name": n, "title": t, "description": d + TOOL_RULES, "inputSchema": _write_schema(mdl),
+                "annotations": _annotations(n)} for n, (mdl, t, d) in WRITE_TOOLS.items()),
+             CONFIRM_TOOL]
+TOOL_NAMES = {t["name"] for t in MCP_TOOLS}
+
 mcp_router = APIRouter()
 
 
@@ -1480,6 +1542,80 @@ def mcp_caller(request: Request) -> tuple:
     return Caller(user_id, name="Claude", scopes=CONNECTOR_SCOPES), claims["client_id"]
 
 
+# One-time confirm codes. ponytail: in memory because Render runs one process (ledger P0-CR-3); move to Postgres
+# if we ever run more than one. A restart just expires pending codes, which is safe.
+PENDING_TTL, PENDING_MAX = 600, 20
+_pending: dict = {}   # code -> (user_id, client_id, [change], created_at, template etag or None)
+_pending_lock = threading.Lock()
+NEXT_STEP = ("Show the user this change in words, with the date in words, and ask yes or no. Only on yes, call "
+             "confirm_change with confirm_code.")
+
+
+def _template_etag(caller: Caller, template_id: str) -> Optional[str]:
+    """Read straight from the DB (not the read cache): the confirm must see an edit made seconds ago."""
+    with db(caller.user_id) as cur:
+        t = template_detail(cur, caller.user_id, template_id)
+    return t and t["etag"]
+
+
+def _preview(request: Request, caller: Caller, client_id: str, name: str, args: dict) -> str:
+    take_request(caller, True)   # as /v1's ?preview=true (need(write=True)): the write runs, then rolls back
+    try:
+        change = WRITE_TOOLS[name][0].model_validate(args)
+    except ValidationError as e:   # validation_problem drops loc[0] (FastAPI's "body"): stand in for it
+        raise validation_problem([{**err, "loc": ("arguments", *err["loc"])} for err in e.errors()])
+    _, body = run_changes(request, caller, [change], True, None)
+    # log_template carries no if_match, so remember the template the preview used; confirm refuses if it moved
+    guard = _template_etag(caller, change.template_id) if change.type == "log_template" else None
+    code, now = secrets.token_urlsafe(16), time.time()
+    with _pending_lock:
+        for k in [k for k, v in _pending.items() if now - v[3] > PENDING_TTL]:
+            del _pending[k]
+        mine = sorted((v[3], k) for k, v in _pending.items() if v[0] == caller.user_id)
+        for _, k in mine[:max(0, len(mine) - PENDING_MAX + 1)]:
+            del _pending[k]
+        _pending[code] = (caller.user_id, client_id, [change], now, guard)
+    return json.dumps({"preview": jsonable_encoder(body), "confirm_code": code, "expires_in_minutes": 10,
+                       "next": NEXT_STEP}, default=str)
+
+
+def _confirm(request: Request, caller: Caller, client_id: str, code) -> str:
+    take_request(caller, True)
+    # The code stays until it expires: the idempotency key (the code) makes a retried confirm replay the saved
+    # answer instead of saving twice, e.g. when the first answer was lost on the way back to claude.ai.
+    entry = _pending.get(code) if isinstance(code, str) else None
+    if (not entry or entry[0] != caller.user_id or entry[1] != client_id
+            or time.time() - entry[3] > PENDING_TTL):
+        raise Problem(422, "confirmation_invalid", "This confirmation expired or is not valid. Ask again.")
+    if entry[4] and _template_etag(caller, entry[2][0].template_id) != entry[4]:
+        raise Problem(412, "precondition_failed", "This changed since the preview. Ask again.")
+    try:
+        _, body = run_changes(request, caller, entry[2], False, code)   # the code is the idempotency key
+    except Problem as p:
+        if p.status in (404, 409, 412):
+            raise Problem(p.status, p.error_type, "This changed since the preview. Ask again.") from p
+        raise
+    return json.dumps({"saved": True, **jsonable_encoder(body)}, default=str)
+
+
+def _call_tool(request: Request, caller: Caller, client_id: str, name: str, args: dict) -> str:
+    """The JSON text of one tool's result; raises Problem/HTTPException on failure."""
+    if name == "get_context":
+        take_request(caller, False)
+        body = context(date_=args.get("date") or melbourne_today().isoformat(), include="", caller=caller)
+    elif name == "get_template":
+        tid = args.get("template_id")
+        if not isinstance(tid, str) or not 1 <= len(tid) <= 64:
+            raise Problem(422, "validation_error", "template_id: 1-64 characters.")
+        take_request(caller, False)
+        body = template_body(tid, caller)
+    elif name in WRITE_TOOLS:
+        return _preview(request, caller, client_id, name, args)
+    else:   # confirm_change: the dispatcher already refused any name outside TOOL_NAMES
+        return _confirm(request, caller, client_id, args.get("code"))
+    return json.dumps(body, default=str)
+
+
 def _mcp_rpc_result(id_, result) -> JSONResponse:
     return JSONResponse({"jsonrpc": "2.0", "id": id_, "result": result})
 
@@ -1499,13 +1635,14 @@ async def mcp(request: Request):
 def _mcp(request: Request, raw: bytes):
     origin = request.headers.get("origin")
     if origin and origin not in MCP_ORIGINS:
-        m.logger.info(f"mcp origin refused: {origin}")
+        m.logger.info(f"mcp origin refused: {origin[:100]}")
         raise Problem(403, "forbidden_origin", "This origin may not call /mcp.")
     caller, client_id = mcp_caller(request)
     if request.method != "POST":
         return Response(status_code=405, headers={"Allow": "POST"})
     version = request.headers.get("mcp-protocol-version")
     if version and version not in MCP_VERSIONS:
+        m.logger.info(f"mcp version refused: {version[:40]}")   # claude.ai tries newer versions, then falls back
         return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32022,
                              "message": "Unsupported protocol version", "data": {"supported": list(MCP_VERSIONS)}}},
                             status_code=400)
@@ -1536,18 +1673,21 @@ def _mcp(request: Request, raw: bytes):
     if method == "ping":
         return _mcp_rpc_result(id_, {})
     if method == "tools/list":
-        return _mcp_rpc_result(id_, {"tools": [MCP_TOOL]})
+        return _mcp_rpc_result(id_, {"tools": MCP_TOOLS})
     if method == "tools/call":
         name = params.get("name")
-        if name != "get_context":
+        if name not in TOOL_NAMES:
             return _mcp_rpc_error(id_, -32602, f"Unknown tool: {name}")
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        mode = "confirm" if name == "confirm_change" else "preview" if name in WRITE_TOOLS else "read"
+        where = f"mcp tool={name} mode={mode} client={client_id} user={caller.user_id[:8]}"   # never arguments
         try:
             budget_gate()
-            take_request(caller, False)
-            body = context(date_=args.get("date") or melbourne_today().isoformat(), include="", caller=caller)
-            return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": json.dumps(body, default=str)}], "isError": False})
+            text = _call_tool(request, caller, client_id, name, args)
+            m.logger.info(f"{where} outcome=ok")
+            return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": text}], "isError": False})
         except (Problem, m.HTTPException) as e:   # db() raises HTTPException 500: still a tool error, not transport
             p = e if isinstance(e, Problem) else from_http_exception(e.status_code, e.detail)
+            m.logger.info(f"{where} outcome={p.error_type}")
             return _mcp_rpc_result(id_, {"content": [{"type": "text", "text": p.detail}], "isError": True})
     return _mcp_rpc_error(id_, -32601, "Method not found")

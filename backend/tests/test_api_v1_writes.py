@@ -25,7 +25,10 @@ MACROS = {"calories": 260, "protein_g": 5.4, "carbs_g": 56, "fat_g": 0.6, "fibre
 TODAY = datetime.now(timezone.utc).date().isoformat()
 
 
-class Writes(V1Case):
+class WritesFixture:
+    """The write-side conn script (template rows, goals, a tiny api_idempotency). A mixin, not a TestCase,
+    so test_mcp_writes can reuse it without re-running Writes' own tests."""
+
     def setUp(self):
         super().setUp()
         self.idem = {}   # key -> (hash, status, response): a tiny api_idempotency
@@ -72,6 +75,11 @@ class Writes(V1Case):
     def statements(self, prefix):
         return [(s, p) for s, p in self.conn.executed if s.startswith(prefix)]
 
+    def entry_row(self, name="Rice", servings=1.0):
+        return ("l1", name, servings, kcal_n(195, 4, "150 g", _meal_group="g1", _meal_label="Meal 1"), TODAY)
+
+
+class Writes(WritesFixture, V1Case):
     # ---- the PRD's done-when for Phase 3
     def test_meal_1_but_200g_rice(self):
         body = {"date": TODAY, "changes": [{"item_id": "i-rice", "portion": "200 g", "macros": MACROS}]}
@@ -158,9 +166,6 @@ class Writes(V1Case):
         self.assertEqual(n["_token_id"], "tok-1")
 
     # ---- edits and deletes
-    def entry_row(self, name="Rice", servings=1.0):
-        return ("l1", name, servings, kcal_n(195, 4, "150 g", _meal_group="g1", _meal_label="Meal 1"), TODAY)
-
     def test_update_with_a_stale_etag_is_412(self):
         self.conn.script.insert(1, ("FROM daily_log WHERE log_id", [self.entry_row()]))
         r = self.client.patch("/v1/entries/l1", headers={"Authorization": f"Bearer {TOKEN}", "If-Match": '"stale"'},

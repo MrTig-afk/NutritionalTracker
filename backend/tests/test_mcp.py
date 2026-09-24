@@ -163,9 +163,7 @@ class ToolsList(WithConnectorAuth, V1Case):
     def test_one_tool_shaped_correctly(self):
         r = self.rpc({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         tools = r.json()["result"]["tools"]
-        self.assertEqual(len(tools), 1)
-        t = tools[0]
-        self.assertEqual(t["name"], "get_context")
+        t = next(x for x in tools if x["name"] == "get_context")   # the read tool among the write tools
         self.assertIn("title", t)
         self.assertIs(t["annotations"]["readOnlyHint"], True)
         self.assertIs(t["annotations"]["destructiveHint"], False)
