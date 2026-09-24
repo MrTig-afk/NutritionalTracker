@@ -1484,7 +1484,8 @@ def _sniff_image_format(b: bytes):
         # major brand, then the compatible brands after the 4-byte minor version (some
         # Samsung/camera files name heic only as compatible); the box is short, cap the scan
         end = min(int.from_bytes(b[:4], "big"), len(b), 64)
-        if {b[8:12], *(b[i:i + 4] for i in range(16, end - 3, 4))} & _HEIF_BRANDS:
+        # AVIF also lists mif1: its own major brand keeps it out, so it gets the 415, not a 422
+        if b[8:12] not in (b"avif", b"avis") and {b[8:12], *(b[i:i + 4] for i in range(16, end - 3, 4))} & _HEIF_BRANDS:
             return "HEIF"
     return None
 

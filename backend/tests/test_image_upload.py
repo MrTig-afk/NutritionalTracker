@@ -136,7 +136,7 @@ class ValidateAndDecode(unittest.TestCase):
             main.validate_and_decode_image(b"\x00\x00\x00\x1cftypheic" + b"\x00" * 200)
         self.assertEqual((c.exception.status_code, c.exception.detail["error_type"]), (422, "invalid_image"))
         with self.assertRaises(main.HTTPException) as c:
-            main.validate_and_decode_image(b"\x00\x00\x00\x1cftypavif" + b"\x00" * 200)   # AVIF is not on the allowlist
+            main.validate_and_decode_image(b"\x00\x00\x00\x20ftypavif\x00\x00\x00\x00avifmif1miafMA1B" + b"\x00" * 200)   # real AVIF brands, incl. mif1
         self.assertEqual(c.exception.status_code, 415)
 
     def test_heic_named_only_as_a_compatible_brand_is_recognised(self):
