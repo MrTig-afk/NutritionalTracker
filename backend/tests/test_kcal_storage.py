@@ -81,6 +81,15 @@ class Hardening(unittest.TestCase):
         import migrate_kcal
         self.assertEqual(migrate_kcal._cals({"per_serving": "junk", "per_100g": {"calories": 600}}), [None, 600])
 
+    def test_migration_settles_a_string_kcal_tag(self):
+        # Pre-kcal code stored client JSON as sent; "true" as a string is not our boolean tag.
+        import migrate_kcal
+        row = ("l1", "2026-09-01", "Pie", {"_kcal": "true", "per_serving": {"calories": 1500}})
+        conn = FakeConn([("FROM daily_log", [row])])
+        out = migrate_kcal.plan(conn.cursor(), set())
+        self.assertIn("IS DISTINCT FROM 'true'::jsonb", conn.executed[0][0])
+        self.assertEqual([(t, new["_kcal"], after) for t, _, _, _, _, after, new in out], [("daily_log", True, [358.5, None])])
+
 
 if __name__ == "__main__":
     unittest.main()

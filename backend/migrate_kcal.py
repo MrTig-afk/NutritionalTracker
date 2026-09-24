@@ -43,7 +43,7 @@ def plan(cur, exclude: set) -> list:
     out = []
     for table, (id_col, where_col) in TABLES.items():
         cur.execute(f"SELECT {id_col}, {where_col}, name, nutrition FROM {table} "   # names come from TABLES, not input
-                    "WHERE COALESCE(nutrition->>'_kcal', '') <> 'true' FOR UPDATE")
+                    "WHERE nutrition->'_kcal' IS DISTINCT FROM 'true'::jsonb FOR UPDATE")   # "true" (a string) is not our tag
         for rid, where, name, raw in cur.fetchall():
             n = load_nutrition(raw)
             new = settle_kcal(n, legacy_guess=(name or "").lower() not in exclude)
