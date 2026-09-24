@@ -4,7 +4,6 @@ import json
 import uuid
 import asyncio
 import time
-import boto3
 import psycopg2
 import psycopg2.pool
 import psycopg2.extras
@@ -85,19 +84,6 @@ VAPID_CLAIM       = os.getenv("VAPID_CLAIM", "mailto:theimpracticalguy007@gmail.
 logger.info(f"📦 DATABASE_URL configured: {bool(DATABASE_URL)}")
 
 # ---------- CLIENTS ----------
-s3_client = None
-S3_BUCKET = os.getenv("S3_BUCKET_NAME")
-if all([os.getenv("AWS_ACCESS_KEY_ID"), os.getenv("AWS_SECRET_ACCESS_KEY"), S3_BUCKET]):
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_REGION", "ap-southeast-2"),
-    )
-    logger.info("✅ S3 client initialized")
-else:
-    logger.warning("⚠️ S3 credentials missing - running in demo mode")
-
 gemini_client = None
 if os.getenv("GOOGLE_API_KEY"):
     gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -1608,33 +1594,6 @@ def validate_and_decode_image(image_bytes: bytes) -> bytes:
     return out
 
 
-async def upload_processed(processed_bytes: bytes, user_id: str, image_id: str) -> str:
-    """Store ONLY the validated, re-encoded JPEG. The raw upload is no longer
-    kept: nothing in the backend read it, and the PWA used raw_url only as a
-    fallback when processed_url was empty. Content-Disposition: attachment so
-    a direct open downloads rather than renders; the bucket is private, so
-    the URL is a record, not a public link."""
-    if not s3_client:
-        return ""
-    key = f"users/{user_id}/processed/{image_id}.jpg"
-    try:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: s3_client.put_object(
-                Bucket=S3_BUCKET, Key=key, Body=processed_bytes, ContentType="image/jpeg",
-                ContentDisposition=f'attachment; filename="{image_id}.jpg"',
-            ),
-        )
-        logger.info(f"   📤 S3: {key}")
-        return f"https://{S3_BUCKET}.s3.amazonaws.com/{key}"
-    except Exception as e:
-        logger.warning(f"   ⚠️ S3 upload failed for {key}: {e}")
-        notify_admin("s3_upload", "Image upload failing",
-                     f"S3 put_object failed — scan images aren't being saved. Detail: {str(e)[:120]}")
-        return ""
-
-
 def _label_rejected(e: Exception, label: str) -> HTTPException:
     """Model output failed the schema: count it (a burst means injection attempts
     or a prompt/model regression) and return a retryable, detail-free error."""
@@ -1758,7 +1717,6 @@ async def health_check(deep: bool = False):
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "db": db_status,
-        "s3_configured": s3_client is not None,
         "gemini_configured": gemini_client is not None,
         "version": "3.2",
     }
@@ -1849,7 +1807,7 @@ async def analyze_label(
 
     processed_bytes = validate_and_decode_image(raw_bytes)   # 415/422 on anything that is not a clean image
     check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)   # a rejected upload uses no scan
-    raw_url, processed_url = "", await upload_processed(processed_bytes, user_id, image_id)
+    raw_url, processed_url = "", ""   # label photos are not stored (owner 2026-09-25)
 
     image_part = types.Part.from_bytes(data=processed_bytes, mime_type="image/jpeg")
     contents   = [image_part, PROMPT_SINGLE]
@@ -1928,10 +1886,6 @@ async def analyze_labels(
         image_ids.append(str(uuid.uuid4()))
     check_and_track(user_id, email, client_date=x_client_date, scan_id=x_scan_id)   # only once every file passed
 
-    upload_results = await asyncio.gather(*[
-        upload_processed(pb, user_id, iid) for pb, iid in zip(processed_images, image_ids)
-    ])
-
     contents = []
     for pb in processed_images:
         contents.append(types.Part.from_bytes(data=pb, mime_type="image/jpeg"))
@@ -1958,7 +1912,7 @@ async def analyze_labels(
         conn = get_db()
         cur  = conn.cursor()
         for i, result in enumerate(results):
-            raw_url, processed_url = "", (upload_results[i] if i < len(upload_results) else "")
+            raw_url, processed_url = "", ""   # label photos are not stored
             result["image_id"]      = image_ids[i]
             result["raw_url"]       = raw_url
             result["processed_url"] = processed_url
