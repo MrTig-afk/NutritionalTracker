@@ -119,7 +119,7 @@ export default function ConnectedAppsCard() {
                   ? <input autoFocus maxLength={40} value={editing.name} style={inputStyle} aria-label="Connection name"
                       onChange={(e) => setEditing({ ...editRef.current, name: e.target.value })}
                       onBlur={saveName} onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditing(null); }} />
-                  : <button onClick={() => setEditing({ id: app.id, name: app.name })} aria-label={`Rename ${app.name}`}
+                  : <button data-write onClick={() => setEditing({ id: app.id, name: app.name })} aria-label={`Rename ${app.name}`}
                       style={{ background: "none", border: "none", padding: 0, fontSize: 13, fontWeight: 700, color: "var(--text)", cursor: "pointer" }}>{app.name}</button>}
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>Connected {day(app.connected_at)} · last used {ago(app.last_used_at)}</div>
               </div>

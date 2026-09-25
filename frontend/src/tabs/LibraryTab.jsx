@@ -228,7 +228,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
       <div style={{ display: "flex", gap: 8 }}>
         <input value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="New folder name..."
           onKeyDown={handleFolderKeyDown} style={{ ...inputStyle, flex: 1 }} />
-        <button onClick={createFolder} disabled={creating || !newFolderName.trim()}
+        <button data-write onClick={createFolder} disabled={creating || !newFolderName.trim()}
           style={{ ...primaryBtn, width: "auto", padding: "9px 16px", fontSize: 13, opacity: (creating || !newFolderName.trim()) ? 0.45 : 1 }}>
           {creating ? <Spin size={13} /> : <Icon n="create_new_folder" size={13} />} Create
         </button>
@@ -259,10 +259,10 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                     <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.folderName} · {macroLine(item.nutrition)}</div>
                   </div>
-                  <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                  <button data-write onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                     <Icon n="add" size={11} /> Log
                   </button>
-                  <button onClick={() => deleteItem(item.folderId, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                  <button data-write onClick={() => deleteItem(item.folderId, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
                     {deletingItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                   </button>
                 </div>
@@ -281,7 +281,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                     {openFolder === folder.folder_id ? <Icon n="folder_open" size={18} style={{ color: "var(--accent)" }} /> : <Icon n="folder" size={18} style={{ color: "var(--muted)" }} />}
                     <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{folder.name}</span>
                     <span style={{ fontSize: 11, color: "var(--muted)" }}>{folderData[folder.folder_id]?.items?.length ?? ""} items</span>
-                    <button onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} aria-label={`Delete folder ${folder.name}`} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
+                    <button data-write onClick={e => { e.stopPropagation(); deleteFolder(folder.folder_id); }} aria-label={`Delete folder ${folder.name}`} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 4 }}>
                       <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />
                     </button>
                     {openFolder === folder.folder_id ? <Icon n="expand_less" size={14} style={{ color: "var(--muted)" }} /> : <Icon n="expand_more" size={14} style={{ color: "var(--muted)" }} />}
@@ -303,10 +303,10 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{macroLine(item.nutrition)}</div>
                               </div>
-                              <button onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                              <button data-write onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                                 <Icon n="add" size={11} /> Log
                               </button>
-                              <button onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                              <button data-write onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
                                 {deletingItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                               </button>
                             </div>
@@ -329,7 +329,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
           <div style={{ display: "flex", gap: 8 }}>
             <input value={newTmplName} onChange={e => setNewTmplName(e.target.value)} placeholder="New template name..."
               onKeyDown={e => e.key === "Enter" && createTemplate()} style={{ ...inputStyle, flex: 1 }} />
-            <button onClick={createTemplate} disabled={creatingTmpl || !newTmplName.trim()}
+            <button data-write onClick={createTemplate} disabled={creatingTmpl || !newTmplName.trim()}
               style={{ ...primaryBtn, width: "auto", padding: "9px 16px", fontSize: 13, opacity: (creatingTmpl || !newTmplName.trim()) ? 0.45 : 1 }}>
               {creatingTmpl ? <Spin size={13} /> : <Icon n="add" size={13} />} New
             </button>
@@ -349,14 +349,14 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                       <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>{tmpl.name}</span>
                       <span style={{ fontSize: 11, color: "var(--muted)" }}>{tmpl.item_count} items</span>
                     </div>
-                    <button onClick={() => logTemplate(tmpl.template_id)} disabled={loggingTmpl === tmpl.template_id || loggedTmpl === tmpl.template_id || tmpl.item_count === 0}
+                    <button data-write onClick={() => logTemplate(tmpl.template_id)} disabled={loggingTmpl === tmpl.template_id || loggedTmpl === tmpl.template_id || tmpl.item_count === 0}
                       style={{ padding: "5px 10px", background: loggedTmpl === tmpl.template_id ? "var(--teal)" : "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: loggedTmpl === tmpl.template_id ? "white" : "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: tmpl.item_count === 0 ? 0.4 : 1, transition: "background 0.2s" }}>
                       {loggingTmpl === tmpl.template_id ? <Spin size={11} />
                         : loggedTmpl === tmpl.template_id ? <Icon n="check" size={11} style={{ color: "white" }} />
                         : <Icon n="playlist_add_check" size={11} />}
                       {loggedTmpl === tmpl.template_id ? "Logged!" : "Log Meal"}
                     </button>
-                    <button onClick={e => { e.stopPropagation(); deleteTemplate(tmpl.template_id); }} aria-label={`Delete template ${tmpl.name}`} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 2 }}>
+                    <button data-write onClick={e => { e.stopPropagation(); deleteTemplate(tmpl.template_id); }} aria-label={`Delete template ${tmpl.name}`} style={{ background: "none", border: "none", cursor: "pointer", marginLeft: 2 }}>
                       <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />
                     </button>
                     <div onClick={() => openTemplateById(tmpl.template_id)} style={{ cursor: "pointer" }}>
@@ -379,17 +379,17 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{macroLine(item.nutrition)} / serving</div>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings - 1)} disabled={item.servings <= 1} aria-label="Fewer servings"
+                            <button data-write onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings - 1)} disabled={item.servings <= 1} aria-label="Fewer servings"
                               style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--off)", cursor: item.servings <= 1 ? "not-allowed" : "pointer", opacity: item.servings <= 1 ? 0.4 : 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
                               <Icon n="remove" size={13} style={{ color: "var(--text)" }} />
                             </button>
                             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", minWidth: 16, textAlign: "center" }}>{item.servings}</span>
-                            <button onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings + 1)} aria-label="More servings"
+                            <button data-write onClick={() => setTmplItemServings(tmpl.template_id, item.item_id, item.servings + 1)} aria-label="More servings"
                               style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
                               <Icon n="add" size={13} style={{ color: "var(--text)" }} />
                             </button>
                           </div>
-                          <button onClick={() => deleteTmplItem(tmpl.template_id, item.item_id)} disabled={deletingTmplItem === item.item_id} aria-label={`Remove ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
+                          <button data-write onClick={() => deleteTmplItem(tmpl.template_id, item.item_id)} disabled={deletingTmplItem === item.item_id} aria-label={`Remove ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
                             {deletingTmplItem === item.item_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--muted)" }} />}
                           </button>
                         </div>
@@ -421,7 +421,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                                 });
                           })()}
                           <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
-                            <button onClick={() => addSelectedToTemplate(tmpl.template_id)} disabled={pickerSelected.length === 0 || savingPicker}
+                            <button data-write onClick={() => addSelectedToTemplate(tmpl.template_id)} disabled={pickerSelected.length === 0 || savingPicker}
                               style={{ flex: 1, padding: "9px", borderRadius: 10, border: "none", background: pickerSelected.length ? "var(--teal)" : "var(--border)", color: pickerSelected.length ? "white" : "var(--muted)", fontSize: 13, fontWeight: 700, cursor: pickerSelected.length ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                               {savingPicker ? <Spin size={14} color="white" /> : <Icon n="playlist_add" size={15} style={{ color: pickerSelected.length ? "white" : "var(--muted)" }} />}
                               {savingPicker ? "Adding…" : `Add ${pickerSelected.length || ""} item${pickerSelected.length === 1 ? "" : "s"}`}
@@ -434,7 +434,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                         </div>
                       ) : (
                         <div style={{ padding: "10px 16px", borderTop: "1px solid var(--off2)" }}>
-                          <button onClick={() => { setItemPickerFor(tmpl.template_id); setItemPickerQuery(""); setPickerSelected([]); }}
+                          <button data-write onClick={() => { setItemPickerFor(tmpl.template_id); setItemPickerQuery(""); setPickerSelected([]); }}
                             style={{ background: "none", border: "1px dashed var(--border)", borderRadius: 8, padding: "6px 14px", fontSize: 12, color: "var(--muted)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
                             <Icon n="add" size={13} /> Add from library
                           </button>

@@ -80,6 +80,10 @@ export function formatDisplayDate(isoDate) {
   return `${String(day).padStart(2, "0")}-${String(month).padStart(2, "0")}-${year} (${dayName})`;
 }
 
+// "Sat 10 Oct": the deletion date as lane L shows it
+export const deletionDate = (when) =>
+  new Date(when).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" }).replace(",", "");
+
 export function todayLocal() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

@@ -25,6 +25,8 @@ const delay = (ms = 180) => new Promise(r => setTimeout(r, ms));
 // Display-only energy unit (mirrors /settings/energy-unit). Not part of
 // `state` because it's never reset by anything else in this file.
 let demoEnergyUnit = "kcal";
+let demoAskFirst = true;        // /settings/library
+let demoDeleteAfter = null;     // /account/deletion: lane L, in page memory only
 
 // ── Fake Supabase auth: the demo is always signed in as the demo user ───────
 
@@ -34,6 +36,17 @@ const DEMO_USER = {
   user_metadata: { full_name: "Demo", avatar_url: null },
 };
 const DEMO_SESSION = { access_token: "demo", token_type: "bearer", user: DEMO_USER };
+
+export async function signOutHere() { return { error: null }; }
+
+// The demo's writes stay in page memory, so view-only needs no request gate here (the greyed controls show it).
+export function setViewOnly() {}
+export function assertWritable() {}
+
+// There is no server to build the file in the demo.
+export async function downloadExport() {
+  throw new Error("Export is not available in the demo.");
+}
 
 export const supabase = {
   auth: {
@@ -277,8 +290,23 @@ export async function apiFetch(path, options = {}) {
     return { prefs: { ...state.prefs } };
   }
 
-  // /account (delete): pretend, but stay signed in — it's a shared demo.
-  if (rawPath === "/account") return { ok: true };
+  // /settings/library
+  if (rawPath === "/settings/library") {
+    if (method === "PUT") demoAskFirst = body?.ask_before_saving !== false;
+    return { ask_before_saving: demoAskFirst };
+  }
+
+  // Lane L: delete in 15 days, view-only meanwhile, Keep my account. Page memory only (a reload restores it).
+  if (rawPath === "/account/deletion") return { delete_after: demoDeleteAfter };
+  if (rawPath === "/account/restore") {
+    const restored = demoDeleteAfter !== null;
+    demoDeleteAfter = null;
+    return { restored };
+  }
+  if (rawPath === "/account" && method === "DELETE") {
+    demoDeleteAfter = demoDeleteAfter || new Date(Date.now() + 15 * 86400000).toISOString();
+    return { scheduled: true, delete_after: demoDeleteAfter };
+  }
 
   // /push/* (the demo build reports push as unsupported; these are inert)
   if (seg[0] === "push") return { public_key: "", ok: true };

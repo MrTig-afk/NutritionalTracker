@@ -753,7 +753,7 @@ app.add_middleware(
         "http://localhost:4173",
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],   # PATCH: Connected apps rename
     allow_headers=["Authorization", "Content-Type", "X-Client-Date", "X-Scan-ID"],
     expose_headers=["Content-Disposition"],   # the export's dated filename, read by fetch()
 )

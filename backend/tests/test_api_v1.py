@@ -365,6 +365,13 @@ class Hygiene(V1Case):
         self.assertNotIn("access-control-allow-origin", self.client.options("/v1/me", headers=pre).headers)
         self.assertIn("access-control-allow-origin", self.client.options("/log", headers=pre).headers)   # control
 
+    def test_the_app_may_patch(self):
+        # V8D2-6: Connected apps Rename sends PATCH; its preflight was refused, so renaming never worked live
+        pre = {"Origin": "https://nutritional-tracker-delta.vercel.app", "Access-Control-Request-Method": "PATCH"}
+        r = self.client.options("/settings/connected-apps/x", headers=pre)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("PATCH", r.headers["access-control-allow-methods"])
+
     def test_unknown_path_is_a_problem(self):
         r = self.get("/v1/nope")
         self.assertEqual((r.status_code, r.headers["content-type"], r.json()["error_type"]),

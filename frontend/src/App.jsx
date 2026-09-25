@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Analytics } from "@vercel/analytics/react";
-import { supabase, apiFetch } from "./lib/api";
+import { supabase, apiFetch, signOutHere, setViewOnly } from "./lib/api";
 import { PALETTE_CSS } from "./styles";
 import { EnergyUnitContext } from "./lib/nutrition";
 import { CHANGELOG_VERSION } from "./version";
@@ -16,6 +16,7 @@ import LibraryTab from "./tabs/LibraryTab";
 import TrackerTab from "./tabs/TrackerTab";
 import TrendsTab from "./tabs/TrendsTab";
 import SettingsTab from "./tabs/SettingsTab";
+import DeletionBanner, { KeptNotice } from "./components/DeletionBanner";
 
 // PUBLIC DEMO build flag: statically false in normal builds, so demo-only
 // branches below are tree-shaken out of the real app.
@@ -49,6 +50,8 @@ const TABS = [
   { id: "settings", label: "Settings", icon: "settings"         },
 ];
 
+const OFF_WHILE_DELETING = new Set(["scan", "ai"]);   // L2/L3: greyed during the 15 days
+
 const isIOSNotInstalled = () => {
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
   const isStandalone = window.navigator.standalone === true;
@@ -81,6 +84,14 @@ export default function App() {
   const unitChosen = useRef(null);   // uid that chose in Settings: that choice beats the slower initial GET
   const chooseEnergyUnit = useCallback((u) => { unitChosen.current = uid; setUnitPref({ uid, unit: u }); }, [uid]);
   const [online, setOnline] = useState(() => navigator.onLine);
+  // Inside the 15 days after "Delete my account": the date it goes, else null (lane L). View-only meanwhile.
+  const [deletion, setDeletion] = useState({ uid: null, at: null });
+  const deleteAfter = deletion.uid === uid ? deletion.at : null;
+  const readOnly = !!deleteAfter;
+  const setDeleteAfter = useCallback((at) => setDeletion({ uid, at }), [uid]);
+  const [keptUid, setKeptUid] = useState(null);   // L4: shown for a few seconds after Keep my account, to that account
+  const kept = keptUid !== null && keptUid === uid;
+  useEffect(() => { if (!keptUid) return; const t = setTimeout(() => setKeptUid(null), 6000); return () => clearTimeout(t); }, [keptUid]);
 
   // iOS pans the page when the keyboard opens, which drags the fixed bottom
   // nav into the middle of the screen. Hide it while any input has the
@@ -117,6 +128,16 @@ export default function App() {
       .catch(() => {});
     return () => { live = false; };
   }, [uid]);
+
+  useEffect(() => {
+    if (!uid || AUTHZ_ID !== null) return;
+    let live = true;
+    const read = () => apiFetch("/account/deletion").then(r => { if (live) setDeletion({ uid, at: r.delete_after }); }).catch(() => {});
+    read();
+    window.addEventListener("ns-deleting", read);   // a write came back 423: the account is being deleted after all
+    return () => { live = false; window.removeEventListener("ns-deleting", read); };
+  }, [uid]);
+  useEffect(() => { setViewOnly(readOnly); }, [readOnly]);
 
   useEffect(() => {
     const onOnline = () => setOnline(true);
@@ -275,7 +296,7 @@ export default function App() {
               const active = activeMainTab === tab.id;
               return (
                 <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: active ? "rgba(174,246,199,0.2)" : "transparent", color: active ? "var(--mint)" : "rgba(255,255,255,0.7)", transition: "all 0.15s" }}>
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 16px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", background: active ? "rgba(174,246,199,0.2)" : "transparent", color: active ? "var(--mint)" : "rgba(255,255,255,0.7)", transition: "all 0.15s", opacity: readOnly && OFF_WHILE_DELETING.has(tab.id) ? 0.4 : 1 }}>
                   <Icon n={tab.icon} size={18} style={{ fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
                   {tab.label}
                 </button>
@@ -292,13 +313,20 @@ export default function App() {
               ? <img src={avatarUrl} alt="avatar" onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = "flex"; }} style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(174,246,199,0.5)" }} />
               : null}
             <div style={{ width: 34, height: 34, borderRadius: "50%", background: "rgba(174,246,199,0.2)", border: "2px solid rgba(174,246,199,0.4)", display: avatarUrl ? "none" : "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: "var(--mint)" }}>{userInitial}</div>
-            <button onClick={() => supabase.auth.signOut()} style={{ fontSize: 12, padding: "5px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer", fontWeight: 600 }}>
+            <button onClick={() => signOutHere()} style={{ fontSize: 12, padding: "5px 12px", background: "rgba(174,246,199,0.12)", border: "1px solid rgba(174,246,199,0.25)", borderRadius: 20, color: "var(--mint)", cursor: "pointer", fontWeight: 600 }}>
               Sign out
             </button>
           </div>
         </div>
 
         {offlineBar}
+
+        {readOnly && (
+          <DeletionBanner deleteAfter={deleteAfter} onKept={() => { setDeleteAfter(null); setKeptUid(uid); }}
+            onExport={() => { handleTabChange("settings"); setTimeout(() => document.getElementById("ns-export")?.scrollIntoView({ behavior: "smooth" }), 60); }} />
+        )}
+
+        {kept && !readOnly && <KeptNotice />}
 
         {/* Update banner — kept out of the header so it never crowds it */}
         {updateReady && (
@@ -312,16 +340,21 @@ export default function App() {
         )}
 
         {/* Content */}
-        <div className="ns-content" style={{ flex: 1, width: "100%", margin: "0 auto", paddingTop: 20 }}>
+        <div className="ns-content" data-readonly={readOnly ? "" : undefined}
+          onClickCapture={readOnly ? blockWrite : undefined} onKeyDownCapture={readOnly ? blockWrite : undefined} style={{ flex: 1, width: "100%", margin: "0 auto", paddingTop: 20 }}>
           <div style={{ display: activeMainTab === "scan" ? "block" : "none" }}>
-            <ScanTab onAddToLog={handleAddToLog} />
+            {readOnly && <OffNotice text="Scanning is off while your account is being deleted." />}
+            <div data-write={readOnly ? "" : undefined}><ScanTab onAddToLog={handleAddToLog} /></div>
           </div>
           {activeMainTab === "library" && <LibraryTab key={libraryMountKey} onAddToLog={handleAddToLog} onLogAdded={handleLogAdded} />}
           <div style={{ display: activeMainTab === "tracker" ? "block" : "none" }}>
             <TrackerTab refreshKey={logRefreshKey} onEditEntry={handleEditEntry} />
           </div>
           {activeMainTab === "trends" && <TrendsTab />}
-          {activeMainTab === "settings" && <SettingsTab setEnergyUnit={chooseEnergyUnit} />}
+          {activeMainTab === "settings" && (
+            <SettingsTab setEnergyUnit={chooseEnergyUnit} onDeleted={setDeleteAfter} />
+          )}
+          {activeMainTab === "ai" && readOnly && <OffNotice text="The assistant is off while your account is being deleted." />}
         </div>
 
         {/* Bottom Navigation — AI is a normal tab like everything else.
@@ -332,7 +365,7 @@ export default function App() {
             const active = activeMainTab === tab.id;
             return (
               <button key={tab.id} onClick={() => handleTabChange(tab.id)}
-                style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--accent)" : "var(--muted)", transition: "color 0.15s" }}>
+                style={{ flex: 1, height: 68, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, border: "none", background: "none", cursor: "pointer", padding: 0, color: active ? "var(--accent)" : "var(--muted)", transition: "color 0.15s", opacity: readOnly && OFF_WHILE_DELETING.has(tab.id) ? 0.4 : 1 }}>
                 <div style={{ width: 56, height: 28, borderRadius: 14, background: active ? "var(--teal-lt)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.15s" }}>
                   <Icon n={tab.icon} size={22} style={{ color: active ? "var(--accent)" : "var(--muted)", fontVariationSettings: active ? "'FILL' 1" : "'FILL' 0" }} />
                 </div>
@@ -381,7 +414,7 @@ export default function App() {
       )}
 
       {/* Kept mounted so the conversation survives tab switches */}
-      <ChatAssistant open={activeMainTab === "ai"} />
+      <ChatAssistant open={activeMainTab === "ai" && !readOnly} />
       {!IS_DEMO && <Analytics />}
       {IS_DEMO && (
         <div style={{ position: "fixed", right: 12, bottom: "calc(84px + env(safe-area-inset-bottom, 0px))", zIndex: 60, background: "var(--teal)", color: "#fff", borderRadius: 20, padding: "6px 12px", fontSize: 11, fontWeight: 700, letterSpacing: "0.3px", boxShadow: "0 4px 14px rgba(0,0,0,0.25)", pointerEvents: "none" }}>
@@ -389,5 +422,19 @@ export default function App() {
         </div>
       )}
     </EnergyUnitContext.Provider>
+  );
+}
+
+// Inside the 15 days a greyed control does nothing, from the mouse or the keyboard (CSS alone stops only the mouse).
+function blockWrite(e) {
+  if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+  if (e.target.closest?.("[data-write]")) { e.preventDefault(); e.stopPropagation(); }
+}
+
+function OffNotice({ text }) {
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto 12px", padding: "0 16px", fontSize: 13, color: "var(--muted)", textAlign: "center" }}>
+      {text}
+    </div>
   );
 }

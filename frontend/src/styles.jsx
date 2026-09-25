@@ -76,6 +76,8 @@ export const PALETTE_CSS = `
   input:focus, select:focus { outline: 2px solid var(--teal); outline-offset: -1px; }
 
   /* Responsive nav */
+  /* Lane L: inside the 15 days after a delete every write control is greyed and inert (the server refuses writes too) */
+  [data-readonly] [data-write] { opacity: 0.35 !important; pointer-events: none; }   /* !important: beats inline opacity */
   .ns-bottom-nav { display: flex; }
   .ns-top-tabs   { display: none; }
   .ns-content    { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
