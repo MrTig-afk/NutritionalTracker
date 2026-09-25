@@ -66,7 +66,7 @@ class FakeConn:
 
 def route(test, conn, user="user-1"):
     """Patch auth and the DB for one test; returns a TestClient."""
-    for target, value in (("get_user_id", lambda auth=None: user),
+    for target, value in (("get_user_id", lambda auth=None, **k: user),
                           ("get_db", lambda *a, **k: conn),
                           ("release_db", lambda c: None)):
         p = mock.patch.object(main, target, value)

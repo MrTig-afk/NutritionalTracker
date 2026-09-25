@@ -265,6 +265,11 @@ def resolve_caller(request: Request) -> Caller:
             raise Problem(401, "token_expired", "This token has expired. Make a new one in Settings.")
         if row["user_id"] in m._frozen:
             raise Problem(423, "account_locked", "This account is locked after unusual activity.")
+        pending = row["user_id"] in m._deleting   # read before _purged, as main._account_gate does
+        if row["user_id"] in m._purged:     # a token cached before the purge
+            raise Problem(401, "account_deleted", "This account was deleted.")
+        if pending:   # an API token reads nothing inside the 15 days (main._account_gate)
+            raise Problem(423, "account_scheduled_for_deletion", "This account is being deleted.")
         return Caller(row["user_id"], row["token_id"], row["name"], row["scopes"])
     return Caller(m.get_user_id(auth, allow_client=True))   # app login: every scope; raises 401/423 itself
 
@@ -1395,10 +1400,11 @@ class TokenCreate(Strict):
     expires: Literal[tuple(EXPIRY_DAYS)]
 
 
-def _admin_login(authorization: Optional[str]) -> str:
+def _admin_login(authorization: Optional[str], allow_deleting: bool = False) -> str:
     """Token management accepts only a Supabase login - a PAT fails JWT
-    verification here - so a leaked token can never mint another. Admin-only for now."""
-    user_id = m.get_user_id(authorization)
+    verification here - so a leaked token can never mint another. Admin-only for now.
+    allow_deleting: taking access away (revoke, disconnect) still works inside the 15 days."""
+    user_id = m.get_user_id(authorization, allow_deleting=allow_deleting)
     if not m.ADMIN_USER_ID or user_id != m.ADMIN_USER_ID:
         raise m.HTTPException(status_code=403, detail={"error_type": "feature_unavailable",
                               "message": "API tokens are not available on this account yet."})
@@ -1448,7 +1454,7 @@ def list_tokens(authorization: Optional[str] = Header(default=None)):
 
 @settings_router.delete("/settings/api-tokens/{token_id}")
 def revoke_token(token_id: str, authorization: Optional[str] = Header(default=None)):
-    user_id = _admin_login(authorization)
+    user_id = _admin_login(authorization, allow_deleting=True)
     with db(user_id) as cur:
         cur.execute("UPDATE api_tokens SET revoked_at = now() WHERE token_id = %s AND user_id = %s AND revoked_at IS NULL",
                     [token_id, user_id])
@@ -1531,7 +1537,7 @@ def rename_app(app_id: str, body: AppRename, authorization: Optional[str] = Head
 @settings_router.delete("/settings/connected-apps/{app_id}")
 def disconnect_app(app_id: str, authorization: Optional[str] = Header(default=None)):
     """What cuts access: the gate re-reads the row on the next call and sends the 401 challenge."""
-    user_id = _admin_login(authorization)
+    user_id = _admin_login(authorization, allow_deleting=True)
     app_uuid = _app_uuid(app_id)   # a malformed id is a 404 before any connection is borrowed
     with db(user_id) as cur:
         cur.execute("""UPDATE connected_apps SET revoked_at = now() WHERE id = %s AND user_id = %s
