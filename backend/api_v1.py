@@ -1599,10 +1599,10 @@ MCP_TOOL = {
         "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD. Leave out for today (Australia/Melbourne)."}}},
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
 
-TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Show the user the change in words, with "
-              "the date in words (\"Thu 24 Sep\"), and ask yes or no. Only after an explicit yes, call confirm_change "
-              "with the code; never call it without the user's yes. If more than one entry matches what the user "
-              "means, list them and ask; never guess.")
+TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Show the user the change as a short table "
+              "(food, amount, kcal, protein, carbs, fat, date in words like \"Thu 24 Sep\") and ask yes or no. Only "
+              "after an explicit yes, call confirm_change with the code; never call it without the user's yes. If "
+              "more than one entry matches what the user means, list them and ask; never guess.")
 
 WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
     "log_food": (LogEntryChange, "Log a food", "Add one food to the log on a date."),
@@ -1624,7 +1624,6 @@ WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
                         "get_template."),
     "save_to_library": (SaveFoodChange, "Save a food to the Library", "Save a food to the user's Library for later."),
 }
-DESTRUCTIVE_TOOLS = {"delete_entry", "delete_meal", "confirm_change"}
 
 
 def _write_schema(model) -> dict:
@@ -1634,8 +1633,10 @@ def _write_schema(model) -> dict:
 
 
 def _annotations(name: str) -> dict:
-    return {"readOnlyHint": False, "destructiveHint": name in DESTRUCTIVE_TOOLS,
-            "idempotentHint": False, "openWorldHint": False}
+    """Only confirm_change writes. A preview saves nothing (its transaction rolls back), so claude.ai need not ask
+    before one: the owner gets a single prompt, for the save (owner 2026-09-25)."""
+    saves = name == "confirm_change"
+    return {"readOnlyHint": not saves, "destructiveHint": saves, "idempotentHint": False, "openWorldHint": False}
 
 
 GET_TEMPLATE_TOOL = {
@@ -1699,8 +1700,8 @@ def mcp_caller(request: Request) -> tuple:
 PENDING_TTL, PENDING_MAX = 600, 20
 _pending: dict = {}   # code -> (user_id, client_id, [change], created_at, template etag or None)
 _pending_lock = threading.Lock()
-NEXT_STEP = ("Show the user this change in words, with the date in words, and ask yes or no. Only on yes, call "
-             "confirm_change with confirm_code.")
+NEXT_STEP = ("Show the user this change as a short table (food, amount, kcal, protein, carbs, fat, date in words) and "
+             "ask yes or no. Only on yes, call confirm_change with confirm_code.")
 
 
 def _template_etag(caller: Caller, template_id: str) -> Optional[str]:
