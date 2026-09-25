@@ -819,6 +819,7 @@ def _log_date(v: str) -> str:
 
 Name = Annotated[str, Field(min_length=1, max_length=80), AfterValidator(_text)]
 Label = Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_text)]
+MealLabel = Annotated[str, Field(min_length=1, max_length=80), AfterValidator(_text)]   # a logged meal's name
 Portion = Annotated[str, Field(min_length=1, max_length=40), AfterValidator(_text)]
 Servings = Annotated[float, Field(gt=0, le=100)]
 LogDate = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$"), AfterValidator(_log_date)]
@@ -857,7 +858,7 @@ class LogEntryChange(Item):
 class LogMealChange(Strict):
     type: Literal["log_meal"] = "log_meal"
     date: LogDate
-    label: Label
+    label: MealLabel
     items: list[Item] = Field(min_length=1, max_length=MAX_ITEMS)
 
 
@@ -1578,6 +1579,25 @@ def rename_app(app_id: str, body: AppRename, authorization: Optional[str] = Head
     return _app_view(row)
 
 
+class MealRename(Strict):
+    label: MealLabel
+
+
+@settings_router.patch("/log/meals/{group_id}")
+def rename_meal(group_id: str, body: MealRename, authorization: Optional[str] = Header(default=None)):
+    """Rename one logged meal from the app (Artifact v9 M5). The name lives on the meal's log rows only, so the
+    template it was logged from keeps its own name."""
+    user_id = m.get_user_id(authorization)
+    with db(user_id) as cur:
+        cur.execute("""UPDATE daily_log SET nutrition = jsonb_set(nutrition, '{_meal_label}', to_jsonb(%s::text))
+                       WHERE user_id = %s AND nutrition->>'_meal_group' = %s RETURNING log_id""",
+                    [body.label, user_id, group_id])
+        renamed = cur.fetchall()
+    if not renamed:
+        raise m.HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Meal not found"})
+    return {"group_id": group_id, "label": body.label}
+
+
 @settings_router.delete("/settings/connected-apps/{app_id}")
 def disconnect_app(app_id: str, authorization: Optional[str] = Header(default=None)):
     """What cuts access: the gate re-reads the row on the next call and sends the 401 challenge."""
@@ -1637,6 +1657,7 @@ MCP_SERVER_INFO = {"name": "nutriscan", "title": "NutriScan", "version": "1", "i
     {"src": "https://nutritional-tracker-delta.vercel.app/icon-512.png", "mimeType": "image/png", "sizes": ["512x512"]}]}
 MCP_ORIGINS = ("https://claude.ai", "https://claude.com")
 CONNECTOR_SCOPES = SCOPES   # PRD: one access level, every "Read + log" scope; named so it is never app-login by accident
+TODAY_HINT = "YYYY-MM-DD. Leave out for today (Australia/Melbourne); never ask the user for the date."
 
 MCP_TOOL = {
     "name": "get_context", "title": "Read a day's food log",
@@ -1647,7 +1668,7 @@ MCP_TOOL = {
                    "when you report a day. If more than one entry matches what the user means, list them and ask; "
                    "never guess.",
     "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"date": {"type": "string",
-        "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD. Leave out for today (Australia/Melbourne)."}}},
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": TODAY_HINT}}},
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
 
 TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Show the user the change as a short table "
@@ -1660,11 +1681,18 @@ LIBRARY_RULE = (" A food the user names: call search_library first (its numbers,
                 "rest but no to the Library, preview again without save_to_library (their answer covers it) and "
                 "confirm that. While ask_before_saving is false: include save_to_library and do not ask about the "
                 "Library; the preview and the user's yes before confirm_change still apply.")
-SAVES_TO_LIBRARY = {"log_food", "log_meal", "log_template", "save_template", "update_template"}   # items can carry save_to_library
+SAVES_TO_LIBRARY = {"log_meal", "log_template", "save_template", "update_template"}   # items can carry save_to_library
+MEAL_RULE = (" Everything the user logs through you is a meal: a dish or several foods become one meal with each part "
+             "its own item, and a single food is a meal of one item. label is the meal's name: suggest it yourself "
+             "(one food: its name; a dish the user named: that dish; several foods: Breakfast, Lunch, Dinner or Snack "
+             "by the time of day in Melbourne). Put everything in ONE preview message, starting \"I'll log this as a "
+             "meal called <label> for <date in words>\" and ending \"Say yes, or tell me a different name.\" Never ask "
+             "for the name or the date on their own. If the user answers yes with a different name, preview again "
+             "with that label and confirm it without asking again (their answer covers it).")
 
+# Claude logs through log_meal only (PRD change 2026-09-25: every Claude log is a named meal); /v1 keeps log_entry.
 WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
-    "log_food": (LogEntryChange, "Log a food", "Add one food to the log on a date."),
-    "log_meal": (LogMealChange, "Log a meal", "Add several foods as one meal (a label such as Breakfast) on a date."),
+    "log_meal": (LogMealChange, "Log a meal", "Log what the user ate, as one named meal on a date." + MEAL_RULE),
     "log_template": (LogTemplateChange, "Log a saved meal",
                      "Log one of the user's meal templates on a date, optionally changing, adding or removing items. "
                      "Item ids come from get_template."),
@@ -1689,6 +1717,9 @@ WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
 def _write_schema(model) -> dict:
     s = model.model_json_schema()
     s["properties"].pop("type", None)   # fixed per tool
+    if "date" in s.get("required", []):   # _preview fills in today
+        s["required"].remove("date")
+        s["properties"]["date"]["description"] = TODAY_HINT
     return s
 
 
@@ -1792,8 +1823,11 @@ def _template_etag(caller: Caller, template_id: str) -> Optional[str]:
 
 def _preview(request: Request, caller: Caller, client_id: str, name: str, args: dict) -> str:
     take_request(caller, True)   # as /v1's ?preview=true (need(write=True)): the write runs, then rolls back
+    model = WRITE_TOOLS[name][0]
+    if "date" not in args and (f := model.model_fields.get("date")) and f.is_required():
+        args = {**args, "date": melbourne_today().isoformat()}   # only where a date is required: an edit keeps its own
     try:
-        change = WRITE_TOOLS[name][0].model_validate(args)
+        change = model.model_validate(args)
     except ValidationError as e:   # validation_problem drops loc[0] (FastAPI's "body"): stand in for it
         raise validation_problem([{**err, "loc": ("arguments", *err["loc"])} for err in e.errors()])
     # log_template carries no if_match, so remember the template the preview uses; confirm refuses if it moved.

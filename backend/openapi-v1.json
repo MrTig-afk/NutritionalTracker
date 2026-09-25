@@ -405,7 +405,7 @@
       "type": "array"
      },
      "label": {
-      "maxLength": 40,
+      "maxLength": 80,
       "minLength": 1,
       "title": "Label",
       "type": "string"

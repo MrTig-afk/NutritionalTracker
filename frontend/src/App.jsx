@@ -388,12 +388,12 @@ export default function App() {
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>What's new in this version</div>
               </div>
             </div>
-            <ul style={{ margin: "16px 0", padding: "0 0 0 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <ul style={{ margin: "16px 0", padding: "0 0 0 18px", listStyle: "disc" }}>
               {upcomingChangelog.length > 0
                 ? upcomingChangelog.map((item, i) => (
-                    <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>{item}</li>
+                    <li key={i} style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45, marginBottom: 8 }}>{item}</li>
                   ))
-                : <li style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45 }}>New fixes and improvements</li>
+                : <li style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.45, marginBottom: 8 }}>New fixes and improvements</li>
               }
             </ul>
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>

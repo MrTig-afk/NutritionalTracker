@@ -181,6 +181,10 @@ export async function apiFetch(path, options = {}) {
       state.diary.push({ log_id: newId(), date: body.log_date || localISO(0), name: body.name, servings: body.servings || 1, nutrition: body.nutrition || {} });
       return { ok: true };
     }
+    if (seg[1] === "meals" && method === "PATCH") {   // rename a logged meal
+      for (const e of state.diary) if (e.nutrition?._meal_group === seg[2]) e.nutrition = { ...e.nutrition, _meal_label: body.label };
+      return { group_id: seg[2], label: body.label };
+    }
     const id = Number(seg[1]);
     const entry = state.diary.find(e => e.log_id === id);
     if (method === "PUT" && entry) {

@@ -36,6 +36,8 @@ It ships as an installable PWA: add it to your home screen on iOS or Android and
 
 **10. Install as PWA.** iOS: Share, then Add to Home Screen. Android: browser install prompt. When a new version is available, a banner shows exactly what's new and you choose when to apply it.
 
+**11. Log from Claude chat** (in testing: the owner's account only for now). Settings → Connected apps shows the connector address to add in claude.ai (Customize → Connectors → Add custom connector); sign in and tap Allow. Then tell Claude what you ate. It logs it as one named meal (tap it in the Tracker to see each part, or rename it with the pencil), after showing you a preview and waiting for your yes. **In claude.ai, set every NutriScan tool to "Always allow"**: Claude then checks with you once, in the chat, instead of adding an Allow pop-up for every step.
+
 ---
 
 ## Stack
