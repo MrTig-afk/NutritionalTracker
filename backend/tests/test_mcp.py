@@ -143,6 +143,7 @@ class Initialize(WithConnectorAuth, V1Case):
         self.assertEqual(result["protocolVersion"], "2025-06-18")
         self.assertIn("tools", result["capabilities"])
         self.assertEqual(result["serverInfo"]["name"], "nutriscan")
+        self.assertEqual(result["serverInfo"]["icons"][0]["src"], "https://nutritional-tracker-delta.vercel.app/icon-512.png")
         self.assertNotIn("mcp-session-id", {k.lower() for k in r.headers})
 
     def test_unknown_version_falls_back_to_the_first_offered(self):

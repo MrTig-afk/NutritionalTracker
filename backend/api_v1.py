@@ -1581,6 +1581,10 @@ def revoke_all(user_id: str):
 MCP_URL = "https://nutritionaltracker.onrender.com/mcp"          # PRM resource: must equal the pasted URL exactly
 MCP_PRM_URL = "https://nutritionaltracker.onrender.com/.well-known/oauth-protected-resource/mcp"
 MCP_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")         # first = the one we offer
+# The app icon, per the MCP spec's serverInfo.icons. claude.ai shows a generic icon for every custom connector today
+# (anthropics/claude-ai-mcp#152); this is here so ours appears once it reads the field.
+MCP_SERVER_INFO = {"name": "nutriscan", "title": "NutriScan", "version": "1", "icons": [
+    {"src": "https://nutritional-tracker-delta.vercel.app/icon-512.png", "mimeType": "image/png", "sizes": ["512x512"]}]}
 MCP_ORIGINS = ("https://claude.ai", "https://claude.com")
 CONNECTOR_SCOPES = SCOPES   # PRD: one access level, the six "Read + log" scopes; named so it is never app-login by accident
 
@@ -1824,7 +1828,7 @@ def _mcp(request: Request, raw: bytes):
     if method == "initialize":
         proto = params.get("protocolVersion")
         return _mcp_rpc_result(id_, {"protocolVersion": proto if proto in MCP_VERSIONS else MCP_VERSIONS[0],
-                                     "capabilities": {"tools": {}}, "serverInfo": {"name": "nutriscan", "version": "1"}})
+                                     "capabilities": {"tools": {}}, "serverInfo": MCP_SERVER_INFO})
     if method == "ping":
         return _mcp_rpc_result(id_, {})
     if method == "tools/list":
