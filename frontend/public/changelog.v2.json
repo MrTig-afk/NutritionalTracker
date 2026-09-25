@@ -1,4 +1,5 @@
 [
+  { "v": 29, "text": "The Log Meal button on your meal templates is easy to read in dark mode" },
   { "v": 28, "text": "Everything you log through Claude is now one named meal: tap it to see each part. Claude suggests the name and uses today's date, so it asks you only once" },
   { "v": 28, "text": "Rename any meal in your day with the pencil next to it" },
   { "v": 28, "text": "Using Claude? In claude.ai, set every NutriScan tool to Always allow. Claude still shows you what it will save and waits for your yes, without the extra Allow pop-ups" },
