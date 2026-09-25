@@ -26,6 +26,7 @@ import main  # noqa: E402
 ALERTS = []                           # (title, message), if a test ever wants them
 REAL_ADMIN_PUSH = main._admin_push    # test_phase0 tests the real one
 main._admin_push = lambda title, message: ALERTS.append((title, message))
+REAL_SEND_PUSH = main.send_push_to_user   # test_account_deletion tests the real one
 main.send_push_to_user = lambda user_id, title, message: ALERTS.append((title, message))
 
 # No real model calls either: importing main builds live Groq/Gemini clients from

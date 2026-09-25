@@ -51,7 +51,7 @@ class Reads(V1Case):
                          [("Meal 1", 2), ("Other", 1), ("Coffee", 1)])
         self.assertEqual(body["by_label"]["Meal 1"]["calories"], 555.0)
         self.conn.script = [("FROM daily_log", [r[:4] for r in self.day_rows])]   # the Tracker's row shape
-        with mock.patch.object(main, "get_user_id", lambda a=None: "user-1"):
+        with mock.patch.object(main, "get_user_id", lambda a=None, **k: "user-1"):
             tracker = self.client.get("/log?log_date=2026-09-24", headers={"Authorization": "Bearer login"}).json()["totals"]
         for k in ("calories", "protein", "carbs", "fat", "fibre"):
             self.assertAlmostEqual(body["totals"][k if k == "calories" else k + "_g"], tracker[k], delta=0.1)
@@ -87,7 +87,7 @@ class Reads(V1Case):
     def test_a_write_in_the_app_clears_the_cache(self):
         self.get("/v1/context?date=2026-09-24")
         n = len(self.conn.executed)
-        with mock.patch.object(main, "get_user_id", lambda a=None: "user-1"), \
+        with mock.patch.object(main, "get_user_id", lambda a=None, **k: "user-1"), \
              mock.patch.object(main, "claims_if_valid", lambda a: {"sub": "user-1"}):
             self.client.post("/log", headers={"Authorization": "Bearer login"},
                              json={"name": "Apple", "servings": 1, "nutrition": {}, "log_date": "2026-09-24"})

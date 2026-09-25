@@ -14,7 +14,7 @@ from .test_api_v1 import V1Case
 
 class Admin(V1Case):
     def login(self, user="admin-1"):
-        for p in (mock.patch.object(main, "get_user_id", lambda a=None: user),
+        for p in (mock.patch.object(main, "get_user_id", lambda a=None, **k: user),
                   mock.patch.object(main, "ADMIN_USER_ID", "admin-1")):
             p.start()
             self.addCleanup(p.stop)
@@ -44,7 +44,7 @@ class Admin(V1Case):
 class EnergyUnit(V1Case):
     def setUp(self):
         super().setUp()
-        p = mock.patch.object(main, "get_user_id", lambda a=None: "user-1")
+        p = mock.patch.object(main, "get_user_id", lambda a=None, **k: "user-1")
         p.start()
         self.addCleanup(p.stop)
         self.h = {"Authorization": "Bearer login"}

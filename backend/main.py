@@ -9,7 +9,8 @@ import psycopg2.pool
 import psycopg2.extras
 import jwt as pyjwt
 from collections import defaultdict
-from datetime import datetime, date, timedelta
+from contextlib import contextmanager
+from datetime import datetime, date, timedelta, timezone
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -351,7 +352,22 @@ def _refuse_connected_app(payload: dict, user_id: str, allow_client: bool = Fals
             "message": "Connecting apps is not available on this account yet."})
 
 
-def get_user_id(authorization: Optional[str] = None, allow_client: bool = False) -> str:
+def _account_gate(user_id: str, allow_client: bool = False, allow_deleting: bool = False) -> None:
+    """Frozen: nothing. Inside the 15 days after a delete: the app login may still look (GET) and export;
+    every write, and every /v1 and /mcp call (allow_client), is refused. allow_deleting: the routes that
+    must work then (status, Keep my account, taking access away)."""
+    if user_id in _purged:
+        raise HTTPException(status_code=401, detail={"error_type": "account_deleted", "message": "This account was deleted."})
+    if user_id in _frozen:
+        raise HTTPException(status_code=423, detail={"error_type": "account_locked",
+            "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
+    if (user_id in _deleting and not allow_deleting
+            and (allow_client or _request_method.get() not in ("GET", "HEAD"))):   # unset (no request) = a write
+        raise HTTPException(status_code=423, detail={"error_type": "account_scheduled_for_deletion",
+            "message": "This account is being deleted. You can still view and export everything, or keep your account."})
+
+
+def get_user_id(authorization: Optional[str] = None, allow_client: bool = False, allow_deleting: bool = False) -> str:
     """Extract user ID from Supabase JWT. Supports both HS256 and RS256."""
     if not authorization:
         raise HTTPException(status_code=401, detail={"error_type": "unauthorized", "message": "Missing authorization header"})
@@ -362,9 +378,7 @@ def get_user_id(authorization: Optional[str] = None, allow_client: bool = False)
         if not user_id:
             raise Exception("No sub claim in JWT")
         _refuse_connected_app(payload, user_id, allow_client)
-        if user_id in _frozen:
-            raise HTTPException(status_code=423, detail={"error_type": "account_locked",
-                "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
+        _account_gate(user_id, allow_client, allow_deleting)
         _current_user_id.set(user_id)
         return user_id
     except HTTPException:
@@ -387,9 +401,7 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         if not user_id:
             raise Exception("No sub claim in JWT")
         _refuse_connected_app(payload, user_id)
-        if user_id in _frozen:
-            raise HTTPException(status_code=423, detail={"error_type": "account_locked",
-                "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
+        _account_gate(user_id)
         _current_user_id.set(user_id)
         return user_id, payload.get("email", "")
     except HTTPException:
@@ -553,6 +565,24 @@ def _note_auth_failure(e):
 # ABUSE GUARDS — block, not just alert. One process on Render, so in-memory.
 # =============================================================================
 _frozen: set = set()      # user_ids locked after a delete spree (see freeze_user)
+_deleting: dict = {}      # user_id -> delete_after, inside the 15 days (see _account_gate, _load_deleting)
+_deleting_gen = [0]       # bumped by every local change: a reload that overlapped one must not apply what it read
+_deleting_lock = threading.Lock()   # the generation check and the rebind in _load_deleting are one step
+_reload_db_uses = [0]     # _db_uses right after our last reload (see _deletion_tick)
+_purged: dict = {}        # user_id -> purged at: its access token outlives the deleted login by up to an hour
+
+
+def _set_deleting(user_id: str, delete_after):
+    with _deleting_lock:
+        _deleting_gen[0] += 1
+        _deleting[user_id] = delete_after
+
+
+def _drop_deleting(user_id: str):
+    with _deleting_lock:
+        _deleting_gen[0] += 1
+        _deleting.pop(user_id, None)
+_request_method = contextvars.ContextVar("request_method", default="")   # set by abuse_guard for _account_gate
 _blocked: dict = {}       # ip -> unblock_ts
 
 def _client_ip(request) -> str:
@@ -593,6 +623,7 @@ def freeze_user(user_id: str, reason: str):
 async def abuse_guard(request: Request, call_next):
     if request.method == "OPTIONS":            # CORS preflight: never counted, never blocked
         return await call_next(request)
+    _request_method.set(request.method)
     ip = _client_ip(request)
     if _blocked.get(ip, 0) > time.time():
         return JSONResponse({"error_type": "rate_limited", "message": "Too many requests. Try again later."}, status_code=429)
@@ -708,7 +739,7 @@ def _webpush_all(subs: list, title: str, body: str):
 
 
 def send_push_to_user(user_id: str, title: str, body: str):
-    if not (VAPID_KEY and VAPID_PUBLIC_KEY):
+    if not (VAPID_KEY and VAPID_PUBLIC_KEY) or user_id in _deleting:   # nothing to log inside the 15 days
         return
     def _send():
         try:
@@ -1049,8 +1080,12 @@ def db_awake() -> bool:
     return time.time() < _budget["awake_until"]
 
 
+_db_uses = [0]   # every database use, counted (see _deletion_tick)
+
+
 def _note_db_use(now: Optional[float] = None):
     now = now or time.time()
+    _db_uses[0] += 1
     with _budget_lock:
         period = neon_period_start(datetime.utcfromtimestamp(now).date())
         if _budget["period"] != period:
@@ -1535,6 +1570,8 @@ def startup():
     _load_budget()
     api_v1.load_prefixes()
     threading.Thread(target=_purge_recycle_bin, daemon=True).start()  # also daily from the scheduler
+    _load_deleting()
+    threading.Thread(target=_deletion_loop, daemon=True).start()   # the daily purge runs even with reminders off
     if MEAL_REMINDERS_ENABLED and VAPID_KEY:
         threading.Thread(target=_meal_reminder_loop, daemon=True).start()
         logger.info("⏰ Meal reminder scheduler started")
@@ -2571,7 +2608,7 @@ async def push_subscribe(body: PushSubscriptionCreate, authorization: Optional[s
 
 @app.delete("/push/unsubscribe")
 async def push_unsubscribe(authorization: Optional[str] = Header(default=None)):
-    user_id = get_user_id(authorization)
+    user_id = get_user_id(authorization, allow_deleting=True)
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("DELETE FROM push_subscriptions WHERE user_id = %s", [user_id])
@@ -2684,14 +2721,13 @@ _ACCOUNT_TABLES = [
     "image_records", "api_usage", "users",
 ]
 
-@app.delete("/account")
-async def delete_account(authorization: Optional[str] = Header(default=None)):
-    """Permanently delete the user's data and login. DB rows are mandatory;
-    the Supabase auth-user deletion is best-effort (tolerates 404)."""
-    user_id = get_user_id(authorization)
-    # A stolen session must not be able to nuke the account: require an actual
-    # sign-in (Supabase `amr` timestamp, not `iat` — refreshes renew iat but
-    # not amr) within the last 5 minutes.
+DELETE_GRACE = timedelta(days=15)   # PRD change 2026-09-25: view-only and exportable, then gone
+
+
+def _require_fresh_sign_in(authorization: Optional[str], action: str):
+    """A stolen or left-open session must not be able to delete an account, or undo a delete: require an
+    actual sign-in (Supabase `amr` timestamp, not `iat` — refreshes renew iat but not amr) within the last
+    5 minutes."""
     claims = claims_if_valid(authorization) or {}
     try:
         last_auth = max((int(a.get("timestamp", 0)) for a in claims.get("amr", [])), default=0)
@@ -2699,37 +2735,193 @@ async def delete_account(authorization: Optional[str] = Header(default=None)):
         last_auth = 0          # malformed amr -> 0 -> re-auth required (fails closed)
     if time.time() - last_auth > 300:
         raise HTTPException(status_code=403, detail={"error_type": "reauth_required",
-            "message": "For safety, sign out and sign back in, then delete your account within 5 minutes."})
+            "message": f"For safety, sign out and sign back in, then {action} within 5 minutes."})
+
+
+@app.delete("/account")
+def delete_account(authorization: Optional[str] = Header(default=None)):
+    """Schedule the delete: from now the account is view-only (_account_gate) and Claude and API tokens
+    are refused; _purge_due_accounts removes everything once DELETE_GRACE has passed. Asking again keeps
+    the first date."""
+    user_id = get_user_id(authorization, allow_deleting=True)
+    _require_fresh_sign_in(authorization, "delete your account")
+    with api_v1.db(user_id) as cur:
+        cur.execute("""INSERT INTO account_deletions (user_id, delete_after) VALUES (%s, %s)
+                       ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id RETURNING delete_after""",
+                    [user_id, datetime.now(timezone.utc) + DELETE_GRACE])
+        delete_after = cur.fetchone()[0]
+    _set_deleting(user_id, delete_after)
+    api_v1.forget_token(user_id=user_id)
+    logger.info(f"🗑️ Account deletion scheduled: {user_id[:8]} on {delete_after:%Y-%m-%d}")
+    notify_admin(f"account_deleted:{user_id}", "🗑️ Account deletion scheduled",
+                 f"User {user_id[:8]} asked to delete their account; it goes on {delete_after:%Y-%m-%d}")
+    return {"scheduled": True, "delete_after": delete_after.isoformat()}
+
+
+@app.get("/account/deletion")
+def deletion_status(authorization: Optional[str] = Header(default=None)):
+    """{"delete_after": iso} inside the 15 days, else {"delete_after": null}. From memory: the app asks on
+    every load, and the map is what the lock itself trusts."""
+    when = _deleting.get(get_user_id(authorization))
+    return {"delete_after": when.isoformat() if when else None}
+
+
+@app.post("/account/restore")
+def restore_account(authorization: Optional[str] = Header(default=None)):
+    """Keep my account, before the date only: once it has passed the purge may already have wiped the rows.
+    App login only: a connector or API token never reaches here (get_user_id)."""
+    user_id = get_user_id(authorization, allow_deleting=True)
+    _require_fresh_sign_in(authorization, "keep your account")
+    with api_v1.db(user_id) as cur:
+        # clock_timestamp, not now(): a restore that waited on the purge's row lock is judged when it gets
+        # the row, not when its transaction began
+        cur.execute("""DELETE FROM account_deletions WHERE user_id = %s AND delete_after > clock_timestamp()
+                       RETURNING user_id""", [user_id])
+        restored = cur.fetchone() is not None
+    if restored:
+        _drop_deleting(user_id)
+        notify_admin(f"account_restored:{user_id}", "Account kept", f"User {user_id[:8]} kept their account")
+    return {"restored": restored}
+
+
+@contextmanager
+def _job_db(user_id: str):
+    """api_v1.db for background jobs: a failure reaches the caller as it is (the job reports it), not as
+    the endpoint "DB error" alert and a sanitized 500."""
+    conn = get_db(user_id)
     try:
-        conn = get_db(); cur = conn.cursor()
-        # The UI promises "cannot be undone": tell the recycle-bin trigger to
-        # stand down for this transaction (recycle_bin.sql reads app.skip_bin).
-        cur.execute("SELECT set_config('app.skip_bin', '1', true)")
+        cur = conn.cursor()
+        yield cur
+        conn.commit()
+        cur.close()
+    finally:
+        release_db(conn)
+
+
+def _wipe_account_rows(user_id: str) -> bool:
+    """Every row of the account, past the recycle bin (the promise is "permanently deleted"). Only while its
+    marker is due, checked under a row lock in the same transaction, so a Keep my account that landed after
+    the due list was read wins (restore only deletes a marker that is not due yet). False: left alone."""
+    with _job_db(user_id) as cur:
+        cur.execute("SELECT 1 FROM account_deletions WHERE user_id = %s AND delete_after <= now() FOR UPDATE",
+                    [user_id])
+        if cur.fetchone() is None:
+            return False
+        cur.execute("SELECT set_config('app.skip_bin', '1', true)")   # recycle_bin.sql reads app.skip_bin
         for t in _ACCOUNT_TABLES:
             cur.execute("SELECT to_regclass(%s)", [t])   # api_* tables exist only once api_v1.sql has run
             if cur.fetchone()[0] is not None:
                 cur.execute(f"DELETE FROM {t} WHERE user_id = %s", [user_id])
-        conn.commit(); cur.close(); release_db(conn)
+        cur.execute("SELECT purge_user_recycle_bin()")   # what it deleted earlier goes now, not 30 days later
+    return True
+
+
+def _delete_login(user_id: str) -> bool:
+    """Delete the Supabase login. True once it is gone (already gone counts), or when there is no admin key
+    (best effort, as before: the rows are what the promise is about). False keeps the account's marker so
+    tomorrow's purge tries again."""
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        notify_admin("supabase_admin_key_missing", "Supabase admin key missing",
+                     f"User {user_id[:8]}'s data is deleted but their login could not be: SUPABASE_SERVICE_ROLE_KEY is not set.")
+        return True
+    try:
+        urllib.request.urlopen(urllib.request.Request(
+            f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}", method="DELETE",
+            headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"}),
+            timeout=15)
+        return True
     except Exception as e:
-        raise _db_error(e)
+        if getattr(e, "code", None) == 404:
+            return True
+        logger.warning(f"Supabase user delete failed for {user_id[:8]}: {e}")
+        return False
 
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    if key:
+
+def _system_rows(sql: str) -> list:
+    """A cross-user read for the background jobs. Unlike api_v1.db a failure is the caller's to report,
+    not the endpoint "DB error" alert."""
+    with _job_db("__system__") as cur:
+        cur.execute(sql)
+        return cur.fetchall()
+
+
+def _purge_due_accounts() -> bool:
+    """Day 15: rows, then the login, then the marker. A failure leaves the marker, so the account stays
+    locked and is retried at the next run; the next account still goes. False: the due list was unreadable."""
+    try:
+        due = [r[0] for r in _system_rows("SELECT user_id FROM due_account_deletions()")]
+    except Exception as e:
+        logger.warning(f"account purge skipped: {e}")
+        notify_admin("account_purge_unreadable", "Account deletions not checked",
+                     f"The daily account-deletion run could not read the due list ({type(e).__name__}); retrying in an hour.")
+        return False
+    for uid, at in list(_purged.items()):
+        if time.time() - at > 7200:   # past any access token's life
+            _purged.pop(uid, None)
+    for uid in due:
         try:
-            req = urllib.request.Request(
-                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
-                headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                method="DELETE",
-            )
-            urllib.request.urlopen(req, timeout=15)
+            if not _wipe_account_rows(uid):
+                continue   # kept meanwhile
+            if not _delete_login(uid):
+                raise RuntimeError("the Supabase login was not deleted")
+            with _job_db(uid) as cur:
+                cur.execute("DELETE FROM account_deletions WHERE user_id = %s", [uid])
         except Exception as e:
-            logger.warning(f"Supabase user delete failed (data already gone): {e}")
+            notify_admin(f"account_purge:{uid}", "Account delete failed",
+                         f"User {uid[:8]} is due for deletion but it failed ({type(e).__name__}: {str(e)[:80]}). "
+                         "The account stays locked and the delete is retried at the next run.")
+            continue
+        _purged[uid] = time.time()
+        _drop_deleting(uid)
+        api_v1.forget_token(user_id=uid)
+        _mark_schedule_dirty()
+        logger.info(f"🗑️ Account deleted: {uid[:8]}")
+        notify_admin(f"account_purged:{uid}", "🗑️ Account Deleted", f"User {uid[:8]}'s 15 days ended; everything is deleted")
+    return True
 
-    _mark_schedule_dirty()
-    api_v1.forget_token(user_id=user_id)
-    logger.info(f"🗑️ Account deleted: {user_id[:8]}")
-    notify_admin("account_deleted", "🗑️ Account Deleted", f"User {user_id[:8]} deleted their account")
-    return {"deleted": True}
+
+def _load_deleting():
+    """Who is inside the 15 days, from the database. A failure keeps the current map; a local change made
+    while the query ran wins over what it read (the next reload picks the database up again)."""
+    global _deleting
+    gen = _deleting_gen[0]
+    try:
+        rows = _system_rows("SELECT user_id, delete_after FROM pending_account_deletions()")
+    except Exception as e:
+        logger.warning(f"deletion list not reloaded: {e}")
+        _reload_db_uses[0] = _db_uses[0]   # the failed attempt's own connection must not earn another one
+        return
+    with _deleting_lock:
+        if _deleting_gen[0] == gen:   # else a local change overlapped: the next tick reads again
+            _deleting = dict(rows)
+            _reload_db_uses[0] = _db_uses[0]
+
+
+def _deletion_tick():
+    """Reload the map, but only while Neon is awake because something else used it since the last reload:
+    the reload is database use too, and must never be what keeps Neon awake. Another instance's delete woke
+    it, so this instance's next request is what triggers the reload after it."""
+    if db_awake() and _db_uses[0] != _reload_db_uses[0]:
+        _load_deleting()
+
+
+def _purge_when_due(next_purge: float) -> float:
+    """Run the purge when its time has come; the next one a day later, or an hour later when it could not
+    even read the due list (a cold or missing database), so an overdue account does not wait a whole day."""
+    if time.time() < next_purge:
+        return next_purge
+    return time.time() + (86400 if _purge_due_accounts() else 3600)
+
+
+def _deletion_loop():
+    next_purge = 0.0
+    while True:
+        try:
+            next_purge = _purge_when_due(next_purge)
+            _deletion_tick()
+        except Exception as e:
+            logger.warning(f"deletion loop error: {e}")
+        time.sleep(60)
 
 
 # =============================================================================
