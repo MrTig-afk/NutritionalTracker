@@ -205,7 +205,10 @@ def connected_app_gate(user_id: str, client_id: str) -> None:
                 new = cur.fetchone() is not None   # a racing first call inserted nothing: one push, not two
         if not revoked:
             cur.execute("UPDATE connected_apps SET last_used_at = now() "
-                        "WHERE user_id = %s AND client_id = %s AND revoked_at IS NULL", key)
+                        "WHERE user_id = %s AND client_id = %s AND revoked_at IS NULL RETURNING 1", key)
+            # No live row behind a cached "active": another instance disconnected it (Render overlaps the old and
+            # new instance during a deploy), so this cache is stale.
+            revoked = bool(hit) and cur.fetchone() is None
     with _apps_lock:
         if _apps_gen == gen:   # a disconnect or allow landed meanwhile: leave it uncached, the next call re-reads
             if len(_apps) >= APPS_MAX:

@@ -65,7 +65,7 @@ class Gate(WithConnectorAuth, V1Case):
         self.assertEqual(len(self.stmts("SELECT revoked_at FROM connected_apps")), 1)
 
     def test_active_connection_is_touched_at_most_once_a_minute(self):
-        self.conn.script = [("SELECT revoked_at FROM connected_apps", [(None,)])]
+        self.conn.script = [("SELECT revoked_at FROM connected_apps", [(None,)]), ("SET last_used_at", [(1,)])]
         self.call_tool({})
         self.call_tool({})
         self.assertEqual(len(self.stmts("SET last_used_at")), 1)
@@ -73,6 +73,13 @@ class Gate(WithConnectorAuth, V1Case):
         self.call_tool({})
         self.assertEqual(len(self.stmts("SET last_used_at")), 2)
         self.push.assert_not_called()
+
+    def test_a_stamp_that_matches_no_live_row_means_disconnected(self):
+        # Another instance (Render overlaps old and new during a deploy) disconnected it: this cache still says active.
+        api_v1._apps[("admin-1", "c1")] = [True, time.time() - api_v1.APP_TOUCH_SECS - 1]
+        self.conn.script = [("SET last_used_at", [])]
+        self.assertEqual(self.call_tool({}).status_code, 401)
+        self.assertTrue(api_v1.app_known_disconnected("admin-1", "c1"))
 
     def test_no_touch_while_the_budget_is_paused(self):
         api_v1._apps[("admin-1", "c1")] = [True, time.time() - 61]
