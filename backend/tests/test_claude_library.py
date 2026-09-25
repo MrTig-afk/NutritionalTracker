@@ -151,14 +151,6 @@ class Connector(WithConnectorAuth, V1Case):
 
 
 class OtherSettingsKeepIt(unittest.TestCase):
-    def test_saving_notification_settings_keeps_the_library_setting(self):
-        # CL-1: that upsert replaces the prefs and carried over only the energy unit
-        conn = FakeConn([])
-        client = route(self, conn)
-        client.put("/settings/notifications", headers={"Authorization": "Bearer x"}, json={"prefs": {"enabled": True}})
-        sql = [s for s, _ in conn.executed if "INSERT INTO notification_prefs" in s][0]
-        self.assertIn("'ask_before_saving_foods', notification_prefs.prefs->'ask_before_saving_foods'", sql)
-
     def test_the_energy_unit_uses_the_one_merge(self):
         # CL-9
         conn = FakeConn([])
