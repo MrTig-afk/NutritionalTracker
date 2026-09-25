@@ -179,9 +179,19 @@ export default function App() {
     setShowIOSBanner(false);
   };
 
+  // The Tracker stays mounted, so it re-reads the log whenever it is shown: entries also arrive from outside this
+  // app (Claude, another device), and nothing here would tell it.
+  const activeTabRef = useRef("scan");
   const handleTabChange = useCallback((tabId) => {
     setActiveMainTab(tabId);
+    activeTabRef.current = tabId;
     if (tabId === "library") setLibraryMountKey(k => k + 1);
+    if (tabId === "tracker" && navigator.onLine) setLogRefreshKey(k => k + 1);   // offline: keep what is on screen
+  }, []);
+  useEffect(() => {
+    const onShow = () => { if (document.visibilityState === "visible" && activeTabRef.current === "tracker" && navigator.onLine) setLogRefreshKey(k => k + 1); };
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
   }, []);
 
   const offlineBar = !online && (

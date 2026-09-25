@@ -57,7 +57,8 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   // Loading is derived: show the spinner until the data in state matches the
   // date + refresh counter being asked for. Nothing sets it from an effect.
   const dataKey = `${selectedDate}|${refreshKey}`;
-  const loading = loadedFor !== dataKey;
+  // Only a new date shows the spinner; a refresh of the same date swaps the data in place (no flash, scroll kept).
+  const loading = loadedFor?.split("|")[0] !== selectedDate;
 
   // Latest wins. Two loads can be in flight when the date changes twice quickly,
   // or when a delete-triggered reload overlaps one. Without this guard the slower

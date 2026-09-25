@@ -1,4 +1,5 @@
 [
+  { "v": 25, "text": "The Tracker now refreshes every time you open it, so food logged from another device shows up straight away" },
   { "v": 24, "text": "Show energy in kcal or kJ: pick it in Settings and the Tracker, Trends, Scan, Library and the AI assistant follow" },
   { "v": 24, "text": "Entries added by Claude show a small 'via Claude' tag in the Tracker" },
   { "v": 24, "text": "A HEIC photo your browser can't display now shows a placeholder and still scans, instead of a spinner that never ends" },
