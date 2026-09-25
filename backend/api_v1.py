@@ -265,7 +265,10 @@ def resolve_caller(request: Request) -> Caller:
             raise Problem(401, "token_expired", "This token has expired. Make a new one in Settings.")
         if row["user_id"] in m._frozen:
             raise Problem(423, "account_locked", "This account is locked after unusual activity.")
-        if row["user_id"] in m._deleting:   # an API token reads nothing inside the 15 days (main._account_gate)
+        pending = row["user_id"] in m._deleting   # read before _purged, as main._account_gate does
+        if row["user_id"] in m._purged:     # a token cached before the purge
+            raise Problem(401, "account_deleted", "This account was deleted.")
+        if pending:   # an API token reads nothing inside the 15 days (main._account_gate)
             raise Problem(423, "account_scheduled_for_deletion", "This account is being deleted.")
         return Caller(row["user_id"], row["token_id"], row["name"], row["scopes"])
     return Caller(m.get_user_id(auth, allow_client=True))   # app login: every scope; raises 401/423 itself

@@ -356,12 +356,13 @@ def _account_gate(user_id: str, allow_client: bool = False, allow_deleting: bool
     """Frozen: nothing. Inside the 15 days after a delete: the app login may still look (GET) and export;
     every write, and every /v1 and /mcp call (allow_client), is refused. allow_deleting: the routes that
     must work then (status, Keep my account, taking access away)."""
-    if user_id in _purged:
+    pending = user_id in _deleting   # read before _purged: _set_purged adds there before it removes here
+    if user_id in _purged:   # its login is gone; an access token from before the purge must not recreate it
         raise HTTPException(status_code=401, detail={"error_type": "account_deleted", "message": "This account was deleted."})
     if user_id in _frozen:
         raise HTTPException(status_code=423, detail={"error_type": "account_locked",
             "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
-    if (user_id in _deleting and not allow_deleting
+    if (pending and not allow_deleting
             and (allow_client or _request_method.get() not in ("GET", "HEAD"))):   # unset (no request) = a write
         raise HTTPException(status_code=423, detail={"error_type": "account_scheduled_for_deletion",
             "message": "This account is being deleted. You can still view and export everything, or keep your account."})
@@ -569,7 +570,8 @@ _deleting: dict = {}      # user_id -> delete_after, inside the 15 days (see _ac
 _deleting_gen = [0]       # bumped by every local change: a reload that overlapped one must not apply what it read
 _deleting_lock = threading.Lock()   # the generation check and the rebind in _load_deleting are one step
 _reload_db_uses = [0]     # _db_uses right after our last reload (see _deletion_tick)
-_purged: dict = {}        # user_id -> purged at: its access token outlives the deleted login by up to an hour
+_purged: set = set()      # purged, tombstone still in the database: every call refused (_account_gate)
+_deletion_loaded = [False]   # until the first successful load every tick tries again (a failed load = no lock)
 
 
 def _set_deleting(user_id: str, delete_after):
@@ -581,6 +583,14 @@ def _set_deleting(user_id: str, delete_after):
 def _drop_deleting(user_id: str):
     with _deleting_lock:
         _deleting_gen[0] += 1
+        _deleting.pop(user_id, None)
+        _purged.discard(user_id)
+
+
+def _set_purged(user_id: str):
+    with _deleting_lock:   # into _purged first: _account_gate reads _deleting, then _purged, without the lock
+        _deleting_gen[0] += 1
+        _purged.add(user_id)
         _deleting.pop(user_id, None)
 _request_method = contextvars.ContextVar("request_method", default="")   # set by abuse_guard for _account_gate
 _blocked: dict = {}       # ip -> unblock_ts
@@ -2846,34 +2856,48 @@ def _system_rows(sql: str) -> list:
 
 
 def _purge_due_accounts() -> bool:
-    """Day 15: rows, then the login, then the marker. A failure leaves the marker, so the account stays
-    locked and is retried at the next run; the next account still goes. False: the due list was unreadable."""
+    """Day 15: rows, then the login, then the marker becomes a tombstone (purged_at); a run once the tombstone
+    is 8 days old (due_account_deletions decides) removes it. A failure leaves the marker as it was, so the account stays locked and is
+    retried at the next run; the next account still goes. False: the due list was unreadable."""
     try:
-        due = [r[0] for r in _system_rows("SELECT user_id FROM due_account_deletions()")]
+        due = _system_rows("SELECT user_id, purged_at FROM due_account_deletions()")
     except Exception as e:
         logger.warning(f"account purge skipped: {e}")
         notify_admin("account_purge_unreadable", "Account deletions not checked",
                      f"The daily account-deletion run could not read the due list ({type(e).__name__}); retrying in an hour.")
         return False
-    for uid, at in list(_purged.items()):
-        if time.time() - at > 7200:   # past any access token's life
-            _purged.pop(uid, None)
-    for uid in due:
+    for uid, purged_at in due:
+        if purged_at is not None:   # an 8-day-old tombstone: one last sweep of the rows, then the marker
+            try:
+                _wipe_account_rows(uid)
+                with _job_db(uid) as cur:
+                    cur.execute("DELETE FROM account_deletions WHERE user_id = %s AND purged_at IS NOT NULL "
+                                "RETURNING user_id", [uid])
+                    if cur.fetchone():
+                        _drop_deleting(uid)
+            except Exception as e:
+                notify_admin(f"account_tombstone:{uid}", "Deleted-account cleanup failed",
+                             f"User {uid[:8]} is already deleted; removing its 8-day marker failed ({type(e).__name__}). "
+                             "Retried at the next run.")
+            continue
         try:
             if not _wipe_account_rows(uid):
                 continue   # kept meanwhile
             if not _delete_login(uid):
                 raise RuntimeError("the Supabase login was not deleted")
             with _job_db(uid) as cur:
-                cur.execute("DELETE FROM account_deletions WHERE user_id = %s", [uid])
+                cur.execute("UPDATE account_deletions SET purged_at = now() WHERE user_id = %s AND purged_at IS NULL "
+                            "RETURNING user_id", [uid])
+                stamped_here = cur.fetchone() is not None
         except Exception as e:
             notify_admin(f"account_purge:{uid}", "Account delete failed",
                          f"User {uid[:8]} is due for deletion but it failed ({type(e).__name__}: {str(e)[:80]}). "
                          "The account stays locked and the delete is retried at the next run.")
             continue
-        _purged[uid] = time.time()
-        _drop_deleting(uid)
+        _set_purged(uid)
         api_v1.forget_token(user_id=uid)
+        if not stamped_here:
+            continue   # another instance stamped it and sent the alert
         _mark_schedule_dirty()
         logger.info(f"🗑️ Account deleted: {uid[:8]}")
         notify_admin(f"account_purged:{uid}", "🗑️ Account Deleted", f"User {uid[:8]}'s 15 days ended; everything is deleted")
@@ -2883,25 +2907,36 @@ def _purge_due_accounts() -> bool:
 def _load_deleting():
     """Who is inside the 15 days, from the database. A failure keeps the current map; a local change made
     while the query ran wins over what it read (the next reload picks the database up again)."""
-    global _deleting
+    global _deleting, _purged
     gen = _deleting_gen[0]
     try:
-        rows = _system_rows("SELECT user_id, delete_after FROM pending_account_deletions()")
+        rows = _system_rows("SELECT user_id, delete_after, purged_at FROM pending_account_deletions()")
     except Exception as e:
         logger.warning(f"deletion list not reloaded: {e}")
         _reload_db_uses[0] = _db_uses[0]   # the failed attempt's own connection must not earn another one
+        if not _deletion_loaded[0]:
+            notify_admin("deletion_lock_unloaded", "Account deletion lock not loaded",
+                         f"The server could not read account_deletions ({type(e).__name__}), so accounts inside "
+                         "their 15 days are not locked. Was account_deletions.sql applied before this deploy?")
         return
     with _deleting_lock:
-        if _deleting_gen[0] == gen:   # else a local change overlapped: the next tick reads again
-            _deleting = dict(rows)
-            _reload_db_uses[0] = _db_uses[0]
+        if _deleting_gen[0] != gen:   # a local change overlapped: the next tick reads again
+            return
+        purged = {u for u, _, at in rows if at is not None}
+        newly_purged = purged - _purged
+        _purged = purged   # before _deleting: see _set_purged
+        _deleting = {u: d for u, d, at in rows if at is None}
+        _reload_db_uses[0] = _db_uses[0]
+        _deletion_loaded[0] = True
+    for uid in newly_purged:   # purged by another instance: this one's cached tokens go too
+        api_v1.forget_token(user_id=uid)
 
 
 def _deletion_tick():
     """Reload the map, but only while Neon is awake because something else used it since the last reload:
     the reload is database use too, and must never be what keeps Neon awake. Another instance's delete woke
     it, so this instance's next request is what triggers the reload after it."""
-    if db_awake() and _db_uses[0] != _reload_db_uses[0]:
+    if not _deletion_loaded[0] or (db_awake() and _db_uses[0] != _reload_db_uses[0]):
         _load_deleting()
 
 

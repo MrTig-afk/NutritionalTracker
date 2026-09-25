@@ -33,6 +33,11 @@ class Sql(unittest.TestCase):
                      "FUNCTION pending_account_deletions()", "FUNCTION due_account_deletions()",
                      "REVOKE ALL ON FUNCTION pending_account_deletions() FROM PUBLIC",
                      "REVOKE ALL ON FUNCTION due_account_deletions() FROM PUBLIC",
+                     "ADD COLUMN IF NOT EXISTS purged_at timestamptz",
+                     "DROP FUNCTION IF EXISTS pending_account_deletions()",
+                     "DROP FUNCTION IF EXISTS due_account_deletions()",
+                     "BEGIN;", "COMMIT;",   # C2D2-7: the drop and re-create are one step in any editor
+                     "d.purged_at IS NULL OR d.purged_at < now() - interval '8 days'",   # C2D2-9: only rows with work
                      "FUNCTION purge_user_recycle_bin()",
                      "WHERE user_id = NULLIF(current_setting('app.user_id', true), '')",
                      "REVOKE ALL ON FUNCTION purge_user_recycle_bin() FROM PUBLIC"):
@@ -47,7 +52,8 @@ class Sql(unittest.TestCase):
 class Case(WithConnectorAuth, V1Case):
     def setUp(self):
         super().setUp()
-        for target, value in (("_deleting", {}), ("_reload_db_uses", [-1]), ("_purged", {})):   # -1: never reloaded
+        for target, value in (("_deleting", {}), ("_purged", set()), ("_reload_db_uses", [-1]),   # -1: never reloaded
+                              ("_deletion_loaded", [True])):
             p = mock.patch.object(main, target, value)
             p.start()
             self.addCleanup(p.stop)
@@ -86,6 +92,22 @@ class Lock(Case):
         self.pending()
         r = self.get("/v1/me")
         self.assertEqual((r.status_code, r.json()["error_type"]), (423, "account_scheduled_for_deletion"))
+
+    def test_a_purged_accounts_api_token_is_refused(self):
+        # C2D2-4: a token cached before the purge must not resolve in the moment before forget_token runs
+        main._purged.add("user-1")
+        r = self.get("/v1/me")
+        self.assertEqual((r.status_code, r.json()["error_type"]), (401, "account_deleted"))
+
+    def test_the_purge_marks_purged_before_it_unmarks_pending(self):
+        # C2D2-3: the gate reads _deleting then _purged without a lock; this order leaves no gap between them
+        class Watch(dict):
+            def pop(self, key, *default):
+                assert key in main._purged, "popped from _deleting before it was added to _purged"
+                return super().pop(key, *default)
+        with mock.patch.object(main, "_deleting", Watch({"user-1": WHEN})):
+            main._set_purged("user-1")
+        self.assertIn("user-1", main._purged)
 
     def test_app_login_on_v1_is_refused_even_for_a_read(self):
         self.pending()
@@ -211,9 +233,38 @@ class Routes(Case):
 class Reload(Case):
     def test_reload_replaces_the_map(self):
         self.pending("restored-elsewhere")
-        self.conn.script = [("pending_account_deletions", [("user-2", WHEN)])]
+        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
         main._load_deleting()
         self.assertEqual(main._deleting, {"user-2": WHEN})
+
+    def test_reload_learns_purges_made_elsewhere(self):
+        # CR2-5: another instance purged it: this one locks it out and drops its cached tokens too
+        self.pending("user-3")
+        with mock.patch.object(api_v1, "forget_token") as forget:
+            self.conn.script = [("pending_account_deletions", [("user-3", WHEN, WHEN)])]
+            main._load_deleting()
+            main._load_deleting()   # already known: not forgotten twice
+        self.assertEqual((main._deleting, main._purged), ({}, {"user-3"}))
+        forget.assert_called_once_with(user_id="user-3")
+
+    def test_until_the_first_load_works_every_tick_tries_again(self):
+        # C2D2-1: a failed startup load must not leave the lock open until something else uses the database
+        main._deletion_loaded[0] = False
+        with mock.patch.object(main, "get_db", mock.Mock(side_effect=RuntimeError("down"))):
+            main._deletion_tick()   # asleep, yet it tries
+        self.assertFalse(main._deletion_loaded[0])
+        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
+        main._deletion_tick()
+        self.assertEqual((main._deleting, main._deletion_loaded[0]), ({"user-2": WHEN}, True))
+
+    def test_an_unreadable_list_is_reported(self):
+        # C2D2-2: e.g. the backend deployed before account_deletions.sql was re-applied: the lock is open
+        main._deletion_loaded[0] = False   # a fresh start
+        with mock.patch.object(main, "get_db", mock.Mock(side_effect=RuntimeError("column purged_at does not exist"))), \
+             mock.patch.object(main, "_admin_alert_last", {}):
+            ALERTS.clear()
+            main._load_deleting()
+        self.assertTrue([t for t, _ in ALERTS if t == "Account deletion lock not loaded"])
 
     def test_reload_failure_keeps_what_it_had(self):
         self.pending()
@@ -226,7 +277,7 @@ class Reload(Case):
         main._deletion_tick()
         self.assertFalse(self.conn.executed)
         with mock.patch.dict(main._budget, {"awake_until": time.time() + 60}):
-            self.conn.script = [("pending_account_deletions", [("user-2", WHEN)])]
+            self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
             main._deletion_tick()
         self.assertEqual(main._deleting, {"user-2": WHEN})
 
@@ -261,11 +312,11 @@ class Reload(Case):
         self.pending()
         def rows(sql, params):
             main._drop_deleting("user-1")
-            return [("user-1", WHEN)]
+            return [("user-1", WHEN, None)]
         self.conn.script = [("pending_account_deletions", rows)]
         main._load_deleting()
         self.assertNotIn("user-1", main._deleting)
-        self.conn.script = [("pending_account_deletions", [("user-2", WHEN)])]
+        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
         main._load_deleting()   # positive control: an undisturbed reload applies
         self.assertEqual(main._deleting, {"user-2": WHEN})
 
@@ -298,14 +349,14 @@ class Purge(Case):
         super().setUp()
         for name in ("user-1", "user-2"):
             self.pending(name)
-        self.conn.script = [("due_account_deletions", [("user-1",), ("user-2",)]), ("FOR UPDATE", [(1,)]),
-                            ("to_regclass", [("x",)])]
+        self.conn.script = [("due_account_deletions", [("user-1", None), ("user-2", None)]), ("FOR UPDATE", [(1,)]),
+                            ("to_regclass", [("x",)]), ("SET purged_at", [(1,)])]
         self.logins = []
         p = mock.patch.object(main, "_delete_login", lambda uid: self.logins.append(uid) or True)
         p.start()
         self.addCleanup(p.stop)
 
-    def test_purges_every_table_then_the_login_then_the_marker(self):
+    def test_purges_every_table_then_the_login_then_stamps_the_marker(self):
         api_v1._apps[("user-1", "c9")] = [True, time.time()]
         main._purge_due_accounts()
         sql = [s for s, _ in self.conn.executed]
@@ -313,9 +364,11 @@ class Purge(Case):
         self.assertEqual(len(wipe), 2 * len(main._ACCOUNT_TABLES))
         self.assertIn("SELECT set_config('app.skip_bin', '1', true)", sql)
         self.assertEqual(self.logins, ["user-1", "user-2"])
-        marker = [p for s, p in self.conn.executed if s.startswith("DELETE FROM account_deletions")]
-        self.assertEqual(marker, [["user-1"], ["user-2"]])
-        self.assertEqual(main._deleting, {})
+        stamp = [(s, p) for s, p in self.conn.executed if "SET purged_at" in s]
+        self.assertEqual([p for _, p in stamp], [["user-1"], ["user-2"]])
+        self.assertIn("purged_at IS NULL", stamp[0][0])
+        self.assertFalse([s for s in sql if s.startswith("DELETE FROM account_deletions")])
+        self.assertEqual((main._deleting, main._purged), ({}, {"user-1", "user-2"}))
         self.assertNotIn(("user-1", "c9"), api_v1._apps)
 
     def test_the_wipe_empties_the_recycle_bin_too(self):
@@ -325,14 +378,61 @@ class Purge(Case):
         self.assertEqual(sql.count("SELECT purge_user_recycle_bin()"), 2)
 
     def test_a_purged_login_that_is_still_open_cannot_write_it_back(self):
-        # D2-2: the access token outlives the Supabase login by up to an hour
+        # D2-2, CR51-1, CR2-1: the access token outlives the deleted login; the lock has to survive a restart,
+        # so the tombstone is the marker row (purged_at), and a purged account is gone, not "pending"
         main._purge_due_accounts()
-        self.assertEqual(main._deleting, {})
-        for method, path, kw in (("get", "/goals", {}),
+        for held in (main._deleting, main._purged):   # a restart: rebuilt from the database
+            held.clear()
+        past = datetime(2026, 9, 25, 1, 0, tzinfo=timezone.utc)
+        self.conn.script.insert(0, ("pending_account_deletions", [("user-1", past, past)]))
+        main._load_deleting()
+        for method, path, kw in (("get", "/goals", {}), ("get", "/account/deletion", {}),
                                  ("post", "/log", {"json": {"name": "x", "servings": 1, "nutrition": {}}})):
             r = getattr(self.client, method)(path, headers=login(), **kw)
             self.assertEqual((r.status_code, r.json()["detail"]["error_type"]), (401, "account_deleted"), path)
+        self.assertFalse([s for s, _ in self.conn.executed if "INSERT INTO daily_log" in s])
         self.assertEqual(self.client.get("/goals", headers=login("user-3")).status_code, 200)   # control
+
+    def test_an_old_tombstone_goes_after_one_last_sweep(self):
+        # CR2-2, CR2-6, C2D2-1: the function returns a tombstone only once it is 8 days old; the rows get one
+        # last sweep (anything written meanwhile goes too), then the marker; no Supabase call, no second alert
+        main._purged.add("user-1")
+        self.conn.script = [("due_account_deletions", [("user-1", WHEN)]), ("FOR UPDATE", [(1,)]), ("to_regclass", [("x",)]),
+                            ("DELETE FROM account_deletions", [("user-1",)])]
+        with mock.patch.object(main, "_admin_alert_last", {}):
+            ALERTS.clear()
+            main._purge_due_accounts()
+        sql = [s for s, _ in self.conn.executed]
+        self.assertEqual(len([s for s in sql if s.startswith("DELETE FROM") and "account_deletions" not in s]),
+                         len(main._ACCOUNT_TABLES))
+        gone = [s for s in sql if s.startswith("DELETE FROM account_deletions")]
+        self.assertEqual(len(gone), 1)
+        self.assertIn("purged_at IS NOT NULL", gone[0])
+        self.assertEqual(self.logins, [])
+        self.assertFalse([t for t, _ in ALERTS if t == "🗑️ Account Deleted"])
+        self.assertNotIn("user-1", main._purged)
+        self.assertIn("user-2", main._deleting)   # not due: untouched
+
+    def test_a_failed_tombstone_cleanup_says_what_it_is(self):
+        # C2D2-5: the account is already deleted; the alert must not say it is still due
+        def boom(sql, params):
+            raise RuntimeError("neon blip")
+        self.conn.script = [("due_account_deletions", [("user-1", WHEN)]), ("FOR UPDATE", boom)]
+        with mock.patch.object(main, "_admin_alert_last", {}):
+            ALERTS.clear()
+            main._purge_due_accounts()
+        titles = [t for t, _ in ALERTS]
+        self.assertIn("Deleted-account cleanup failed", titles)
+        self.assertNotIn("Account delete failed", titles)
+
+    def test_stamped_elsewhere_still_forgets_this_instances_tokens(self):
+        # C2D2-4
+        self.conn.script = [("due_account_deletions", [("user-1", None)]), ("FOR UPDATE", [(1,)]),
+                            ("to_regclass", [("x",)]), ("SET purged_at", [])]
+        with mock.patch.object(api_v1, "forget_token") as forget:
+            main._purge_due_accounts()
+        forget.assert_called_with(user_id="user-1")
+        self.assertIn("user-1", main._purged)
 
     def test_each_account_gets_its_own_alert(self):
         # D2-10: the per-event cooldown must not swallow the second account
@@ -345,7 +445,7 @@ class Purge(Case):
         # D2-8
         def boom(sql, params):
             raise RuntimeError("permission denied for table api_audit")
-        self.conn.script = [("due_account_deletions", [("user-1",)]), ("FOR UPDATE", boom)]
+        self.conn.script = [("due_account_deletions", [("user-1", None)]), ("FOR UPDATE", boom)]
         with mock.patch.object(main, "_db_error", mock.Mock()) as db_error, \
              mock.patch.object(main, "_admin_alert_last", {}):
             ALERTS.clear()
@@ -356,7 +456,7 @@ class Purge(Case):
     def test_login_failure_keeps_the_marker_for_tomorrow(self):
         main._delete_login = lambda uid: uid != "user-1"
         main._purge_due_accounts()
-        marker = [p for s, p in self.conn.executed if s.startswith("DELETE FROM account_deletions")]
+        marker = [p for s, p in self.conn.executed if "SET purged_at" in s]
         self.assertEqual(marker, [["user-2"]])
         self.assertIn("user-1", main._deleting)
 
@@ -373,7 +473,7 @@ class Purge(Case):
 
     def test_an_account_kept_meanwhile_is_left_alone(self):
         # CR-AD-2: the list was read, then Keep my account removed the marker; the wipe re-checks it under a lock
-        self.conn.script = [("due_account_deletions", [("user-1",)]), ("FOR UPDATE", []), ("to_regclass", [("x",)])]
+        self.conn.script = [("due_account_deletions", [("user-1", None)]), ("FOR UPDATE", []), ("to_regclass", [("x",)])]
         main._purge_due_accounts()
         sql = [s for s, _ in self.conn.executed]
         lock = [s for s in sql if "FOR UPDATE" in s][0]
