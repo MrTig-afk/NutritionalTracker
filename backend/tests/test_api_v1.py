@@ -364,6 +364,12 @@ class Hygiene(V1Case):
         r = self.client.post("/v1/me", headers={**h, "Content-Type": "text/plain"}, content=b"hi")
         self.assertEqual((r.status_code, r.json()["error_type"]), (415, "unsupported_media_type"))
 
+    def test_v1_uses_the_one_app_body_cap(self):
+        # One 64 KB rule for app and /v1 writes (INT-2): changing it in main changes /v1 too.
+        with mock.patch.object(main, "APP_BODY_CAP", 10):
+            r = self.client.post("/v1/me", headers={"Authorization": f"Bearer {TOKEN}"}, content=b'{"a": "0123456789"}')
+        self.assertEqual((r.status_code, r.json()["error_type"]), (413, "payload_too_large"))
+
     def test_no_browser_origin_on_v1(self):
         pre = {"Origin": "https://nutritional-tracker-delta.vercel.app", "Access-Control-Request-Method": "GET"}
         self.assertNotIn("access-control-allow-origin", self.client.options("/v1/me", headers=pre).headers)

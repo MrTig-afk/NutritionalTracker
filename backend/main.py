@@ -64,7 +64,7 @@ MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 # 1 MB of multipart overhead. The server never reads past Content-Length.
 _SCAN_BODY_CAP = {"/analyze-label": (MAX_UPLOAD_MB + 1) * 1024 * 1024,
                   "/analyze-labels": (10 * MAX_UPLOAD_MB + 1) * 1024 * 1024}
-APP_BODY_CAP = 64 * 1024   # every other app write (a real nutrition object is under 1 KB); /v1 has its own 64 KB cap
+APP_BODY_CAP = 64 * 1024   # every other app write and every /v1 write (a real nutrition object is under 1 KB)
 # /chat carries the whole conversation (the frontend sends every message), so a long session needs room.
 _BODY_CAP = {**_SCAN_BODY_CAP, "/chat": 256 * 1024}
 MAX_DECODED_PIXELS    = 30_000_000  # decoded-pixel cap (~90 MB RGB): MAX_UPLOAD_MB bounds bytes, not what a PNG header declares
@@ -340,7 +340,7 @@ def claims_if_valid(authorization: Optional[str]) -> Optional[dict]:
 
 def _refuse_connected_app(payload: dict, user_id: str, allow_client: bool = False) -> None:
     """A connected app's key (a Supabase OAuth token: it carries client_id) reaches only /v1 and /mcp,
-    and only on the owner's account until Phase 6 (PRD 'Claude chat first')."""
+    and only on the owner's account until connecting opens to everyone."""
     if not payload.get("client_id"):
         return
     if not allow_client:

@@ -86,26 +86,19 @@ export default function AllowPage({ authorizationId, email, online, onDone }) {
       if (action === "allow") {
         // Approve first without the automatic redirect, so a failed approval records nothing and sends no push.
         const { data, error } = await supabase.auth.oauth.approveAuthorization(authorizationId, { skipBrowserRedirect: true });
-        if (error) {
-          console.error("oauth details failed", error.status, error.code, error.message);
-          setView("failed");
-          return;
-        }
+        if (error) throw error;
         // Only ever back to Claude; checked before anything is recorded or pushed.
-        if (!CONNECTOR_ORIGINS.includes(new URL(data.redirect_url).origin)) { setView("failed"); return; }
+        if (!CONNECTOR_ORIGINS.includes(new URL(data.redirect_url).origin)) throw new Error("redirect is not Claude");
         await recordConnection(clientId);
         window.location.assign(data.redirect_url);
         return;
       }
       const { error } = await supabase.auth.oauth.denyAuthorization(authorizationId);
-      if (error) {
-        console.error("oauth details failed", error.status, error.code, error.message);
-        setView("failed");
-      }
+      if (error) throw error;
       // No error: supabase-js itself navigates the tab to the returned redirect_url.
     } catch (e) {
-      // A thrown call (not an {error} result) must not leave both buttons spinning.
-      console.error("oauth details failed", e);
+      // An {error} result or a thrown call: never leave both buttons spinning.
+      console.error("oauth consent failed", e?.status, e?.code, e?.message ?? e);
       setView("failed");
     }
   };
