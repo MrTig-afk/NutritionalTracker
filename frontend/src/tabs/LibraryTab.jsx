@@ -350,7 +350,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                       <span style={{ fontSize: 11, color: "var(--muted)" }}>{tmpl.item_count} items</span>
                     </div>
                     <button data-write onClick={() => logTemplate(tmpl.template_id)} disabled={loggingTmpl === tmpl.template_id || loggedTmpl === tmpl.template_id || tmpl.item_count === 0}
-                      style={{ padding: "5px 10px", background: loggedTmpl === tmpl.template_id ? "var(--teal)" : "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: loggedTmpl === tmpl.template_id ? "white" : "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: tmpl.item_count === 0 ? 0.4 : 1, transition: "background 0.2s" }}>
+                      style={{ padding: "5px 10px", background: loggedTmpl === tmpl.template_id ? "var(--teal)" : "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: loggedTmpl === tmpl.template_id ? "white" : "#0B3D22", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, opacity: tmpl.item_count === 0 ? 0.4 : 1, transition: "background 0.2s" }}>
                       {loggingTmpl === tmpl.template_id ? <Spin size={11} />
                         : loggedTmpl === tmpl.template_id ? <Icon n="check" size={11} style={{ color: "white" }} />
                         : <Icon n="playlist_add_check" size={11} />}
