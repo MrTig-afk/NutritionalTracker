@@ -755,6 +755,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["Authorization", "Content-Type", "X-Client-Date", "X-Scan-ID"],
+    expose_headers=["Content-Disposition"],   # the export's dated filename, read by fetch()
 )
 
 
@@ -3190,6 +3191,9 @@ api_v1.m = sys.modules[__name__]   # this module, whether run as main or __main_
 app.include_router(api_v1.router)
 app.include_router(api_v1.settings_router)
 app.include_router(api_v1.mcp_router)
+import export  # noqa: E402
+export.m = sys.modules[__name__]
+app.include_router(export.router)
 app.middleware("http")(api_v1.v1_middleware)   # outermost: body cap and headers before anything else
 
 
