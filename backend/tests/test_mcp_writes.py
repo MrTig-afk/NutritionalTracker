@@ -35,12 +35,11 @@ class Registry(WithConnectorAuth, V1Case):
             self.assertLessEqual(len(name), 64)
             self.assertEqual(tool["inputSchema"]["type"], "object", name)
 
-    def test_destructive_flags(self):
+    def test_only_confirm_change_writes(self):
+        # A preview saves nothing, so claude.ai need not ask before one; the one prompt is for the save.
         t = self.tools()
-        destructive = {n for n, x in t.items() if x["annotations"]["destructiveHint"]}
-        self.assertEqual(destructive, {"delete_entry", "delete_meal", "confirm_change"})
-        self.assertTrue(t["get_template"]["annotations"]["readOnlyHint"])
-        self.assertFalse(t["log_food"]["annotations"]["readOnlyHint"])
+        self.assertEqual({n for n, x in t.items() if not x["annotations"]["readOnlyHint"]}, {"confirm_change"})
+        self.assertEqual({n for n, x in t.items() if x["annotations"]["destructiveHint"]}, {"confirm_change"})
 
     def test_write_schema_has_no_type_field(self):
         self.assertNotIn("type", self.tools()["log_food"]["inputSchema"]["properties"])
@@ -51,6 +50,7 @@ class Registry(WithConnectorAuth, V1Case):
                      "save_template", "update_template", "save_to_library"):
             self.assertIn("confirm_change", t[name]["description"], name)
             self.assertIn("list them and ask", t[name]["description"], name)
+            self.assertIn("short table", t[name]["description"], name)
         self.assertIn("whole meal or one item", t["delete_meal"]["description"])
 
 
@@ -92,6 +92,7 @@ class Preview(PreviewBase):
         uid, cid, changes, _, _ = api_v1._pending[body["confirm_code"]]
         self.assertEqual((uid, cid, changes[0].type), ("admin-1", "c1", "log_entry"))
         self.assertIn("confirm_change", body["next"])
+        self.assertIn("short table", body["next"])   # the last thing Claude reads must agree with the description
 
     def test_bad_arguments_are_readable(self):
         for args, field in (({"date": TODAY, "name": "Banana"}, "macros"),                      # missing
