@@ -31,7 +31,7 @@ class V1Case(unittest.TestCase):
     """Fresh limits and caches per test; the DB is whatever FakeConn the test sets."""
 
     def setUp(self):
-        for d in (api_v1._token_cache, api_v1._calls, api_v1._daily, api_v1._usage, api_v1._read_cache):
+        for d in (api_v1._token_cache, api_v1._calls, api_v1._daily, api_v1._usage, api_v1._read_cache, api_v1._apps):
             d.clear()
         main._blocked.clear()
         p = mock.patch.object(api_v1, "_live_prefixes", None)
