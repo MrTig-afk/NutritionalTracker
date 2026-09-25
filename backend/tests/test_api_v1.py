@@ -383,7 +383,7 @@ class Hygiene(V1Case):
         self.assertEqual(published, json.loads(json.dumps(api_v1.openapi_v1())),
                          "regenerate backend/openapi-v1.json from api_v1.openapi_v1()")
         routes = sum(len(ops) for ops in published["paths"].values())
-        self.assertEqual(routes, 16)   # the PRD's route table
+        self.assertEqual(routes, 17)   # the PRD's route table, plus GET /v1/library (PRD change 2026-09-25)
         self.assertFalse([p for p in published["paths"] if not p.startswith("/v1/")])
 
     def test_no_internal_fields_in_me(self):

@@ -28,7 +28,7 @@ from PIL import Image
 from pillow_heif import register_heif_opener
 
 register_heif_opener()   # iPhone HEIC photos: browsers that cannot decode them upload the original file
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 import re
 from urllib.parse import urlparse
 import threading
@@ -2691,6 +2691,29 @@ class EnergyUnit(BaseModel):
     unit: Literal["kcal", "kJ"]
 
 
+class LibrarySettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ask_before_saving: StrictBool
+
+
+@app.get("/settings/library")
+def get_library_settings(authorization: Optional[str] = Header(default=None)):
+    """"Ask before saving new foods to my Library", on by default (PRD change 2026-09-25). Claude can only turn
+    it off (api_v1 stop_asking_before_saving); here the user turns it either way."""
+    user_id = get_user_id(authorization)
+    with api_v1.db(user_id, commit=False) as cur:
+        cur.execute(api_v1.ASK_SQL, [user_id])
+        return {"ask_before_saving": api_v1.ask_before_saving(cur.fetchall())}
+
+
+@app.put("/settings/library")
+def set_library_settings(body: LibrarySettings, authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id(authorization)
+    with api_v1.db(user_id) as cur:
+        cur.execute(api_v1.PREFS_MERGE_SQL, [user_id, json.dumps({"ask_before_saving_foods": body.ask_before_saving})])
+    return {"ask_before_saving": body.ask_before_saving}
+
+
 # Display only: storage and /v1 are always kcal. Kept in the notification_prefs
 # JSONB row so it follows the account to other devices without a schema change.
 @app.get("/settings/energy-unit")
@@ -2711,11 +2734,7 @@ async def set_energy_unit(body: EnergyUnit, authorization: Optional[str] = Heade
     user_id = get_user_id(authorization)
     try:
         conn = get_db(); cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO notification_prefs (user_id, prefs, updated_at) VALUES (%s, %s, now())
-            ON CONFLICT (user_id) DO UPDATE SET prefs = COALESCE(notification_prefs.prefs, '{}'::jsonb) || EXCLUDED.prefs,
-                updated_at = EXCLUDED.updated_at
-        """, [user_id, json.dumps({"energy_unit": body.unit})])
+        cur.execute(api_v1.PREFS_MERGE_SQL, [user_id, json.dumps({"energy_unit": body.unit})])
         conn.commit(); cur.close(); release_db(conn)
     except Exception as e:
         raise _db_error(e)
@@ -2741,8 +2760,10 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
             INSERT INTO notification_prefs (user_id, prefs, updated_at)
             VALUES (%s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET updated_at = EXCLUDED.updated_at,
-                -- keep the energy unit, which lives in the same row (see /settings/energy-unit)
-                prefs = EXCLUDED.prefs || jsonb_strip_nulls(jsonb_build_object('energy_unit', notification_prefs.prefs->'energy_unit'))
+                -- keep the settings that live in the same row (/settings/energy-unit, /settings/library)
+                prefs = EXCLUDED.prefs || jsonb_strip_nulls(jsonb_build_object(
+                    'energy_unit', notification_prefs.prefs->'energy_unit',
+                    'ask_before_saving_foods', notification_prefs.prefs->'ask_before_saving_foods'))
         """, [user_id, json.dumps(clean), datetime.now()])
         conn.commit(); cur.close(); release_db(conn)
     except HTTPException:

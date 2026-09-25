@@ -1320,6 +1320,45 @@
     "summary": "Get Goals"
    }
   },
+  "/v1/library": {
+   "get": {
+    "operationId": "get_library_v1_library_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "q",
+      "required": false,
+      "schema": {
+       "default": "",
+       "maxLength": 80,
+       "title": "Q",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Library"
+   }
+  },
   "/v1/me": {
    "get": {
     "operationId": "me_v1_me_get",
