@@ -2760,11 +2760,9 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
             INSERT INTO notification_prefs (user_id, prefs, updated_at)
             VALUES (%s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET updated_at = EXCLUDED.updated_at,
-                -- keep the settings that live in the same row (/settings/energy-unit, /settings/library)
-                prefs = EXCLUDED.prefs || jsonb_strip_nulls(jsonb_build_object(
-                    'energy_unit', notification_prefs.prefs->'energy_unit',
-                    'ask_before_saving_foods', notification_prefs.prefs->'ask_before_saving_foods'))
-        """, [user_id, json.dumps(clean), datetime.now()])
+                -- replace only the reminder keys: other settings share this row (/settings/energy-unit, /settings/library)
+                prefs = (COALESCE(notification_prefs.prefs, '{}'::jsonb) - %s::text[]) || EXCLUDED.prefs
+        """, [user_id, json.dumps(clean), datetime.now(), NOTIF_PREF_KEYS + list(NOTIF_TIME_DEFAULTS)])
         conn.commit(); cur.close(); release_db(conn)
     except HTTPException:
         raise

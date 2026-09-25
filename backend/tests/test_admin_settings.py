@@ -66,11 +66,14 @@ class EnergyUnit(V1Case):
         for body in ({"unit": "cal"}, {"unit": "KJ"}, {"unit": "kJ", "extra": 1}, {}):
             self.assertEqual(self.client.put("/settings/energy-unit", headers=self.h, json=body).status_code, 422, body)
 
-    def test_saving_notifications_keeps_the_unit(self):
+    def test_saving_notifications_replaces_only_the_reminder_keys(self):
+        # every other setting in the row survives, including ones added later (CL2-6)
         with mock.patch.object(main, "_mark_schedule_dirty", lambda: None):
             self.client.put("/settings/notifications", headers=self.h, json={"prefs": {"meal_morning": True}})
-        sql = next(s for s, p in self.conn.executed if "INSERT INTO notification_prefs" in s)
-        self.assertIn("notification_prefs.prefs->'energy_unit'", sql)
+        sql, params = next((s, p) for s, p in self.conn.executed if "INSERT INTO notification_prefs" in s)
+        # COALESCE: a NULL prefs row must not swallow the new reminders (NP-1)
+        self.assertIn("(COALESCE(notification_prefs.prefs, '{}'::jsonb) - %s::text[]) || EXCLUDED.prefs", sql)
+        self.assertEqual(set(params[3]), set(main.NOTIF_PREF_KEYS) | set(main.NOTIF_TIME_DEFAULTS))
 
 
 if __name__ == "__main__":
