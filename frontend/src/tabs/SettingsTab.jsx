@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { apiFetch, downloadExport } from "../lib/api";
-import { card, cardHeader, inputStyle, ghostBtn, pillRow, errorBanner } from "../styles";
-import { Icon, Spin } from "../components/Icon";
+import { card, inputStyle, ghostBtn, pillRow, errorBanner } from "../styles";
+import { Icon, Spin, Spark } from "../components/Icon";
 import { pushSupported, getPermission, getSubscribed, enablePush, disablePush } from "../lib/push";
 import { useEnergyUnit, deletionDate, todayLocal } from "../lib/nutrition";
 import ConnectedAppsCard from "../components/ConnectedAppsCard";
@@ -70,7 +70,66 @@ function Toggle({ on, onChange, disabled, label, write = true }) {
   );
 }
 
-export default function SettingsTab({ setEnergyUnit, onDeleted }) {
+// ConnectedAppsCard's own marker ("connectedAppsSeen"): only a device that has shown the owner's card may see its load error
+const seenAsOwner = () => { try { return !!localStorage.getItem("connectedAppsSeen"); } catch { return false; } };
+
+// Artifact v10 lane S: a list of rows under group headings (S1); a row opens its own screen with "‹ Settings" (S2, S3).
+const groupHead = { fontSize: 11, fontWeight: 800, letterSpacing: 0.6, color: "var(--muted)", textTransform: "uppercase", margin: "4px 4px -8px" };
+
+function Row({ icon, name, value, onClick, write, danger, control, first }) {
+  const body = (
+    <>
+      <span style={{ width: 32, height: 32, borderRadius: 9, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        background: danger ? "var(--danger-lt)" : "var(--off)", border: danger ? "none" : "1px solid var(--border)" }}>{icon}</span>
+      <span style={{ flex: 1, minWidth: 0, textAlign: "left" }}>
+        <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: danger ? "var(--danger)" : "var(--text)" }}>{name}</span>
+        {value && <span style={{ display: "block", fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{value}</span>}
+      </span>
+      {control ?? <Icon n="chevron_right" size={18} style={{ color: "var(--muted)", flexShrink: 0 }} />}
+    </>
+  );
+  const style = { display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "12px 16px", background: "none", border: "none",
+    borderTop: first ? "none" : "1px solid var(--border)", color: "inherit", font: "inherit" };
+  return control
+    ? <div style={style}>{body}</div>
+    : <button data-write={write ? "" : undefined} onClick={onClick} style={{ ...style, cursor: "pointer" }}>{body}</button>;
+}
+
+export default function SettingsTab({ setEnergyUnit, onDeleted, pending, startAt, onStarted }) {
+  const [screen, setScreen] = useState(null);   // null = the list (S1)
+  const [appCount, setAppCount] = useState(null);   // number, "error", or false for "not this account"
+
+  // A screen is one history step, so the phone's back gesture returns to the list (S2). Only ever one level deep:
+  // opening a screen reuses our step (an open screen's, or the one a tab switch left behind) instead of stacking.
+  const openScreen = (k) => {
+    const ours = window.history.state?.nsSettings || window.history.state?.nsSettingsGone;
+    window.history[ours ? "replaceState" : "pushState"]({ nsSettings: k }, "");
+    setScreen(k);
+  };
+  const closeScreen = () => { if (window.history.state?.nsSettings) window.history.back(); else setScreen(null); };
+  useEffect(() => {
+    const onPop = () => setScreen(window.history.state?.nsSettings || null);
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      // leaving the tab with a screen open: the step must not reopen that screen later
+      if (window.history.state?.nsSettings) window.history.replaceState({ nsSettingsGone: true }, "");
+    };
+  }, []);
+  useEffect(() => {   // the deletion banner's Export button (L2) opens S3 directly
+    if (!startAt) return;
+    openScreen(startAt);
+    onStarted();
+  }, [startAt]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onList = screen === null;
+  useEffect(() => {
+    if (!onList) return;
+    apiFetch("/settings/connected-apps").then(a => setAppCount(a.length))
+      // 403: connecting is the owner's only (H4b); any other error shows only where this device has seen the card
+      .catch(e => setAppCount(e.status !== 403 && seenAsOwner() ? "error" : false));
+  }, [onList]);
+
   const energyUnit = useEnergyUnit();
   const [unitErr, setUnitErr]         = useState(false);
   const [unitSaving, setUnitSaving]   = useState(false);
@@ -193,200 +252,211 @@ export default function SettingsTab({ setEnergyUnit, onDeleted }) {
 
   const rowStyle = { display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: "1px solid var(--border)" };
 
-  return (
-    <div style={{ maxWidth: 560, margin: "0 auto", padding: "0 16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-
-      {/* Display */}
-      <div style={card}>
-        <div style={{ ...cardHeader, background: "var(--off)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Display</span>
-        </div>
-        <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Energy unit</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>How calories are shown. Stored the same either way.</div>
-          </div>
-          <div style={{ ...pillRow, background: "var(--off)" }}>
-            {["kcal", "kJ"].map(u => (
-              <button data-write key={u} onClick={() => chooseUnit(u)} aria-pressed={energyUnit === u} disabled={unitSaving}
-                style={energyUnit === u
-                  ? { flex: 1, padding: "7px", background: "var(--teal)", color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }
-                  : { flex: 1, padding: "7px", background: "transparent", color: "var(--muted)", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                {u}
-              </button>
-            ))}
-          </div>
-          {unitErr && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 6 }}>Couldn't save. Try again.</div>}
-        </div>
-      </div>
-
-      {/* G4: one Library for the app and Claude */}
-      <div style={card}>
-        <div style={{ ...cardHeader, background: "var(--off)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Library</span>
-        </div>
-        <div style={{ ...rowStyle, borderTop: "none" }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Ask before saving new foods to my Library</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>The app and Claude share one Library. Turn this off to save new foods without asking.</div>
-          </div>
-          {askFirst === null ? (askLoadErr ? <span style={{ fontSize: 11, color: "var(--danger)" }}>Couldn't load</span> : <Spin size={14} />) : (
-            <Toggle label="Ask before saving new foods to my Library" on={askFirst} onChange={toggleAskFirst} />
-          )}
-        </div>
-        {askErr && <div style={{ fontSize: 11, color: "var(--danger)", padding: "0 16px 12px" }}>Couldn't save. Try again.</div>}
-      </div>
-
-      {/* G3: export, any time, and during the 15 days after a delete */}
-      <div id="ns-export" style={{ ...card, scrollMarginTop: 80 }}>
-        <div style={{ ...cardHeader, background: "var(--off)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Your data</span>
-        </div>
-        <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>Download everything: food log, goals, meal templates and your Library.</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {[["xlsx", "Excel (.xlsx)"], ["csv", "CSV (.zip)"]].map(([f, label], i) => (
-              <button key={f} onClick={() => exportAs(f)} disabled={!!exporting}
-                style={{ flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: exporting ? "not-allowed" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  ...(i === 0 ? { background: "var(--teal)", color: "#fff", border: "none" }
-                              : { background: "transparent", color: "var(--text2)", border: "1px solid var(--border)" }) }}>
-                {exporting === f ? <Spin size={14} color={i === 0 ? "white" : undefined} /> : label}
-              </button>
-            ))}
-          </div>
-          <div style={{ fontSize: 11, color: "var(--muted)" }}>nutriscan-export-{todayLocal()}.xlsx</div>
-          {exportErr && <div style={errorBanner}>{exportErr}</div>}
-        </div>
-      </div>
-
-      {/* Contact */}
-      <div style={card}>
-        <div style={{ ...cardHeader, background: "var(--off)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Contact the developer</span>
-        </div>
-        <div style={{ display: "flex", gap: 14, padding: "16px", justifyContent: "center" }}>
-          {[
-            { href: LINKS.email,    title: "Email",    inner: <Icon n="mail" size={20} style={{ color: "var(--accent)" }} /> },
-            { href: LINKS.linkedin, title: "LinkedIn", inner: <LinkedInLogo /> },
-            { href: LINKS.github,   title: "GitHub",   inner: <GitHubLogo /> },
-          ].map(l => (
-            <a key={l.title} href={l.href} target="_blank" rel="noopener noreferrer" title={l.title}
-              style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--off)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text)" }}>
-              {l.inner}
-            </a>
-          ))}
-        </div>
-      </div>
-
-      {/* Notifications */}
-      <div style={card}>
-        <div style={{ ...cardHeader, background: "var(--off)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700 }}>Notifications</span>
-        </div>
-
-        <div style={{ ...rowStyle, borderTop: "none" }}>
-          <Icon n={subscribed ? "notifications_active" : "notifications"} size={20} style={{ color: "var(--accent)", flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Notifications on this device</div>
-            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-              {permission === "denied"
-                ? "Blocked in your browser/system settings"
-                : subscribed ? "Enabled" : "Turn on to receive any notifications"}
-            </div>
-          </div>
-          {pushLoading ? <Spin size={18} /> : (
-            <Toggle label="Push notifications" on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()}
-              write={!subscribed} /* turning notifications off still works inside the 15 days */ />
-          )}
-        </div>
-
-        <div style={{ padding: "8px 16px", fontSize: 11, color: "var(--muted)", borderTop: "1px solid var(--border)", lineHeight: 1.5 }}>
-          Goal-reached and scan-limit alerts are always included. Reminders below are optional — turn on the ones you want.
-        </div>
-
-        {NOTIF_TYPES.map(t => (
-          <div key={t.key} style={{ ...rowStyle, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 150 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: subscribed ? "var(--text)" : "var(--muted)" }}>{t.label}</div>
-              <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-                {t.hasTime && prefs?.[t.key] ? `Reminds you at ${to12h(prefs[`${t.key}_time`])} — ${t.desc.toLowerCase()}` : t.desc}
-              </div>
-            </div>
-            {prefs === null ? <Spin size={14} /> : (
-              <Toggle label={t.label} on={!!prefs[t.key]} onChange={() => togglePref(t.key)} disabled={!subscribed} />
-            )}
-            {t.hasTime && prefs?.[t.key] && subscribed && (
-              <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                <span style={{ fontSize: 11, color: "var(--muted)" }}>Time:</span>
-                <input
-                  data-write
-                  value={timeDrafts[t.key] ?? ""}
-                  onChange={e => setTimeDrafts(d => ({ ...d, [t.key]: e.target.value }))}
-                  onBlur={() => commitTime(t.key)}
-                  onKeyDown={e => e.key === "Enter" && e.target.blur()}
-                  placeholder="9:00 AM"
-                  style={{ width: 110, padding: "6px 10px", fontSize: 16, borderRadius: 8, background: "var(--off)", color: "var(--text)", border: `1.5px solid ${timeErrors[t.key] ? "var(--danger)" : "var(--border)"}` }}
-                />
-                {timeErrors[t.key] && (
-                  <span style={{ fontSize: 11, color: "var(--danger)" }}>Use a time like 9:00 AM</span>
-                )}
-              </div>
-            )}
-          </div>
+  const unitBody = (
+    <div style={{ ...card, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>How calories are shown. Stored the same either way.</div>
+      <div style={{ ...pillRow, background: "var(--off)" }}>
+        {["kcal", "kJ"].map(u => (
+          <button data-write key={u} onClick={() => chooseUnit(u)} aria-pressed={energyUnit === u} disabled={unitSaving}
+            style={energyUnit === u
+              ? { flex: 1, padding: "7px", background: "var(--teal)", color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }
+              : { flex: 1, padding: "7px", background: "transparent", color: "var(--muted)", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            {u}
+          </button>
         ))}
       </div>
+      {unitErr && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 6 }}>Couldn't save. Try again.</div>}
+    </div>
+  );
 
-      <ConnectedAppsCard />
-
-      {/* Admin (owner only): renders nothing until GET /settings/admin/health returns 200 */}
-      {health && (
-        <div style={card}>
-          <div style={{ ...cardHeader, background: "var(--off)" }}>
-            <Icon n="admin_panel_settings" size={16} style={{ color: "var(--accent)" }} />
-            <span style={{ fontSize: 14, fontWeight: 700, flex: 1, marginLeft: 8 }}>Admin</span>
-            <span style={{ background: "var(--teal-lt)", color: "var(--accent)", borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>only you</span>
-          </div>
-          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div style={{ background: "var(--off)", borderRadius: 10, padding: "8px 10px" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>API requests left today</div>
-                {/* 200 is api_v1.DAILY_CAP */}
-                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{health.requests_left_today} / 200</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>resets {new Date(health.resets_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
-              </div>
-              <div style={{ background: "var(--off)", borderRadius: 10, padding: "8px 10px" }}>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>Neon budget used</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{health.neon_budget_percent}%</div>
-                <div style={{ fontSize: 11, color: "var(--muted)" }}>resets {new Date(health.budget_period_resets + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</div>
-              </div>
-            </div>
-            {health.api_paused
-              ? <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--orange-lt)", color: "var(--orange)" }}>API paused: Neon budget at 90%</div>
-              : <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--off)", color: "var(--mint-dk)" }}>API running</div>}
-            <div style={{ fontSize: 11, color: "var(--muted)" }}>At 90% of the Neon budget the Claude API pauses itself; the app keeps working.</div>
-            <button data-write onClick={sendTestAlert} disabled={alertState === "sending"} style={{ ...ghostBtn, opacity: alertState === "sending" ? 0.6 : 1 }}>
-              {alertState === "sending" ? <Spin size={14} /> : <Icon n="notifications_active" size={14} />}
-              Send test alert
-            </button>
-            {alertState === "sent" && <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mint-dk)" }}>Sent. It should arrive on every device with notifications on.</div>}
-            {alertState === "failed" && <div style={errorBanner}>Couldn't send the test alert.</div>}
-          </div>
-        </div>
-      )}
-
-      {/* Danger zone */}
-      <div style={{ ...card, border: "1px solid var(--danger)" }}>
-        <div style={{ ...cardHeader, background: "var(--danger-lt)" }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--danger)" }}>Danger zone</span>
-        </div>
-        <div style={{ padding: 16 }}>
-          <button data-write onClick={() => { setConfirmOpen(true); setConfirmText(""); }}
-            style={{ padding: "10px 16px", background: "var(--danger)", color: "var(--on-danger)", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-            Delete my account
+  const exportBody = (
+    <div style={{ ...card, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 12, color: "var(--muted)" }}>Download everything: food log, goals, meal templates and your Library.</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {[["xlsx", "Excel (.xlsx)"], ["csv", "CSV (.zip)"]].map(([f, label], i) => (
+          <button key={f} onClick={() => exportAs(f)} disabled={!!exporting}
+            style={{ flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: exporting ? "not-allowed" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              ...(i === 0 ? { background: "var(--teal)", color: "#fff", border: "none" }
+                          : { background: "transparent", color: "var(--text2)", border: "1px solid var(--border)" }) }}>
+            {exporting === f ? <Spin size={14} color={i === 0 ? "white" : undefined} /> : label}
           </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>nutriscan-export-{todayLocal()}.xlsx</div>
+      {exportErr && <div style={errorBanner}>{exportErr}</div>}
+    </div>
+  );
+
+  const contactBody = (
+    <div style={{ ...card, display: "flex", gap: 14, padding: "16px", justifyContent: "center" }}>
+      {[
+        { href: LINKS.email,    title: "Email",    inner: <Icon n="mail" size={20} style={{ color: "var(--accent)" }} /> },
+        { href: LINKS.linkedin, title: "LinkedIn", inner: <LinkedInLogo /> },
+        { href: LINKS.github,   title: "GitHub",   inner: <GitHubLogo /> },
+      ].map(l => (
+        <a key={l.title} href={l.href} target="_blank" rel="noopener noreferrer" title={l.title}
+          style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--off)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text)" }}>
+          {l.inner}
+        </a>
+      ))}
+    </div>
+  );
+
+  const notifyBody = (
+    <div style={card}>
+      <div style={{ ...rowStyle, borderTop: "none" }}>
+        <Icon n={subscribed ? "notifications_active" : "notifications"} size={20} style={{ color: "var(--accent)", flexShrink: 0 }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Notifications on this device</div>
+          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+            {permission === "denied"
+              ? "Blocked in your browser/system settings"
+              : subscribed ? "Enabled" : "Turn on to receive any notifications"}
+          </div>
+        </div>
+        {pushLoading ? <Spin size={18} /> : (
+          <Toggle label="Push notifications" on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()}
+            write={!subscribed} /* turning notifications off still works inside the 15 days */ />
+        )}
+      </div>
+
+      <div style={{ padding: "8px 16px", fontSize: 11, color: "var(--muted)", borderTop: "1px solid var(--border)", lineHeight: 1.5 }}>
+        Goal-reached and scan-limit alerts are always included. Reminders below are optional — turn on the ones you want.
+      </div>
+
+      {NOTIF_TYPES.map(t => (
+        <div key={t.key} style={{ ...rowStyle, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 150 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: subscribed ? "var(--text)" : "var(--muted)" }}>{t.label}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+              {t.hasTime && prefs?.[t.key] ? `Reminds you at ${to12h(prefs[`${t.key}_time`])} — ${t.desc.toLowerCase()}` : t.desc}
+            </div>
+          </div>
+          {prefs === null ? <Spin size={14} /> : (
+            <Toggle label={t.label} on={!!prefs[t.key]} onChange={() => togglePref(t.key)} disabled={!subscribed} />
+          )}
+          {t.hasTime && prefs?.[t.key] && subscribed && (
+            <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>Time:</span>
+              <input
+                data-write
+                value={timeDrafts[t.key] ?? ""}
+                onChange={e => setTimeDrafts(d => ({ ...d, [t.key]: e.target.value }))}
+                onBlur={() => commitTime(t.key)}
+                onKeyDown={e => e.key === "Enter" && e.target.blur()}
+                placeholder="9:00 AM"
+                style={{ width: 110, padding: "6px 10px", fontSize: 16, borderRadius: 8, background: "var(--off)", color: "var(--text)", border: `1.5px solid ${timeErrors[t.key] ? "var(--danger)" : "var(--border)"}` }}
+              />
+              {timeErrors[t.key] && (
+                <span style={{ fontSize: 11, color: "var(--danger)" }}>Use a time like 9:00 AM</span>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  // Admin (owner only): renders nothing until GET /settings/admin/health returns 200
+  const adminBody = health && (
+    <div style={{ ...card, padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div style={{ background: "var(--off)", borderRadius: 10, padding: "8px 10px" }}>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>API requests left today</div>
+          {/* 200 is api_v1.DAILY_CAP */}
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{health.requests_left_today} / 200</div>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>resets {new Date(health.resets_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+        </div>
+        <div style={{ background: "var(--off)", borderRadius: 10, padding: "8px 10px" }}>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>Neon budget used</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{health.neon_budget_percent}%</div>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>resets {new Date(health.budget_period_resets + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" })}</div>
         </div>
       </div>
+      {health.api_paused
+        ? <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--orange-lt)", color: "var(--orange)" }}>API paused: Neon budget at 90%</div>
+        : <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--off)", color: "var(--mint-dk)" }}>API running</div>}
+      <div style={{ fontSize: 11, color: "var(--muted)" }}>At 90% of the Neon budget the Claude API pauses itself; the app keeps working.</div>
+      <button data-write onClick={sendTestAlert} disabled={alertState === "sending"} style={{ ...ghostBtn, opacity: alertState === "sending" ? 0.6 : 1 }}>
+        {alertState === "sending" ? <Spin size={14} /> : <Icon n="notifications_active" size={14} />}
+        Send test alert
+      </button>
+      {alertState === "sent" && <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mint-dk)" }}>Sent. It should arrive on every device with notifications on.</div>}
+      {alertState === "failed" && <div style={errorBanner}>Couldn't send the test alert.</div>}
+    </div>
+  );
+
+  const SCREENS = {
+    unit:    { title: "Energy unit", body: unitBody },
+    notify:  { title: "Notifications", body: notifyBody },
+    apps:    { title: null, body: <ConnectedAppsCard /> },   // the card carries its own "Connected apps" header
+    export:  { title: "Export my data", body: exportBody },
+    contact: { title: "Contact the developer", body: contactBody },
+    admin:   { title: "Admin", body: adminBody },
+  };
+
+  const reminders = prefs ? NOTIF_TYPES.filter(t => prefs[t.key]).length : 0;
+  const notifyValue = permission === "denied" ? "Blocked in your browser settings"
+    : subscribed ? `On · ${reminders} reminder${reminders === 1 ? "" : "s"}` : "Off on this device";
+  const appsValue = appCount === "error" ? "Couldn't load" : appCount ? `${appCount} connected` : "Nothing connected yet";
+  const ico = (n) => <Icon n={n} size={17} style={{ color: "var(--accent)" }} />;
+
+  const open = SCREENS[screen];
+  return (
+    <div style={{ maxWidth: 560, margin: "0 auto", padding: "0 16px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+      {open ? (
+        <>
+          <button onClick={closeScreen} style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 2, background: "none", border: "none",
+            color: "var(--accent)", fontSize: 14, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+            <Icon n="chevron_left" size={20} /> Settings
+          </button>
+          {open.title && <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)", marginTop: -6 }}>{open.title}</div>}
+          {open.body}
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text)" }}>Settings</div>
+
+          <div style={groupHead}>Display</div>
+          <div style={card}><Row first write icon={ico("straighten")} name="Energy unit" value={energyUnit} onClick={() => openScreen("unit")} /></div>
+
+          <div style={groupHead}>Library</div>
+          <div style={card}>
+            <Row first icon={ico("bookmark_add")} name="Ask before saving new foods"
+              value={askFirst === null ? (askLoadErr ? "Couldn't load" : "") : `${askFirst ? "On" : "Off"}${health ? " · the app and Claude share one Library" : ""}`}
+              control={askFirst === null ? (askLoadErr ? <span /> : <Spin size={14} />) : <Toggle label="Ask before saving new foods to my Library" on={askFirst} onChange={toggleAskFirst} />} />
+            {askErr && <div style={{ fontSize: 11, color: "var(--danger)", padding: "0 16px 12px" }}>Couldn't save. Try again.</div>}
+          </div>
+
+          <div style={groupHead}>Reminders</div>
+          <div style={card}><Row first icon={ico(subscribed ? "notifications_active" : "notifications")} name="Notifications" value={notifyValue} onClick={() => openScreen("notify")} /></div>
+
+          {appCount !== null && appCount !== false && <>
+            <div style={groupHead}>Claude</div>
+            <div style={card}><Row first icon={<Spark size={16} color="var(--claude)" />} name="Connected apps" value={appsValue} onClick={() => openScreen("apps")} /></div>
+          </>}
+
+          <div style={groupHead}>Your data</div>
+          <div style={card}>
+            <Row first icon={ico("download")} name="Export my data" value="Excel or CSV" onClick={() => openScreen("export")} />
+            <Row icon={ico("mail")} name="Contact the developer" value="Email, LinkedIn, GitHub" onClick={() => openScreen("contact")} />
+          </div>
+
+          {health && <>
+            <div style={groupHead}>Admin · only you</div>
+            <div style={card}><Row first icon={ico("admin_panel_settings")} name="Admin"
+              value={`${health.api_paused ? "API paused" : "API running"} · Neon ${health.neon_budget_percent}%`} onClick={() => openScreen("admin")} /></div>
+          </>}
+
+          {!pending && (
+            <div style={{ ...card, border: "1px solid var(--danger)" }}>
+              <Row first write danger icon={<Icon n="delete" size={17} style={{ color: "var(--danger)" }} />} name="Delete my account"
+                onClick={() => { setConfirmOpen(true); setConfirmText(""); }} />
+            </div>
+          )}
+        </>
+      )}
 
       {error && (
         <div style={{ background: "var(--danger-lt)", border: "1px solid var(--danger)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--danger)" }}>
