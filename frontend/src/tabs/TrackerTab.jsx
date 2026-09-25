@@ -6,6 +6,7 @@ import { Icon, Spin, Spark } from "../components/Icon";
 import MacroBar from "../components/MacroBar";
 import DatePicker from "../components/DatePicker";
 import { confirm } from "../lib/confirm";
+import RenameMealModal from "../components/RenameMealModal";
 
 // Approved D3 spark (design/userflow.artifact.html, class="pill p-claude"). The
 // spark itself is Icon.jsx's Spark (AllowPage and, later, Connected apps use it too).
@@ -35,6 +36,18 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
   const [expandedGroups, setExpandedGroups] = useState({});
   const [err, setErr] = useState(null); // one inline line, auto-clears
   useEffect(() => { if (!err) return; const t = setTimeout(() => setErr(null), 5000); return () => clearTimeout(t); }, [err]);
+  const [renaming, setRenaming] = useState(null); // the meal block whose name is being changed
+  const [renamed, setRenamed] = useState(false);
+  useEffect(() => { if (!renamed) return; const t = setTimeout(() => setRenamed(false), 2500); return () => clearTimeout(t); }, [renamed]);
+
+  const onRenamed = (label) => {
+    const gid = renaming.gid;
+    // the _meal_label tag too: an item edit sends its nutrition tags back and would restore the old name
+    setLogData(d => ({ ...d, items: d.items.map(it => (it.meal_group === gid
+      ? { ...it, meal_label: label, nutrition: { ...it.nutrition, _meal_label: label } } : it)) }));
+    setRenaming(null);
+    setRenamed(true);
+  };
 
   // The app can stay open across midnight (installed PWA). If the user was
   // viewing "today", roll the view forward when the date changes so new logs
@@ -194,6 +207,13 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
 
       {/* Right col — log entries */}
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {renamed && (
+        <div role="status" style={{ background: "var(--mint)", color: "#0B3D22", borderRadius: 10, padding: "10px 14px", fontSize: 13, fontWeight: 700 }}>
+          Renamed.
+        </div>
+      )}
+      {renaming && <RenameMealModal meal={renaming} onClose={() => setRenaming(null)} onRenamed={onRenamed}
+        onGone={() => { setRenaming(null); loadData(); }} />}
       <div style={card}>
         <div style={{ ...cardHeader, background: "var(--off)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -249,6 +269,10 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
                         {block.items.length} item{block.items.length !== 1 ? "s" : ""} · {toUnit(sum.calories, unit).toFixed(0)} {unit} · P {sum.protein.toFixed(1)}g · C {sum.carbs.toFixed(1)}g · F {sum.fat.toFixed(1)}g
                       </div>
                     </div>
+                    <button data-write onClick={(e) => { e.stopPropagation(); setRenaming(block); }} aria-label={`Rename ${block.label}`}
+                      style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Icon n="edit" size={13} style={{ color: "var(--accent)" }} />
+                    </button>
                     <button data-write onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid} aria-label={`Delete ${block.label}`}
                       style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {deletingId === block.gid ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}

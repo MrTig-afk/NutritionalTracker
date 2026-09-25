@@ -27,7 +27,8 @@ class Registry(WithConnectorAuth, V1Case):
 
     def test_all_tools_listed_with_titles(self):
         t = self.tools()
-        self.assertEqual(set(t), {"get_context", "get_template", "log_food", "log_meal", "log_template", "edit_entry",
+        # no log_food: everything Claude logs is a named meal (PRD change 2026-09-25)
+        self.assertEqual(set(t), {"get_context", "get_template", "log_meal", "log_template", "edit_entry",
                                   "delete_entry", "delete_meal", "save_template", "update_template",
                                   "save_to_library", "confirm_change", "search_library", "stop_asking_before_saving"})
         for name, tool in t.items():
@@ -44,11 +45,11 @@ class Registry(WithConnectorAuth, V1Case):
         self.assertEqual({n for n, x in t.items() if x["annotations"]["destructiveHint"]}, {"confirm_change"})
 
     def test_write_schema_has_no_type_field(self):
-        self.assertNotIn("type", self.tools()["log_food"]["inputSchema"]["properties"])
+        self.assertNotIn("type", self.tools()["log_meal"]["inputSchema"]["properties"])
 
     def test_preview_rule_is_in_every_write_description(self):
         t = self.tools()
-        for name in ("log_food", "log_meal", "log_template", "edit_entry", "delete_entry", "delete_meal",
+        for name in ("log_meal", "log_template", "edit_entry", "delete_entry", "delete_meal",
                      "save_template", "update_template", "save_to_library"):
             self.assertIn("confirm_change", t[name]["description"], name)
             self.assertIn("list them and ask", t[name]["description"], name)
@@ -80,27 +81,29 @@ class PreviewBase(WithConnectorAuth, WritesFixture, V1Case):
         self.conn.executed.clear()
 
     def banana(self, **over):
-        return {"date": TODAY, "name": "Banana", "portion": "1 medium", "macros": MACROS, **over}
+        return {"date": TODAY, "label": "Banana",
+                "items": [{"name": "Banana", "portion": "1 medium", "macros": MACROS}], **over}
 
 
 class Preview(PreviewBase):
     def test_preview_saves_nothing_and_returns_a_code(self):
-        is_err, text = result(self.call_tool(self.banana(), name="log_food"))
+        is_err, text = result(self.call_tool(self.banana(), name="log_meal"))
         self.assertFalse(is_err, text)
         body = json.loads(text)
         self.assertTrue(body["preview"]["preview"])
         self.assertEqual(self.conn.commits, 0)
         self.assertIn(body["confirm_code"], api_v1._pending)
         uid, cid, changes, _, _ = api_v1._pending[body["confirm_code"]]
-        self.assertEqual((uid, cid, changes[0].type), ("admin-1", "c1", "log_entry"))
+        self.assertEqual((uid, cid, changes[0].type), ("admin-1", "c1", "log_meal"))
         self.assertIn("confirm_change", body["next"])
         self.assertIn("short table", body["next"])   # the last thing Claude reads must agree with the description
 
     def test_bad_arguments_are_readable(self):
-        for args, field in (({"date": TODAY, "name": "Banana"}, "macros"),                      # missing
+        bad_item = [{"name": "Banana", "macros": {"calories": "lots"}}]
+        for args, field in (({"date": TODAY, "label": "Banana"}, "items"),                      # missing
                             ({**self.banana(), "extra": 1}, "extra"),                          # extra field
-                            ({**self.banana(), "macros": {"calories": "lots"}}, "macros.calories")):   # wrong type
-            is_err, text = result(self.call_tool(args, name="log_food"))
+                            (self.banana(items=bad_item), "items.0.macros.calories")):          # wrong type
+            is_err, text = result(self.call_tool(args, name="log_meal"))
             self.assertTrue(is_err, args)
             self.assertTrue(text.startswith(field + ":"), text)
             self.assertNotIn("Traceback", text)
@@ -110,25 +113,25 @@ class Preview(PreviewBase):
         # /v1's ?preview=true goes through need(write=True): a connector preview is held to the same write limit
         now = time.time()
         api_v1._calls["admin-1"].extend((now, True) for _ in range(api_v1.WRITES_PER_MIN))
-        is_err, text = result(self.call_tool(self.banana(), name="log_food"))
+        is_err, text = result(self.call_tool(self.banana(), name="log_meal"))
         self.assertTrue(is_err)
         self.assertIn("Over the limit of 10", text)
 
     def test_codes_are_bounded(self):
         for _ in range(api_v1.PENDING_MAX + 5):
-            self.call_tool(self.banana(), name="log_food")
+            self.call_tool(self.banana(), name="log_meal")
             api_v1._calls.clear()   # stay under the per-minute limiter for this test
             api_v1._daily.clear()
         self.assertEqual(sum(1 for v in api_v1._pending.values() if v[0] == "admin-1"), api_v1.PENDING_MAX)
 
     def test_expired_codes_are_swept_on_the_next_preview(self):
         api_v1._pending["old"] = ("admin-1", "c1", [], time.time() - api_v1.PENDING_TTL - 1, None)
-        self.call_tool(self.banana(), name="log_food")
+        self.call_tool(self.banana(), name="log_meal")
         self.assertNotIn("old", api_v1._pending)
 
 
 class Confirm(PreviewBase):
-    def preview(self, args=None, name="log_food", tok=None):
+    def preview(self, args=None, name="log_meal", tok=None):
         is_err, text = result(self.call_tool(args or self.banana(), name=name, tok=tok))
         self.assertFalse(is_err, text)
         return json.loads(text)["confirm_code"]
@@ -270,8 +273,8 @@ class Confirm(PreviewBase):
 class Logging(PreviewBase):
     def test_tool_line_has_outcome_and_no_content(self):
         with self.assertLogs(main.logger, "INFO") as logs:
-            self.call_tool(self.banana(), name="log_food")
-        line = next(l for l in logs.output if "mcp tool=log_food" in l)
+            self.call_tool(self.banana(), name="log_meal")
+        line = next(l for l in logs.output if "mcp tool=log_meal" in l)
         self.assertIn("mode=preview", line)
         self.assertIn("outcome=ok", line)
         self.assertNotIn("Banana", " ".join(logs.output))

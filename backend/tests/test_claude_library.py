@@ -91,7 +91,7 @@ class Connector(WithConnectorAuth, V1Case):
         stop = tools["stop_asking_before_saving"]
         self.assertEqual(stop["inputSchema"]["properties"], {})   # nothing to pass: it can only turn asking off
         self.assertFalse(stop["annotations"]["destructiveHint"])
-        for name in ("log_food", "log_meal", "log_template", "save_template", "update_template"):
+        for name in ("log_meal", "log_template", "save_template", "update_template"):
             d = tools[name]["description"]   # CL-3: the save question rides in the one preview, never a second prompt
             self.assertIn("ask_before_saving", d, name)
             self.assertIn("same preview", d, name)
