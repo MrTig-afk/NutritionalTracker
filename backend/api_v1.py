@@ -39,7 +39,6 @@ MAX_TOKENS = 10
 EXPIRY_DAYS = {"30d": 30, "90d": 90, "1y": 365, "never": None}
 TOKEN_CACHE_SEC = 300
 BURST_PER_MIN, WRITES_PER_MIN, DAILY_CAP = 20, 10, 200
-BODY_CAP = 64 * 1024
 MELBOURNE = ZoneInfo("Australia/Melbourne")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -383,10 +382,10 @@ async def v1_middleware(request: Request, call_next):
             if declared is None and request.headers.get("transfer-encoding"):
                 # a chunked body would be read whole before its size is known
                 raise Problem(411, "length_required", "Send a Content-Length header.")
-            if declared and declared.isdigit() and int(declared) > BODY_CAP:
+            if declared and declared.isdigit() and int(declared) > m.APP_BODY_CAP:
                 raise Problem(413, "payload_too_large", "Body over 64 KB.")
             body = await request.body()
-            if len(body) > BODY_CAP:
+            if len(body) > m.APP_BODY_CAP:
                 raise Problem(413, "payload_too_large", "Body over 64 KB.")
             ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
             if body and ctype != "application/json":
@@ -1234,7 +1233,8 @@ def run_changes(request: Request, caller: Caller, changes: list, preview: bool, 
                 if old[0] != rhash:
                     raise Problem(409, "idempotency_conflict", "This Idempotency-Key was used for a different request.")
                 if not old[1]:
-                    raise Problem(409, "idempotency_conflict", "A request with this Idempotency-Key is still running.")
+                    raise Problem(409, "idempotency_conflict", "A request with this Idempotency-Key is still running.",
+                                  in_progress=True)
                 replay = (old[1], old[2] if isinstance(old[2], dict) else json.loads(old[2]))
         if replay is None:
             run = _Run(cur, caller)
@@ -1746,6 +1746,9 @@ def _confirm(request: Request, caller: Caller, client_id: str, code) -> str:
     try:
         _, body = run_changes(request, caller, entry[2], False, code)   # the code is the idempotency key
     except Problem as p:
+        if p.extra.get("in_progress"):   # the same code confirmed twice at once: the first one is saving it
+            raise Problem(409, p.error_type, "This change is already being saved. Do not save it again; check the "
+                                             "log in a moment.") from p
         if p.status in (404, 409, 412):
             raise Problem(p.status, p.error_type, "This changed since the preview. Ask again.") from p
         raise

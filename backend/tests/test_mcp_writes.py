@@ -163,6 +163,27 @@ class Confirm(PreviewBase):
         self.assertIn("expired or is not valid", text)
         self.assertEqual(self.conn.commits, 0)
 
+    def test_a_second_save_of_a_running_confirm_says_so(self):
+        # Claude pressing save twice at once: the second must not claim the data changed (CA-3).
+        code = self.preview()
+        busy = api_v1.Problem(409, "idempotency_conflict", "A request with this Idempotency-Key is still running.",
+                              in_progress=True)
+        with mock.patch.object(api_v1, "run_changes", side_effect=busy):
+            is_err, text = self.confirm(code)
+        self.assertTrue(is_err)
+        self.assertIn("already being saved", text)
+        self.assertNotIn("changed since", text)
+
+    def test_a_code_reused_for_a_different_change_asks_again(self):
+        # Nothing is being saved here, so "already being saved" would leave the user waiting for nothing.
+        code = self.preview()
+        other = api_v1.Problem(409, "idempotency_conflict", "This Idempotency-Key was used for a different request.")
+        with mock.patch.object(api_v1, "run_changes", side_effect=other):
+            is_err, text = self.confirm(code)
+        self.assertTrue(is_err)
+        self.assertIn("Ask again", text)
+        self.assertNotIn("already being saved", text)
+
     def test_other_client_cannot_use_code(self):
         code = self.preview()
         api_v1._apps[("admin-1", "c2")] = [True, time.time()]   # a known second connection: the gate stays quiet

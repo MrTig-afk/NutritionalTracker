@@ -234,7 +234,7 @@ export default function ScanTab({ onAddToLog }) {
         {/* Results panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {error && !loading && (
-            <div style={{ background: "#FDF0DC", border: "1px solid var(--orange)", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ background: "var(--orange-lt)", border: "1px solid var(--orange)", borderRadius: 12, padding: "12px 16px", display: "flex", gap: 10, alignItems: "flex-start" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "var(--orange)" }}>Error</span>
               <p style={{ flex: 1, fontSize: 13, color: "var(--brown)" }}>{error}</p>
               <button onClick={() => setError(null)} aria-label="Dismiss" style={{ background: "none", border: "none", cursor: "pointer" }}><Icon n="close" size={14} style={{ color: "var(--muted)" }} /></button>
