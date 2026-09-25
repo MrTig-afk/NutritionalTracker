@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { apiFetch, supabase } from "../lib/api";
+import { apiFetch, downloadExport } from "../lib/api";
 import { card, cardHeader, inputStyle, ghostBtn, pillRow, errorBanner } from "../styles";
 import { Icon, Spin } from "../components/Icon";
 import { pushSupported, getPermission, getSubscribed, enablePush, disablePush } from "../lib/push";
-import { useEnergyUnit } from "../lib/nutrition";
+import { useEnergyUnit, deletionDate, todayLocal } from "../lib/nutrition";
 import ConnectedAppsCard from "../components/ConnectedAppsCard";
 
 const LINKS = {
@@ -49,9 +49,10 @@ const GitHubLogo = () => (
   </svg>
 );
 
-function Toggle({ on, onChange, disabled, label }) {
+function Toggle({ on, onChange, disabled, label, write = true }) {
   return (
     <button
+      data-write={write ? "" : undefined}
       onClick={onChange}
       disabled={disabled}
       aria-pressed={on}
@@ -69,7 +70,7 @@ function Toggle({ on, onChange, disabled, label }) {
   );
 }
 
-export default function SettingsTab({ setEnergyUnit }) {
+export default function SettingsTab({ setEnergyUnit, onDeleted }) {
   const energyUnit = useEnergyUnit();
   const [unitErr, setUnitErr]         = useState(false);
   const [unitSaving, setUnitSaving]   = useState(false);
@@ -85,6 +86,27 @@ export default function SettingsTab({ setEnergyUnit }) {
   const [timeErrors, setTimeErrors]   = useState({});
   const [health, setHealth]           = useState(null);
   const [alertState, setAlertState]   = useState(null); // null | "sending" | "sent" | "failed"
+  const [askFirst, setAskFirst]       = useState(null);  // G4: null while loading
+  const [askErr, setAskErr]           = useState(false);
+  const [exporting, setExporting]     = useState(null);  // G3: "xlsx" | "csv" while the file is made
+  const [exportErr, setExportErr]     = useState(null);
+
+  const [askLoadErr, setAskLoadErr]   = useState(false);
+  useEffect(() => { apiFetch("/settings/library").then(r => setAskFirst(r.ask_before_saving)).catch(() => setAskLoadErr(true)); }, []);
+
+  const toggleAskFirst = () => {
+    const next = !askFirst;
+    setAskFirst(next); setAskErr(false);
+    apiFetch("/settings/library", { method: "PUT", body: JSON.stringify({ ask_before_saving: next }) })
+      .catch(() => { setAskFirst(!next); setAskErr(true); });
+  };
+
+  const exportAs = async (format) => {
+    setExporting(format); setExportErr(null);
+    try { await downloadExport(format); }
+    catch (e) { setExportErr(e.message); }
+    finally { setExporting(null); }
+  };
 
   useEffect(() => { apiFetch("/settings/admin/health").then(setHealth).catch(() => {}); }, []);
 
@@ -158,11 +180,13 @@ export default function SettingsTab({ setEnergyUnit }) {
     if (confirmText !== "DELETE") return;
     setDeleting(true); setError(null);
     try {
-      await apiFetch("/account", { method: "DELETE" });
-      await supabase.auth.signOut();
+      const r = await apiFetch("/account", { method: "DELETE" });
+      setConfirmOpen(false);
+      onDeleted(r.delete_after);   // L2: this device stays signed in, view-only, with the banner
     } catch (e) {
       setConfirmOpen(false);   // the error banner sits behind the modal otherwise
       setError(e.message);
+    } finally {
       setDeleting(false);
     }
   };
@@ -184,7 +208,7 @@ export default function SettingsTab({ setEnergyUnit }) {
           </div>
           <div style={{ ...pillRow, background: "var(--off)" }}>
             {["kcal", "kJ"].map(u => (
-              <button key={u} onClick={() => chooseUnit(u)} aria-pressed={energyUnit === u} disabled={unitSaving}
+              <button data-write key={u} onClick={() => chooseUnit(u)} aria-pressed={energyUnit === u} disabled={unitSaving}
                 style={energyUnit === u
                   ? { flex: 1, padding: "7px", background: "var(--teal)", color: "white", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }
                   : { flex: 1, padding: "7px", background: "transparent", color: "var(--muted)", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
@@ -193,6 +217,46 @@ export default function SettingsTab({ setEnergyUnit }) {
             ))}
           </div>
           {unitErr && <div style={{ fontSize: 11, color: "var(--danger)", marginTop: 6 }}>Couldn't save. Try again.</div>}
+        </div>
+      </div>
+
+      {/* G4: one Library for the app and Claude */}
+      <div style={card}>
+        <div style={{ ...cardHeader, background: "var(--off)" }}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Library</span>
+        </div>
+        <div style={{ ...rowStyle, borderTop: "none" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Ask before saving new foods to my Library</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>The app and Claude share one Library. Turn this off to save new foods without asking.</div>
+          </div>
+          {askFirst === null ? (askLoadErr ? <span style={{ fontSize: 11, color: "var(--danger)" }}>Couldn't load</span> : <Spin size={14} />) : (
+            <Toggle label="Ask before saving new foods to my Library" on={askFirst} onChange={toggleAskFirst} />
+          )}
+        </div>
+        {askErr && <div style={{ fontSize: 11, color: "var(--danger)", padding: "0 16px 12px" }}>Couldn't save. Try again.</div>}
+      </div>
+
+      {/* G3: export, any time, and during the 15 days after a delete */}
+      <div id="ns-export" style={{ ...card, scrollMarginTop: 80 }}>
+        <div style={{ ...cardHeader, background: "var(--off)" }}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Your data</span>
+        </div>
+        <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>Download everything: food log, goals, meal templates and your Library.</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["xlsx", "Excel (.xlsx)"], ["csv", "CSV (.zip)"]].map(([f, label], i) => (
+              <button key={f} onClick={() => exportAs(f)} disabled={!!exporting}
+                style={{ flex: 1, padding: "10px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: exporting ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                  ...(i === 0 ? { background: "var(--teal)", color: "#fff", border: "none" }
+                              : { background: "transparent", color: "var(--text2)", border: "1px solid var(--border)" }) }}>
+                {exporting === f ? <Spin size={14} color={i === 0 ? "white" : undefined} /> : label}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted)" }}>nutriscan-export-{todayLocal()}.xlsx</div>
+          {exportErr && <div style={errorBanner}>{exportErr}</div>}
         </div>
       </div>
 
@@ -232,7 +296,8 @@ export default function SettingsTab({ setEnergyUnit }) {
             </div>
           </div>
           {pushLoading ? <Spin size={18} /> : (
-            <Toggle label="Push notifications" on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()} />
+            <Toggle label="Push notifications" on={subscribed} onChange={toggleMaster} disabled={permission === "denied" || !pushSupported()}
+              write={!subscribed} /* turning notifications off still works inside the 15 days */ />
           )}
         </div>
 
@@ -255,6 +320,7 @@ export default function SettingsTab({ setEnergyUnit }) {
               <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
                 <span style={{ fontSize: 11, color: "var(--muted)" }}>Time:</span>
                 <input
+                  data-write
                   value={timeDrafts[t.key] ?? ""}
                   onChange={e => setTimeDrafts(d => ({ ...d, [t.key]: e.target.value }))}
                   onBlur={() => commitTime(t.key)}
@@ -299,7 +365,7 @@ export default function SettingsTab({ setEnergyUnit }) {
               ? <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--orange-lt)", color: "var(--orange)" }}>API paused: Neon budget at 90%</div>
               : <div style={{ fontSize: 12, fontWeight: 700, borderRadius: 10, padding: "8px 12px", background: "var(--off)", color: "var(--mint-dk)" }}>API running</div>}
             <div style={{ fontSize: 11, color: "var(--muted)" }}>At 90% of the Neon budget the Claude API pauses itself; the app keeps working.</div>
-            <button onClick={sendTestAlert} disabled={alertState === "sending"} style={{ ...ghostBtn, opacity: alertState === "sending" ? 0.6 : 1 }}>
+            <button data-write onClick={sendTestAlert} disabled={alertState === "sending"} style={{ ...ghostBtn, opacity: alertState === "sending" ? 0.6 : 1 }}>
               {alertState === "sending" ? <Spin size={14} /> : <Icon n="notifications_active" size={14} />}
               Send test alert
             </button>
@@ -315,11 +381,7 @@ export default function SettingsTab({ setEnergyUnit }) {
           <span style={{ fontSize: 14, fontWeight: 700, color: "var(--danger)" }}>Danger zone</span>
         </div>
         <div style={{ padding: 16 }}>
-          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6, marginBottom: 12 }}>
-            Permanently delete your account: your food log, goals, folders, meal templates,
-            scan history and login. This cannot be undone.
-          </div>
-          <button onClick={() => { setConfirmOpen(true); setConfirmText(""); }}
+          <button data-write onClick={() => { setConfirmOpen(true); setConfirmText(""); }}
             style={{ padding: "10px 16px", background: "var(--danger)", color: "var(--on-danger)", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
             Delete my account
           </button>
@@ -336,11 +398,13 @@ export default function SettingsTab({ setEnergyUnit }) {
       {confirmOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: "var(--surface)", borderRadius: 20, padding: 24, width: "100%", maxWidth: 400 }}>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--danger)" }}>Delete account?</div>
-            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "10px 0 14px" }}>
-              Everything goes: log entries, goals, folders, templates, scan history and your login.
-              Type <strong style={{ color: "var(--danger)" }}>DELETE</strong> to confirm.
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--danger)" }}>Delete your account?</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, margin: "10px 0 6px" }}>
+              Your account and everything in it will be deleted on{" "}
+              <strong style={{ color: "var(--text)" }}>{deletionDate(Date.now() + 15 * 86400000)}</strong>.
+              Until then you can still see and export everything, and sign in to keep it.
             </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>Type DELETE to confirm</div>
             <input
               value={confirmText}
               onChange={e => setConfirmText(e.target.value)}
@@ -355,7 +419,7 @@ export default function SettingsTab({ setEnergyUnit }) {
               </button>
               <button onClick={deleteAccount} disabled={confirmText !== "DELETE" || deleting}
                 style={{ flex: 1, padding: "12px", background: "var(--danger)", color: "var(--on-danger)", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: confirmText === "DELETE" ? "pointer" : "not-allowed", opacity: confirmText === "DELETE" ? 1 : 0.5, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                {deleting ? <Spin size={14} color="white" /> : "Delete forever"}
+                {deleting ? <Spin size={14} color="white" /> : "Delete in 15 days"}
               </button>
             </div>
           </div>

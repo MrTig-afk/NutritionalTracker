@@ -1,4 +1,7 @@
 [
+  { "v": 27, "text": "Deleting your account now gives you 15 days: you can still look at and export everything, or tap Keep my account. After that everything is deleted for good" },
+  { "v": 27, "text": "Export your data any time from Settings: Excel with four sheets, or a CSV zip (food log, goals, meal templates and your Library)" },
+  { "v": 27, "text": "Claude can now read your Library and log foods from it. A new setting, Ask before saving new foods to my Library, decides whether it asks first" },
   { "v": 26, "text": "The scan error message is readable in dark mode" },
   { "v": 25, "text": "The Tracker now refreshes every time you open it, so food logged from another device shows up straight away" },
   { "v": 24, "text": "Show energy in kcal or kJ: pick it in Settings and the Tracker, Trends, Scan, Library and the AI assistant follow" },

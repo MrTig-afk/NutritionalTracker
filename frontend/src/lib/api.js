@@ -28,6 +28,40 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Every sign-out is this device only: a global one would also end the account's other sessions and Claude's
+// connection (a deleted account keeps them paused, not ended, so Keep my account brings them back).
+export const signOutHere = () => supabase.auth.signOut({ scope: "local" });
+
+// A 401: the two account-deletion cases get one explanation, even when several requests fail at once (they all
+// wait for the same dialog, so signing out cannot close it early), then this device signs out.
+const WHY_401 = {
+  account_deleted: "This account was deleted.",
+  signed_out: "This account is being deleted, so its other devices were signed out. Sign in again to look, export or keep it.",
+};
+let notice = null;   // cleared by the next sign-in, so a late 401 after this sign-out asks nothing again
+supabase.auth.onAuthStateChange((event) => { if (event === "SIGNED_IN") notice = null; });
+async function signedOut(res) {
+  const type = (await res.json().catch(() => ({})))?.detail?.error_type;
+  const msg = WHY_401[type];
+  if (msg) {
+    notice ||= confirm(msg, { title: type === "account_deleted" ? "Account deleted" : "Signed out", okLabel: "OK", cancel: false });
+    await notice;
+  }
+  await signOutHere();
+  return msg || "Session expired. Please log in again.";
+}
+
+// Lane L: inside the 15 days nothing can change. The greyed controls are the visible half; this refuses the
+// write itself (a keyboard press, a control that missed its mark) with the server's own words, before any request.
+const DELETING = "This account is being deleted. You can still view and export everything, or keep your account.";
+let viewOnly = false;
+export const setViewOnly = (on) => { viewOnly = on; };
+// The routes the server lets through inside the 15 days (allow_deleting); the server's 423 stays the authority.
+const allowedWhileDeleting = (method, path) =>
+  method === "GET" || method === "HEAD" || path === "/account/restore" || (method === "DELETE" && path === "/account")
+  || path === "/push/unsubscribe" || (method === "DELETE" && path.startsWith("/settings/connected-apps/"));
+const deletingNow = () => window.dispatchEvent(new Event("ns-deleting"));   // App re-reads GET /account/deletion
+
 export async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RETRIES) {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -39,10 +73,12 @@ export async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RET
       if (response.ok) return response;
       const status = response.status;
       const isRetryable = status !== 429 && (status === 500 || status === 503 || status === 504);
+      if (status === 401) { const e = new Error(await signedOut(response)); e.noRetry = true; throw e; }
       if (!isRetryable || attempt === maxRetries) {
         // Show the server's own message (FastAPI wraps HTTPException in {detail}); never the raw body.
         const body = await response.json().catch(() => null);
         const msg  = body?.detail?.message || body?.message;
+        if (body?.detail?.error_type === "account_scheduled_for_deletion") deletingNow();
         const err  = new Error(msg || (status === 429
           ? "You've reached your daily scan limit. Come back tomorrow!"
           : "Something went wrong. Please try again."));
@@ -63,34 +99,67 @@ export async function fetchWithRetry(url, options, maxRetries = MAX_FRONTEND_RET
   throw lastError || new Error("Request failed after retries");
 }
 
+// Throws DELETING while view-only (and re-reads the state: kept on another device unlocks this one).
+export function assertWritable() {
+  if (!viewOnly) return;
+  deletingNow();
+  const e = new Error(DELETING);
+  e.status = 423; e.errorType = "account_scheduled_for_deletion";
+  throw e;
+}
+
 export async function apiFetch(path, options = {}) {
+  if (!allowedWhileDeleting((options.method || "GET").toUpperCase(), path)) assertWritable();
   const { data: { session } } = await supabase.auth.getSession();
   const authHeader = session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {};
   const res = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...authHeader, ...options.headers },
     ...options,
   });
-  if (res.status === 401) {
-    await supabase.auth.signOut();
-    throw new Error("Session expired. Please log in again.");
-  }
+  if (res.status === 401) throw new Error(await signedOut(res));
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     const msg = err.message || err.detail?.message || `HTTP ${res.status}`;  // FastAPI wraps HTTPException in {detail}
-    if (res.status === 423 && !apiFetch._locked) {                       // frozen server-side: tell once, then sign out
+    const type = err.detail?.error_type;
+    if (type === "account_scheduled_for_deletion") deletingNow();
+    if (res.status === 423 && type === "account_locked" && !apiFetch._locked) {   // frozen server-side: tell once, then sign out
       apiFetch._locked = true;
       await confirm(msg, { title: "Account locked", okLabel: "OK", cancel: false });
-      await supabase.auth.signOut();
+      await signOutHere();
     }
     const e = new Error(msg);
     e.status = res.status;   // callers tell "not for this account" (403) from a failure
+    e.errorType = type;      // e.g. account_scheduled_for_deletion, reauth_required
     throw e;
   }
   return res.json();
 }
 
+// G3: the file comes back as a download; fetch (not a link) because the request must carry the login.
+export async function downloadExport(format) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${API_URL}/export?format=${format}`, {
+    headers: session?.access_token ? { "Authorization": `Bearer ${session.access_token}` } : {},
+  });
+  if (res.status === 401) throw new Error(await signedOut(res));
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((res.status === 429 || res.status === 503) && body.detail?.message
+      ? body.detail.message : "Couldn't create the export. Try again.");
+  }
+  const blob = await res.blob();
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1]
+    || `nutriscan-export.${format === "csv" ? "zip" : "xlsx"}`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function runAnalysis({ optimizedFiles, setLoading, setLoadingMsg, setError, setResults, setImages, switchToIndex }) {
   if (!optimizedFiles.length) return;
+  try { assertWritable(); } catch (e) { setError(e.message); return; }   // no photo leaves the device while view-only
   setLoading(true); setError(null);
   try {
     const { data: { session } } = await supabase.auth.getSession();

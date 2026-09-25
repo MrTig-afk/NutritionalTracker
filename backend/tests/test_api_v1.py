@@ -34,6 +34,7 @@ class V1Case(unittest.TestCase):
         for d in (api_v1._token_cache, api_v1._calls, api_v1._daily, api_v1._usage, api_v1._read_cache, api_v1._apps):
             d.clear()
         main._blocked.clear()
+        main._event_windows.clear()   # the flood counter: the whole suite comes from one test client
         p = mock.patch.object(api_v1, "_live_prefixes", None)
         p.start()
         self.addCleanup(p.stop)
@@ -81,7 +82,7 @@ class Tokens(V1Case):
         self.assertEqual(self.get("/v1/me").status_code, 200)
         self.conn.script = [("UPDATE api_tokens SET revoked_at", []),
                             ("resolve_api_token", [token_row(revoked_at=datetime.now(timezone.utc))])]
-        with mock.patch.object(main, "get_user_id", lambda a=None: "admin-1"), \
+        with mock.patch.object(main, "get_user_id", lambda a=None, **k: "admin-1"), \
              mock.patch.object(main, "ADMIN_USER_ID", "admin-1"), \
              mock.patch.object(api_v1, "forget_token", wraps=api_v1.forget_token) as forget:
             self.client.delete("/settings/api-tokens/tok-1", headers={"Authorization": "Bearer login"})
@@ -136,7 +137,7 @@ class Tokens(V1Case):
 
 class TokenManagement(V1Case):
     def admin(self, user="admin-1"):
-        p1 = mock.patch.object(main, "get_user_id", lambda a=None: user)
+        p1 = mock.patch.object(main, "get_user_id", lambda a=None, **k: user)
         p2 = mock.patch.object(main, "ADMIN_USER_ID", "admin-1")
         for p in (p1, p2):
             p.start()
@@ -278,26 +279,15 @@ class Remediation(V1Case):
             api_v1.flush_usage()
         self.assertEqual(list(api_v1._usage.values()), [[1, 0]])
 
-    def test_account_delete_skips_missing_api_tables_and_forgets_tokens(self):
-        # P1-CR-2 and P1-CR-3
-        self.get("/v1/me")
-        self.assertTrue(api_v1._token_cache)
-        self.conn.script = [("to_regclass", [(None,)])]
-        claims = {"amr": [{"timestamp": time.time()}]}
-        with mock.patch.object(main, "get_user_id", lambda a=None: "user-1"), \
-             mock.patch.object(main, "claims_if_valid", lambda a: claims), \
-             mock.patch.object(main, "SUPABASE_SERVICE_ROLE_KEY", ""):
-            r = self.client.delete("/account", headers={"Authorization": "Bearer login"})
-        self.assertEqual(r.status_code, 200)
+    def test_account_wipe_skips_missing_api_tables(self):
+        # P1-CR-2 (the wipe now runs from the day-15 purge; forgetting tokens: test_account_deletion)
+        self.conn.script = [("FOR UPDATE", [(1,)]), ("to_regclass", [(None,)])]
+        main._wipe_account_rows("user-1")
         self.assertFalse([s for s, _ in self.conn.executed if s.startswith("DELETE FROM")])   # every table "missing"
-        self.assertFalse(api_v1._token_cache)
         # positive control: tables present -> rows deleted
         self.conn.executed.clear()
-        self.conn.script = [("to_regclass", [("x",)])]
-        with mock.patch.object(main, "get_user_id", lambda a=None: "user-1"), \
-             mock.patch.object(main, "claims_if_valid", lambda a: claims), \
-             mock.patch.object(main, "SUPABASE_SERVICE_ROLE_KEY", ""):
-            self.client.delete("/account", headers={"Authorization": "Bearer login"})
+        self.conn.script = [("FOR UPDATE", [(1,)]), ("to_regclass", [("x",)])]
+        main._wipe_account_rows("user-1")
         deleted = [s for s, _ in self.conn.executed if s.startswith("DELETE FROM")]
         self.assertIn("DELETE FROM api_tokens WHERE user_id = %s", deleted)
 
@@ -375,6 +365,13 @@ class Hygiene(V1Case):
         self.assertNotIn("access-control-allow-origin", self.client.options("/v1/me", headers=pre).headers)
         self.assertIn("access-control-allow-origin", self.client.options("/log", headers=pre).headers)   # control
 
+    def test_the_app_may_patch(self):
+        # V8D2-6: Connected apps Rename sends PATCH; its preflight was refused, so renaming never worked live
+        pre = {"Origin": "https://nutritional-tracker-delta.vercel.app", "Access-Control-Request-Method": "PATCH"}
+        r = self.client.options("/settings/connected-apps/x", headers=pre)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("PATCH", r.headers["access-control-allow-methods"])
+
     def test_unknown_path_is_a_problem(self):
         r = self.get("/v1/nope")
         self.assertEqual((r.status_code, r.headers["content-type"], r.json()["error_type"]),
@@ -393,7 +390,7 @@ class Hygiene(V1Case):
         self.assertEqual(published, json.loads(json.dumps(api_v1.openapi_v1())),
                          "regenerate backend/openapi-v1.json from api_v1.openapi_v1()")
         routes = sum(len(ops) for ops in published["paths"].values())
-        self.assertEqual(routes, 16)   # the PRD's route table
+        self.assertEqual(routes, 17)   # the PRD's route table, plus GET /v1/library (PRD change 2026-09-25)
         self.assertFalse([p for p in published["paths"] if not p.startswith("/v1/")])
 
     def test_no_internal_fields_in_me(self):

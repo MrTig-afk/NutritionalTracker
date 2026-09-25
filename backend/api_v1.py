@@ -32,7 +32,7 @@ import log_service
 
 m = None  # the main module; set by main.py right after import
 
-SCOPES = ("log:read", "log:write", "goals:read", "templates:read", "templates:write", "library:append")
+SCOPES = ("log:read", "log:write", "goals:read", "templates:read", "templates:write", "library:append", "library:read")
 TOKEN_PREFIX = "nsk_live_"
 _TOKEN_RE = re.compile(r"^nsk_live_[A-Za-z0-9_-]{43}$")  # secrets.token_urlsafe(32) is 43 chars
 MAX_TOKENS = 10
@@ -265,6 +265,11 @@ def resolve_caller(request: Request) -> Caller:
             raise Problem(401, "token_expired", "This token has expired. Make a new one in Settings.")
         if row["user_id"] in m._frozen:
             raise Problem(423, "account_locked", "This account is locked after unusual activity.")
+        pending = row["user_id"] in m._deleting   # read before _purged, as main._account_gate does
+        if row["user_id"] in m._purged:     # a token cached before the purge
+            raise Problem(401, "account_deleted", "This account was deleted.")
+        if pending:   # an API token reads nothing inside the 15 days (main._account_gate)
+            raise Problem(423, "account_scheduled_for_deletion", "This account is being deleted.")
         return Caller(row["user_id"], row["token_id"], row["name"], row["scopes"])
     return Caller(m.get_user_id(auth, allow_client=True))   # app login: every scope; raises 401/423 itself
 
@@ -352,14 +357,18 @@ def flush_usage():
 
 
 # ---------------------------------------------------------------- dependencies
+def _require(caller: Caller, *scopes: str):
+    missing = [s for s in scopes if s not in caller.scopes]
+    if missing:
+        raise Problem(403, "insufficient_scope", f"This token lacks {', '.join(missing)}.")
+
+
 def need(*scopes: str, write: bool = False):
     """Route dependency: resolve the caller, check scopes, count the request."""
     def dep(request: Request) -> Caller:
         budget_gate()
         caller = resolve_caller(request)
-        missing = [s for s in scopes if s not in caller.scopes]
-        if missing:
-            raise Problem(403, "insufficient_scope", f"This token lacks {', '.join(missing)}.")
+        _require(caller, *scopes)
         request.state.ratelimit = take_request(caller, write)
         request.state.caller = caller
         return caller
@@ -706,6 +715,46 @@ def get_meal(group_id: str, caller: Caller = Depends(need("log:read"))):
 @router.get("/goals")
 def get_goals(caller: Caller = Depends(need("goals:read"))):
     return cached_read(caller, "goals", lambda: _goals(caller))
+
+
+# ---------------------------------------------------------------- the Library (one for the app and Claude)
+LIBRARY_LIMIT = 50
+ASK_SQL = "SELECT prefs->>'ask_before_saving_foods' FROM notification_prefs WHERE user_id = %s"
+PREFS_MERGE_SQL = """INSERT INTO notification_prefs (user_id, prefs, updated_at) VALUES (%s, %s, now())
+    ON CONFLICT (user_id) DO UPDATE SET prefs = COALESCE(notification_prefs.prefs, '{}'::jsonb) || EXCLUDED.prefs,
+        updated_at = EXCLUDED.updated_at"""
+
+
+def ask_before_saving(rows) -> bool:
+    """"Ask before saving new foods to my Library": on unless the user turned it off (PRD change 2026-09-25)."""
+    return not (rows and rows[0][0] == "false")
+
+
+def library(caller: Caller, q: str) -> dict:
+    """Library foods whose name contains q (literally, any case), with per-serving numbers, and the setting."""
+    q = _CONTROL.sub("", q).strip()
+    like = "%" + re.sub(r"([\\%_])", r"\\\1", q) + "%"
+    with db(caller.user_id, commit=False) as cur:
+        cur.execute(f"""SELECT i.item_id, f.name, i.name, i.nutrition FROM folder_items i
+                        JOIN folders f ON f.folder_id = i.folder_id AND f.user_id = i.user_id
+                        WHERE i.user_id = %s AND i.name ILIKE %s ORDER BY lower(i.name) LIMIT {LIBRARY_LIMIT + 1}""",
+                    [caller.user_id, like])
+        rows = cur.fetchall()
+        cur.execute(ASK_SQL, [caller.user_id])
+        ask = ask_before_saving(cur.fetchall())
+    items = []
+    for item_id, folder, name, raw in rows[:LIBRARY_LIMIT]:
+        n = log_service.load_nutrition(raw)
+        ps = log_service.per_serving_section(n)   # the same section entry_macros reads the numbers from
+        items.append({"item_id": item_id, "name": name, "folder": folder,
+                      "portion": str(ps.get("size") or ("100 g" if ps is n.get("per_100g") else "")),
+                      "per_serving": _macros5(log_service.entry_macros(n, 1))})
+    return {"items": items, "truncated": len(rows) > LIBRARY_LIMIT, "ask_before_saving": ask}
+
+
+@router.get("/library")
+def get_library(q: str = Query("", max_length=80), caller: Caller = Depends(need("library:read"))):
+    return library(caller, q)
 
 
 def template_detail(cur, user_id: str, template_id: str) -> Optional[dict]:
@@ -1395,10 +1444,11 @@ class TokenCreate(Strict):
     expires: Literal[tuple(EXPIRY_DAYS)]
 
 
-def _admin_login(authorization: Optional[str]) -> str:
+def _admin_login(authorization: Optional[str], allow_deleting: bool = False) -> str:
     """Token management accepts only a Supabase login - a PAT fails JWT
-    verification here - so a leaked token can never mint another. Admin-only for now."""
-    user_id = m.get_user_id(authorization)
+    verification here - so a leaked token can never mint another. Admin-only for now.
+    allow_deleting: taking access away (revoke, disconnect) still works inside the 15 days."""
+    user_id = m.get_user_id(authorization, allow_deleting=allow_deleting)
     if not m.ADMIN_USER_ID or user_id != m.ADMIN_USER_ID:
         raise m.HTTPException(status_code=403, detail={"error_type": "feature_unavailable",
                               "message": "API tokens are not available on this account yet."})
@@ -1448,7 +1498,7 @@ def list_tokens(authorization: Optional[str] = Header(default=None)):
 
 @settings_router.delete("/settings/api-tokens/{token_id}")
 def revoke_token(token_id: str, authorization: Optional[str] = Header(default=None)):
-    user_id = _admin_login(authorization)
+    user_id = _admin_login(authorization, allow_deleting=True)
     with db(user_id) as cur:
         cur.execute("UPDATE api_tokens SET revoked_at = now() WHERE token_id = %s AND user_id = %s AND revoked_at IS NULL",
                     [token_id, user_id])
@@ -1531,7 +1581,7 @@ def rename_app(app_id: str, body: AppRename, authorization: Optional[str] = Head
 @settings_router.delete("/settings/connected-apps/{app_id}")
 def disconnect_app(app_id: str, authorization: Optional[str] = Header(default=None)):
     """What cuts access: the gate re-reads the row on the next call and sends the 401 challenge."""
-    user_id = _admin_login(authorization)
+    user_id = _admin_login(authorization, allow_deleting=True)
     app_uuid = _app_uuid(app_id)   # a malformed id is a 404 before any connection is borrowed
     with db(user_id) as cur:
         cur.execute("""UPDATE connected_apps SET revoked_at = now() WHERE id = %s AND user_id = %s
@@ -1586,13 +1636,14 @@ MCP_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")         # first = the 
 MCP_SERVER_INFO = {"name": "nutriscan", "title": "NutriScan", "version": "1", "icons": [
     {"src": "https://nutritional-tracker-delta.vercel.app/icon-512.png", "mimeType": "image/png", "sizes": ["512x512"]}]}
 MCP_ORIGINS = ("https://claude.ai", "https://claude.com")
-CONNECTOR_SCOPES = SCOPES   # PRD: one access level, the six "Read + log" scopes; named so it is never app-login by accident
+CONNECTOR_SCOPES = SCOPES   # PRD: one access level, every "Read + log" scope; named so it is never app-login by accident
 
 MCP_TOOL = {
     "name": "get_context", "title": "Read a day's food log",
     "description": "The user's NutriScan food log for one day: entries grouped by meal, the day's totals, goals and "
                    "what is left, their meal templates and the foods they log most. Energy is kcal. Read-only. "
-                   "Call it first when the user talks about what they ate. Say the date in words (\"Thu 24 Sep\") "
+                   "Call it first when the user talks about what they ate. Foods the user saved are in their "
+                   "Library: search_library. Say the date in words (\"Thu 24 Sep\") "
                    "when you report a day. If more than one entry matches what the user means, list them and ask; "
                    "never guess.",
     "inputSchema": {"type": "object", "additionalProperties": False, "properties": {"date": {"type": "string",
@@ -1603,6 +1654,13 @@ TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Sho
               "(food, amount, kcal, protein, carbs, fat, date in words like \"Thu 24 Sep\") and ask yes or no. Only "
               "after an explicit yes, call confirm_change with the code; never call it without the user's yes. If "
               "more than one entry matches what the user means, list them and ask; never guess.")
+LIBRARY_RULE = (" A food the user names: call search_library first (its numbers, and ask_before_saving). For a food "
+                "not in the Library yet, while ask_before_saving is true: include save_to_library in this preview and "
+                "ask in the same preview message whether to save it to the Library too; if the user says yes to the "
+                "rest but no to the Library, preview again without save_to_library (their answer covers it) and "
+                "confirm that. While ask_before_saving is false: include save_to_library and do not ask about the "
+                "Library; the preview and the user's yes before confirm_change still apply.")
+SAVES_TO_LIBRARY = {"log_food", "log_meal", "log_template", "save_template", "update_template"}   # items can carry save_to_library
 
 WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
     "log_food": (LogEntryChange, "Log a food", "Add one food to the log on a date."),
@@ -1622,7 +1680,9 @@ WRITE_TOOLS = {   # tool name -> (/v1 change model, title, what it does)
     "update_template": (UpdateTemplateChange, "Change a meal template",
                         "Rename a meal template or replace its items. template_id and if_match (its etag) come from "
                         "get_template."),
-    "save_to_library": (SaveFoodChange, "Save a food to the Library", "Save a food to the user's Library for later."),
+    "save_to_library": (SaveFoodChange, "Save a food to the Library",
+                        "Save a food to the user's Library for later. Call it only when the user asked to save the "
+                        "food, or said yes to saving it."),
 }
 
 
@@ -1645,6 +1705,24 @@ GET_TEMPLATE_TOOL = {
     "inputSchema": {"type": "object", "additionalProperties": False, "required": ["template_id"],
                     "properties": {"template_id": {"type": "string", "minLength": 1, "maxLength": 64}}},
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
+SEARCH_LIBRARY_TOOL = {
+    "name": "search_library", "title": "Search the Library",
+    "description": "The user's Library (the same one the NutriScan app uses): saved foods whose name contains the "
+                   "query, with per-serving numbers (kcal). Search by one key word (\"milk\"), not the whole phrase; "
+                   "if truncated is true, search narrower. Use these numbers when logging a food that is in it. If "
+                   "more than one food matches what the user means, list them and ask which; never guess. "
+                   "ask_before_saving: while true, ask the user before saving a new food to the Library. If they say "
+                   "not to ask anymore, call stop_asking_before_saving. Read-only.",
+    "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
+        "query": {"type": "string", "maxLength": 80, "description": "Part of a food name. Leave out for all foods."}}},
+    "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
+STOP_ASKING_TOOL = {
+    "name": "stop_asking_before_saving", "title": "Stop asking before saving foods",
+    "description": "Turn off the user's setting \"Ask before saving new foods to my Library\". Call it only when the "
+                   "user tells you not to ask anymore, then tell them they can turn it back on in Settings > "
+                   "Library. It changes nothing else, and nothing can turn the setting back on from here.",
+    "inputSchema": {"type": "object", "additionalProperties": False, "properties": {}},
+    "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
 CONFIRM_TOOL = {
     "name": "confirm_change", "title": "Save a previewed change",
     "description": "Save exactly the change a preview tool showed, using its confirm_code. Call this only after "
@@ -1652,8 +1730,9 @@ CONFIRM_TOOL = {
     "inputSchema": {"type": "object", "additionalProperties": False, "required": ["code"],
                     "properties": {"code": {"type": "string", "minLength": 1, "maxLength": 64}}},
     "annotations": _annotations("confirm_change")}
-MCP_TOOLS = [MCP_TOOL, GET_TEMPLATE_TOOL,
-             *({"name": n, "title": t, "description": d + TOOL_RULES, "inputSchema": _write_schema(mdl),
+MCP_TOOLS = [MCP_TOOL, GET_TEMPLATE_TOOL, SEARCH_LIBRARY_TOOL, STOP_ASKING_TOOL,
+             *({"name": n, "title": t, "description": d + TOOL_RULES + (LIBRARY_RULE if n in SAVES_TO_LIBRARY else ""),
+                "inputSchema": _write_schema(mdl),
                 "annotations": _annotations(n)} for n, (mdl, t, d) in WRITE_TOOLS.items()),
              CONFIRM_TOOL]
 TOOL_NAMES = {t["name"] for t in MCP_TOOLS}
@@ -1770,6 +1849,25 @@ def _call_tool(request: Request, caller: Caller, client_id: str, name: str, args
             raise Problem(422, "validation_error", "template_id: 1-64 characters.")
         take_request(caller, False)
         body = template_body(tid, caller)
+    elif name == "search_library":
+        _require(caller, "library:read")
+        q = args.get("query", "")
+        if not isinstance(q, str) or len(q) > 80:
+            raise Problem(422, "validation_error", "query: up to 80 characters.")
+        take_request(caller, False)
+        body = library(caller, q)
+    elif name == "stop_asking_before_saving":   # the one setting Claude may change, and only this way (PRD)
+        _require(caller, "library:append")
+        if args:   # e.g. a call meant to turn asking back on: refuse rather than turn it off
+            raise Problem(422, "validation_error", "This tool takes no arguments and only turns asking off.")
+        take_request(caller, True)
+        with db(caller.user_id) as cur:
+            cur.execute(PREFS_MERGE_SQL, [caller.user_id, json.dumps({"ask_before_saving_foods": False})])
+            cur.execute("""INSERT INTO api_audit (audit_id, user_id, token_id, method, path, status, affected_ids)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",   # like every other Claude write (run_changes)
+                        [str(uuid.uuid4()), caller.user_id, caller.token_id, request.method, request.url.path[:200],
+                         200, json.dumps(["setting:ask_before_saving_foods=false"])])
+        body = {"ask_before_saving": False}
     elif name in WRITE_TOOLS:
         return _preview(request, caller, client_id, name, args)
     else:   # confirm_change: the dispatcher already refused any name outside TOOL_NAMES
@@ -1841,8 +1939,12 @@ def _mcp(request: Request, raw: bytes):
         name = params.get("name")
         if name not in TOOL_NAMES:
             return _mcp_rpc_error(id_, -32602, f"Unknown tool: {name}")
-        args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
-        mode = "confirm" if name == "confirm_change" else "preview" if name in WRITE_TOOLS else "read"
+        args = params.get("arguments")
+        if args is not None and not isinstance(args, dict):   # never quietly {}: [true] is not "no arguments"
+            return _mcp_rpc_error(id_, -32602, "Tool arguments must be an object.")
+        args = args or {}
+        mode = ("confirm" if name == "confirm_change" else "preview" if name in WRITE_TOOLS
+                else "setting" if name == "stop_asking_before_saving" else "read")
         where = f"mcp tool={name} mode={mode} client={client_id} user={caller.user_id[:8]}"   # never arguments
         try:
             connected_app_gate(caller.user_id, client_id)   # before budget_gate: it skips the DB while paused

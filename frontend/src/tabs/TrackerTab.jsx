@@ -116,11 +116,11 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
           ×{entry.servings} serving{entry.servings !== 1 ? "s" : ""} · {toUnit(entry.contribution.calories, unit).toFixed(0)} {unit} · P {entry.contribution.protein.toFixed(1)}g · C {entry.contribution.carbs.toFixed(1)}g · F {entry.contribution.fat.toFixed(1)}g
         </div>
       </div>
-      <button onClick={() => onEditEntry && onEditEntry(entry)} aria-label={`Edit ${entry.name}`}
+      <button data-write onClick={() => onEditEntry && onEditEntry(entry)} aria-label={`Edit ${entry.name}`}
         style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Icon n="edit" size={13} style={{ color: "var(--accent)" }} />
       </button>
-      <button onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id} aria-label={`Delete ${entry.name}`}
+      <button data-write onClick={() => deleteEntry(entry.log_id)} disabled={deletingId === entry.log_id} aria-label={`Delete ${entry.name}`}
         style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
         {deletingId === entry.log_id ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
       </button>
@@ -145,7 +145,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brown)", display: "flex", alignItems: "center", gap: 8 }}>
             <Icon n="my_location" size={14} style={{ color: "var(--accent)" }} /> Daily Goals
           </div>
-          <button onClick={() => { setGoalDraft({ ...goals, calories: toUnit(goals.calories, unit) }); setEditingGoals(v => !v); }}
+          <button data-write onClick={() => { setGoalDraft({ ...goals, calories: toUnit(goals.calories, unit) }); setEditingGoals(v => !v); }}
             style={{ fontSize: 12, fontWeight: 600, color: "var(--accent)", background: "none", border: "none", cursor: "pointer" }}>
             {editingGoals ? "Cancel" : "Edit"}
           </button>
@@ -160,7 +160,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
                   <span style={{ fontSize: 11, color: "var(--muted)", width: 32 }}>{key === "calories" ? unit : "g"}</span>
                 </div>
               ))}
-              <button onClick={saveGoals} disabled={savingGoals} style={{ ...primaryBtn, opacity: savingGoals ? 0.45 : 1 }}>
+              <button data-write onClick={saveGoals} disabled={savingGoals} style={{ ...primaryBtn, opacity: savingGoals ? 0.45 : 1 }}>
                 {savingGoals ? "Saving..." : "Save Goals"}
               </button>
             </>
@@ -249,7 +249,7 @@ export default function TrackerTab({ refreshKey, onEditEntry }) {
                         {block.items.length} item{block.items.length !== 1 ? "s" : ""} · {toUnit(sum.calories, unit).toFixed(0)} {unit} · P {sum.protein.toFixed(1)}g · C {sum.carbs.toFixed(1)}g · F {sum.fat.toFixed(1)}g
                       </div>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid} aria-label={`Delete ${block.label}`}
+                    <button data-write onClick={(e) => { e.stopPropagation(); deleteGroup(block); }} disabled={deletingId === block.gid} aria-label={`Delete ${block.label}`}
                       style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--off)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {deletingId === block.gid ? <Spin size={13} color="var(--muted)" /> : <Icon n="delete" size={13} style={{ color: "var(--danger)" }} />}
                     </button>

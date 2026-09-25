@@ -138,11 +138,11 @@ export default function AllowPage({ authorizationId, email, online, onDone }) {
           NutriScan account: {email}
         </div>
         <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>Claude will be able to:</div>
-        <div style={{ fontSize: 13, color: "var(--text)" }}>· Read your food log, goals, meal templates and Library</div>
+        <div style={{ fontSize: 13, color: "var(--text)" }}>· Read your food log, goals, meal templates and Library, and log foods from your Library</div>
         <div style={{ fontSize: 13, color: "var(--text)" }}>· Add, change or delete log entries and log templates, after showing you first and you say yes</div>
-        <div style={{ fontSize: 13, color: "var(--text)" }}>· Save foods to your Library</div>
+        <div style={{ fontSize: 13, color: "var(--text)" }}>· Save foods to your Library (asking first, unless you have told it not to ask)</div>
         <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>It can't:</div>
-        <div style={{ fontSize: 13, color: "var(--text)" }}>· Change your goals, notifications or account, or delete your account</div>
+        <div style={{ fontSize: 13, color: "var(--text)" }}>· Change your goals, notifications or account, or delete your account. The one exception: it can turn off "Ask before saving new foods" when you tell it to.</div>
         <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
           <button onClick={() => respond("deny")} disabled={!!busy}
             style={{ flex: 1, padding: "10px", borderRadius: 10, border: "1.5px solid var(--border)",

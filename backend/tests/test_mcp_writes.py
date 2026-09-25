@@ -29,7 +29,7 @@ class Registry(WithConnectorAuth, V1Case):
         t = self.tools()
         self.assertEqual(set(t), {"get_context", "get_template", "log_food", "log_meal", "log_template", "edit_entry",
                                   "delete_entry", "delete_meal", "save_template", "update_template",
-                                  "save_to_library", "confirm_change"})
+                                  "save_to_library", "confirm_change", "search_library", "stop_asking_before_saving"})
         for name, tool in t.items():
             self.assertTrue(tool["title"], name)
             self.assertLessEqual(len(name), 64)
@@ -38,7 +38,9 @@ class Registry(WithConnectorAuth, V1Case):
     def test_only_confirm_change_writes(self):
         # A preview saves nothing, so claude.ai need not ask before one; the one prompt is for the save.
         t = self.tools()
-        self.assertEqual({n for n, x in t.items() if not x["annotations"]["readOnlyHint"]}, {"confirm_change"})
+        # stop_asking_before_saving changes a setting (the user's "don't ask anymore"): claude.ai may ask once
+        self.assertEqual({n for n, x in t.items() if not x["annotations"]["readOnlyHint"]},
+                         {"confirm_change", "stop_asking_before_saving"})
         self.assertEqual({n for n, x in t.items() if x["annotations"]["destructiveHint"]}, {"confirm_change"})
 
     def test_write_schema_has_no_type_field(self):

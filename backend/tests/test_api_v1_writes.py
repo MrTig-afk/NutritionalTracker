@@ -351,7 +351,7 @@ class Writes(WritesFixture, V1Case):
     def test_preview_flag_on_an_app_route_still_counts(self):
         # P24-D2-SEC-1: app routes ignore ?preview and really delete, so they must still be counted
         with mock.patch.object(main, "_event_windows", {}) as windows, \
-             mock.patch.object(main, "get_user_id", lambda a=None: "user-1"), \
+             mock.patch.object(main, "get_user_id", lambda a=None, **k: "user-1"), \
              mock.patch.object(main, "claims_if_valid", lambda a: {"sub": "user-1"}):
             r = self.client.delete("/log/l1?preview=true", headers={"Authorization": "Bearer login"})
         self.assertEqual(r.status_code, 200)
