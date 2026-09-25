@@ -259,7 +259,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                     <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.folderName} · {macroLine(item.nutrition)}</div>
                   </div>
-                  <button data-write onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                  <button data-write onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "#0B3D22", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                     <Icon n="add" size={11} /> Log
                   </button>
                   <button data-write onClick={() => deleteItem(item.folderId, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>
@@ -303,7 +303,7 @@ export default function LibraryTab({ onAddToLog, onLogAdded }) {
                                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
                                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{macroLine(item.nutrition)}</div>
                               </div>
-                              <button data-write onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "var(--mint-dk)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                              <button data-write onClick={() => onAddToLog({ ...item })} style={{ padding: "5px 10px", background: "var(--mint)", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700, color: "#0B3D22", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
                                 <Icon n="add" size={11} /> Log
                               </button>
                               <button data-write onClick={() => deleteItem(folder.folder_id, item.item_id)} disabled={deletingItem === item.item_id} aria-label={`Delete ${item.name}`} style={{ background: "none", border: "none", cursor: "pointer" }}>

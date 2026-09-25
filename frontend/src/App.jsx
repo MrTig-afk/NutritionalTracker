@@ -88,6 +88,7 @@ export default function App() {
   const [deletion, setDeletion] = useState({ uid: null, at: null });
   const deleteAfter = deletion.uid === uid ? deletion.at : null;
   const readOnly = !!deleteAfter;
+  const [settingsStart, setSettingsStart] = useState(null);   // a Settings screen to open on arrival (the banner's Export)
   const setDeleteAfter = useCallback((at) => setDeletion({ uid, at }), [uid]);
   const [keptUid, setKeptUid] = useState(null);   // L4: shown for a few seconds after Keep my account, to that account
   const kept = keptUid !== null && keptUid === uid;
@@ -323,7 +324,7 @@ export default function App() {
 
         {readOnly && (
           <DeletionBanner deleteAfter={deleteAfter} onKept={() => { setDeleteAfter(null); setKeptUid(uid); }}
-            onExport={() => { handleTabChange("settings"); setTimeout(() => document.getElementById("ns-export")?.scrollIntoView({ behavior: "smooth" }), 60); }} />
+            onExport={() => { setSettingsStart("export"); handleTabChange("settings"); }} />
         )}
 
         {kept && !readOnly && <KeptNotice />}
@@ -352,7 +353,8 @@ export default function App() {
           </div>
           {activeMainTab === "trends" && <TrendsTab />}
           {activeMainTab === "settings" && (
-            <SettingsTab setEnergyUnit={chooseEnergyUnit} onDeleted={setDeleteAfter} />
+            <SettingsTab setEnergyUnit={chooseEnergyUnit} onDeleted={setDeleteAfter} pending={readOnly}
+              startAt={settingsStart} onStarted={() => setSettingsStart(null)} />
           )}
           {activeMainTab === "ai" && readOnly && <OffNotice text="The assistant is off while your account is being deleted." />}
         </div>

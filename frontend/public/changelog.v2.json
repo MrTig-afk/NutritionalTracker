@@ -1,4 +1,6 @@
 [
+  { "v": 30, "text": "Settings is now one short list: each setting shows its current value, and tapping it opens its own page" },
+  { "v": 30, "text": "The Log buttons in your Library folders are easy to read in dark mode too" },
   { "v": 29, "text": "The Log Meal button on your meal templates is easy to read in dark mode" },
   { "v": 28, "text": "Everything you log through Claude is now one named meal: tap it to see each part. Claude suggests the name and uses today's date, so it asks you only once" },
   { "v": 28, "text": "Rename any meal in your day with the pencil next to it" },
