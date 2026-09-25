@@ -21,8 +21,15 @@ WHEN = datetime(2026, 10, 10, 1, 0, tzinfo=timezone.utc)
 SQL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "account_deletions.sql")
 
 
-def login(sub="user-1", **extra):
-    return {"Authorization": f"Bearer {token(sub=sub, client_id=None, **extra)}"}
+def login(sub="user-1", signed_in=None, **extra):
+    """An app login signed in at `signed_in` (epoch seconds; default now, i.e. after the pending delete)."""
+    at = int(time.time()) if signed_in is None else signed_in
+    return {"Authorization": f"Bearer {token(sub=sub, client_id=None, amr=[{'method': 'otp', 'timestamp': at}], **extra)}"}
+
+
+OLD_DEVICE = int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp())   # signed in long before the delete
+REQ = datetime(2026, 9, 25, 1, 0, tzinfo=timezone.utc)                   # when the delete was asked for
+AN_HOUR_AGO = lambda: int(time.time()) - 3600
 
 
 class Sql(unittest.TestCase):
@@ -34,6 +41,7 @@ class Sql(unittest.TestCase):
                      "REVOKE ALL ON FUNCTION pending_account_deletions() FROM PUBLIC",
                      "REVOKE ALL ON FUNCTION due_account_deletions() FROM PUBLIC",
                      "ADD COLUMN IF NOT EXISTS purged_at timestamptz",
+                     "ADD COLUMN IF NOT EXISTS keep_session varchar",
                      "DROP FUNCTION IF EXISTS pending_account_deletions()",
                      "DROP FUNCTION IF EXISTS due_account_deletions()",
                      "BEGIN;", "COMMIT;",   # C2D2-7: the drop and re-create are one step in any editor
@@ -52,7 +60,7 @@ class Sql(unittest.TestCase):
 class Case(WithConnectorAuth, V1Case):
     def setUp(self):
         super().setUp()
-        for target, value in (("_deleting", {}), ("_purged", set()), ("_reload_db_uses", [-1]),   # -1: never reloaded
+        for target, value in (("_deleting", {}), ("_purged", set()), ("_signout", {}), ("_reload_db_uses", [-1]),   # -1: never reloaded
                               ("_deletion_loaded", [True])):
             p = mock.patch.object(main, target, value)
             p.start()
@@ -128,7 +136,8 @@ class Lock(Case):
 
     def test_outside_a_request_counts_as_a_write(self):
         self.pending()
-        with mock.patch.object(main, "verify_claims", lambda a: {"sub": "user-1"}):
+        with mock.patch.object(main, "verify_claims",
+                               lambda a: {"sub": "user-1", "amr": [{"timestamp": int(time.time())}]}):
             with self.assertRaises(main.HTTPException) as cm:
                 main.get_user_id("Bearer x")
             self.assertEqual(cm.exception.status_code, 423)
@@ -136,19 +145,19 @@ class Lock(Case):
 
 
 def fresh(**extra):
-    return login(amr=[{"method": "otp", "timestamp": int(time.time())}], **extra)
+    return login(**extra)   # signed in just now
 
 
 class Routes(Case):
     def test_delete_schedules_and_locks_at_once(self):
         self.get("/v1/me")
         self.assertTrue(api_v1._token_cache)
-        self.conn.script = [("INSERT INTO account_deletions", [(WHEN,)])]
-        r = self.client.delete("/account", headers=fresh())
+        self.conn.script = [("INSERT INTO account_deletions", [(WHEN, REQ)])]
+        r = self.client.delete("/account", headers=fresh(session_id="sess-del"))
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {"scheduled": True, "delete_after": "2026-10-10T01:00:00+00:00"})
         ins = [p for s, p in self.conn.executed if "INSERT INTO account_deletions" in s][0]
-        self.assertEqual(ins[0], "user-1")
+        self.assertEqual((ins[0], ins[2]), ("user-1", "sess-del"))   # the deleting device's session stays signed in
         self.assertAlmostEqual(ins[1], datetime.now(timezone.utc) + timedelta(days=15), delta=timedelta(minutes=1))
         self.assertFalse([s for s, _ in self.conn.executed if s.startswith("DELETE FROM")])   # nothing wiped yet
         self.assertEqual(main._deleting["user-1"], WHEN)
@@ -156,16 +165,77 @@ class Routes(Case):
         self.assertEqual(self.client.post("/log", headers=login(), json={"name": "x", "servings": 1,
                                                                           "nutrition": {}}).status_code, 423)
 
+    def test_other_devices_are_signed_out_while_pending(self):
+        # SR-AD-2 (owner 2026-09-25), CR3-1: sign-ins from before the delete are refused, every route, reads too;
+        # the deleting device and any new sign-in work; nothing at Supabase is touched, so Claude's connection
+        # is only paused and works again after Keep my account (Q21)
+        self.pending()
+        old = login(signed_in=OLD_DEVICE)
+        for method, path in (("get", "/goals"), ("get", "/account/deletion"), ("post", "/account/restore")):
+            r = getattr(self.client, method)(path, headers=old)
+            self.assertEqual((r.status_code, r.json()["detail"]["error_type"]), (401, "signed_out"), path)
+        self.assertEqual(self.client.get("/goals", headers=fresh()).status_code, 200)
+        self.assertFalse([s for s, _ in self.conn.executed if "account_deletions" in s])
+
+    def test_the_deleting_device_stays_whatever_its_sign_in_time(self):
+        # C3D2-3: it passed the 5-minute check just before; the session, not a clock window, decides
+        self.pending()
+        main._signout["user-1"] = (REQ.timestamp(), "sess-del")
+        r = self.client.get("/goals", headers=login(signed_in=int(REQ.timestamp()) - 299, session_id="sess-del"))
+        self.assertEqual(r.status_code, 200)
+
+    def test_a_device_signed_in_just_before_the_delete_is_signed_out(self):
+        # C3D2-4
+        self.pending()
+        main._signout["user-1"] = (REQ.timestamp(), "sess-del")
+        r = self.client.get("/goals", headers=login(signed_in=int(REQ.timestamp()) - 240, session_id="sess-other"))
+        self.assertEqual(r.json()["detail"]["error_type"], "signed_out")
+
+    def test_an_old_app_login_on_v1_is_signed_out_too(self):
+        # C3D2-6: the rule follows the token (an app login), not the route
+        self.pending()
+        r = self.client.get("/v1/me", headers=login(signed_in=OLD_DEVICE))
+        self.assertEqual((r.status_code, r.json()["error_type"]), (401, "signed_out"))
+
+    def test_a_token_without_a_readable_sign_in_time_is_signed_out(self):
+        # C3D2-9: fail closed
+        self.pending()
+        for amr in (None, ["pwd"], "otp"):
+            extra = {} if amr is None else {"amr": amr}
+            h = {"Authorization": f"Bearer {token(sub='user-1', client_id=None, **extra)}"}
+            self.assertEqual(self.client.get("/goals", headers=h).json()["detail"]["error_type"], "signed_out", amr)
+
+    def test_a_second_factor_does_not_count_as_signing_in(self):
+        # C3D2-5: an MFA step-up on an old session must not make it look freshly signed in
+        self.pending()
+        amr = [{"method": "otp", "timestamp": OLD_DEVICE}, {"method": "totp", "timestamp": int(time.time())}]
+        h = {"Authorization": f"Bearer {token(sub='user-1', client_id=None, amr=amr)}"}
+        self.assertEqual(self.client.get("/goals", headers=h).json()["detail"]["error_type"], "signed_out")
+        self.assertEqual(main._signed_in_at({"amr": amr}), OLD_DEVICE)
+
+    def test_after_keep_my_account_every_device_works_again(self):
+        self.pending()
+        main._drop_deleting("user-1")
+        self.assertEqual(self.client.get("/goals", headers=login(signed_in=OLD_DEVICE)).status_code, 200)
+
+    def test_no_supabase_call_on_delete(self):
+        # CR3-1..6: nothing ends sessions at Supabase (that would end Claude's too)
+        self.conn.script = [("INSERT INTO account_deletions", [(WHEN, REQ)])]
+        with mock.patch.object(main.urllib.request, "urlopen") as urlopen:
+            self.assertEqual(self.client.delete("/account", headers=fresh()).status_code, 200)
+        urlopen.assert_not_called()
+
     def test_asking_again_keeps_the_first_date(self):
         self.pending()
-        self.conn.script = [("INSERT INTO account_deletions", [(WHEN,)])]
+        self.conn.script = [("INSERT INTO account_deletions", [(WHEN, REQ)])]
         r = self.client.delete("/account", headers=fresh())
         self.assertEqual(r.json()["delete_after"], "2026-10-10T01:00:00+00:00")
         sql = [s for s, _ in self.conn.executed if "INSERT INTO account_deletions" in s][0]
-        self.assertIn("ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id RETURNING delete_after", sql)
+        # C3D2-8: asking again keeps the date but moves the line: this device stays, every other one is signed out
+        self.assertIn("ON CONFLICT (user_id) DO UPDATE SET requested_at = now(), keep_session = EXCLUDED.keep_session", sql)
 
     def test_stale_sign_in_still_needs_reauth(self):
-        r = self.client.delete("/account", headers=login())
+        r = self.client.delete("/account", headers=login(signed_in=AN_HOUR_AGO()))
         self.assertEqual(r.json()["detail"]["error_type"], "reauth_required")
         self.assertEqual(main._deleting, {})
 
@@ -179,7 +249,7 @@ class Routes(Case):
 
     def test_restore_needs_a_fresh_sign_in(self):
         self.pending()
-        r = self.client.post("/account/restore", headers=login())
+        r = self.client.post("/account/restore", headers=login(signed_in=AN_HOUR_AGO()))   # after the delete, not fresh
         self.assertEqual(r.json()["detail"]["error_type"], "reauth_required")
         self.assertIn("user-1", main._deleting)
         self.assertFalse(self.conn.executed)
@@ -233,7 +303,7 @@ class Routes(Case):
 class Reload(Case):
     def test_reload_replaces_the_map(self):
         self.pending("restored-elsewhere")
-        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
+        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None, REQ, "sess-2")])]
         main._load_deleting()
         self.assertEqual(main._deleting, {"user-2": WHEN})
 
@@ -241,7 +311,7 @@ class Reload(Case):
         # CR2-5: another instance purged it: this one locks it out and drops its cached tokens too
         self.pending("user-3")
         with mock.patch.object(api_v1, "forget_token") as forget:
-            self.conn.script = [("pending_account_deletions", [("user-3", WHEN, WHEN)])]
+            self.conn.script = [("pending_account_deletions", [("user-3", WHEN, WHEN, REQ, None)])]
             main._load_deleting()
             main._load_deleting()   # already known: not forgotten twice
         self.assertEqual((main._deleting, main._purged), ({}, {"user-3"}))
@@ -253,7 +323,7 @@ class Reload(Case):
         with mock.patch.object(main, "get_db", mock.Mock(side_effect=RuntimeError("down"))):
             main._deletion_tick()   # asleep, yet it tries
         self.assertFalse(main._deletion_loaded[0])
-        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
+        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None, REQ, "sess-2")])]
         main._deletion_tick()
         self.assertEqual((main._deleting, main._deletion_loaded[0]), ({"user-2": WHEN}, True))
 
@@ -277,7 +347,7 @@ class Reload(Case):
         main._deletion_tick()
         self.assertFalse(self.conn.executed)
         with mock.patch.dict(main._budget, {"awake_until": time.time() + 60}):
-            self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
+            self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None, REQ, "sess-2")])]
             main._deletion_tick()
         self.assertEqual(main._deleting, {"user-2": WHEN})
 
@@ -312,11 +382,11 @@ class Reload(Case):
         self.pending()
         def rows(sql, params):
             main._drop_deleting("user-1")
-            return [("user-1", WHEN, None)]
+            return [("user-1", WHEN, None, REQ, "sess-1")]
         self.conn.script = [("pending_account_deletions", rows)]
         main._load_deleting()
         self.assertNotIn("user-1", main._deleting)
-        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None)])]
+        self.conn.script = [("pending_account_deletions", [("user-2", WHEN, None, REQ, "sess-2")])]
         main._load_deleting()   # positive control: an undisturbed reload applies
         self.assertEqual(main._deleting, {"user-2": WHEN})
 
@@ -384,7 +454,7 @@ class Purge(Case):
         for held in (main._deleting, main._purged):   # a restart: rebuilt from the database
             held.clear()
         past = datetime(2026, 9, 25, 1, 0, tzinfo=timezone.utc)
-        self.conn.script.insert(0, ("pending_account_deletions", [("user-1", past, past)]))
+        self.conn.script.insert(0, ("pending_account_deletions", [("user-1", past, past, REQ, None)]))
         main._load_deleting()
         for method, path, kw in (("get", "/goals", {}), ("get", "/account/deletion", {}),
                                  ("post", "/log", {"json": {"name": "x", "servings": 1, "nutrition": {}}})):

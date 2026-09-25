@@ -352,16 +352,39 @@ def _refuse_connected_app(payload: dict, user_id: str, allow_client: bool = Fals
             "message": "Connecting apps is not available on this account yet."})
 
 
-def _account_gate(user_id: str, allow_client: bool = False, allow_deleting: bool = False) -> None:
+FRESH_SIGN_IN = 300   # seconds: "signed in within the last 5 minutes" (delete, Keep my account)
+_SECOND_FACTORS = {"totp", "mfa/totp", "mfa/phone", "mfa/webauthn", "webauthn"}   # a step-up is not a sign-in
+
+
+def _signed_in_at(claims: dict) -> float:
+    """When this login actually signed in: Supabase's `amr` timestamp, which a refresh keeps (a refresh renews
+    `iat`). Missing or malformed -> 0, i.e. "long ago": every check that uses it fails closed."""
+    try:
+        return max((int(a.get("timestamp", 0)) for a in claims.get("amr", [])
+                    if a.get("method") not in _SECOND_FACTORS), default=0)
+    except Exception:
+        return 0
+
+
+def _account_gate(user_id: str, allow_client: bool = False, allow_deleting: bool = False,
+                  signed_in_at: Optional[float] = None, session_id: Optional[str] = None) -> None:
     """Frozen: nothing. Inside the 15 days after a delete: the app login may still look (GET) and export;
     every write, and every /v1 and /mcp call (allow_client), is refused. allow_deleting: the routes that
-    must work then (status, Keep my account, taking access away)."""
-    pending = user_id in _deleting   # read before _purged: _set_purged adds there before it removes here
+    must work then (status, Keep my account, taking access away). The other devices are signed out (owner
+    2026-09-25): an app login (signed_in_at given) is refused everywhere unless it is the session that asked
+    for the delete or it signed in after it. Nothing is ended at Supabase, so Claude's connection is only
+    paused and works again after Keep my account (Q21)."""
+    when = _deleting.get(user_id)   # read before _purged: _set_purged adds there before it removes here
+    pending = when is not None
     if user_id in _purged:   # its login is gone; an access token from before the purge must not recreate it
         raise HTTPException(status_code=401, detail={"error_type": "account_deleted", "message": "This account was deleted."})
     if user_id in _frozen:
         raise HTTPException(status_code=423, detail={"error_type": "account_locked",
             "message": "This account is locked after unusual activity. Email kaushiknaru2002@gmail.com to restore it."})
+    requested, keep = _signout.get(user_id) or ((when - DELETE_GRACE).timestamp() if pending else 0, None)
+    if pending and signed_in_at is not None and not (keep and session_id == keep) and signed_in_at < requested:
+        raise HTTPException(status_code=401, detail={"error_type": "signed_out",
+            "message": "This account is being deleted, so its other devices were signed out. Sign in again to look, export or keep it."})
     if (pending and not allow_deleting
             and (allow_client or _request_method.get() not in ("GET", "HEAD"))):   # unset (no request) = a write
         raise HTTPException(status_code=423, detail={"error_type": "account_scheduled_for_deletion",
@@ -379,7 +402,9 @@ def get_user_id(authorization: Optional[str] = None, allow_client: bool = False,
         if not user_id:
             raise Exception("No sub claim in JWT")
         _refuse_connected_app(payload, user_id, allow_client)
-        _account_gate(user_id, allow_client, allow_deleting)
+        app_login = not payload.get("client_id")   # the sign-out rule follows the token, not the route
+        _account_gate(user_id, allow_client, allow_deleting,
+                      _signed_in_at(payload) if app_login else None, payload.get("session_id") if app_login else None)
         _current_user_id.set(user_id)
         return user_id
     except HTTPException:
@@ -402,7 +427,7 @@ def get_user_info(authorization: Optional[str] = None) -> tuple:
         if not user_id:
             raise Exception("No sub claim in JWT")
         _refuse_connected_app(payload, user_id)
-        _account_gate(user_id)
+        _account_gate(user_id, signed_in_at=_signed_in_at(payload), session_id=payload.get("session_id"))
         _current_user_id.set(user_id)
         return user_id, payload.get("email", "")
     except HTTPException:
@@ -571,19 +596,23 @@ _deleting_gen = [0]       # bumped by every local change: a reload that overlapp
 _deleting_lock = threading.Lock()   # the generation check and the rebind in _load_deleting are one step
 _reload_db_uses = [0]     # _db_uses right after our last reload (see _deletion_tick)
 _purged: set = set()      # purged, tombstone still in the database: every call refused (_account_gate)
+_signout: dict = {}       # user_id -> (requested_at epoch, the session that asked): who stays signed in (_account_gate)
 _deletion_loaded = [False]   # until the first successful load every tick tries again (a failed load = no lock)
 
 
-def _set_deleting(user_id: str, delete_after):
+def _set_deleting(user_id: str, delete_after, requested_at=None, keep_session=None):
     with _deleting_lock:
         _deleting_gen[0] += 1
         _deleting[user_id] = delete_after
+        if requested_at is not None:
+            _signout[user_id] = (requested_at.timestamp(), keep_session)
 
 
 def _drop_deleting(user_id: str):
     with _deleting_lock:
         _deleting_gen[0] += 1
         _deleting.pop(user_id, None)
+        _signout.pop(user_id, None)
         _purged.discard(user_id)
 
 
@@ -592,6 +621,7 @@ def _set_purged(user_id: str):
         _deleting_gen[0] += 1
         _purged.add(user_id)
         _deleting.pop(user_id, None)
+        _signout.pop(user_id, None)
 _request_method = contextvars.ContextVar("request_method", default="")   # set by abuse_guard for _account_gate
 _blocked: dict = {}       # ip -> unblock_ts
 
@@ -2736,14 +2766,8 @@ DELETE_GRACE = timedelta(days=15)   # PRD change 2026-09-25: view-only and expor
 
 def _require_fresh_sign_in(authorization: Optional[str], action: str):
     """A stolen or left-open session must not be able to delete an account, or undo a delete: require an
-    actual sign-in (Supabase `amr` timestamp, not `iat` — refreshes renew iat but not amr) within the last
-    5 minutes."""
-    claims = claims_if_valid(authorization) or {}
-    try:
-        last_auth = max((int(a.get("timestamp", 0)) for a in claims.get("amr", [])), default=0)
-    except Exception:
-        last_auth = 0          # malformed amr -> 0 -> re-auth required (fails closed)
-    if time.time() - last_auth > 300:
+    actual sign-in within the last FRESH_SIGN_IN seconds."""
+    if time.time() - _signed_in_at(claims_if_valid(authorization) or {}) > FRESH_SIGN_IN:
         raise HTTPException(status_code=403, detail={"error_type": "reauth_required",
             "message": f"For safety, sign out and sign back in, then {action} within 5 minutes."})
 
@@ -2755,12 +2779,14 @@ def delete_account(authorization: Optional[str] = Header(default=None)):
     the first date."""
     user_id = get_user_id(authorization, allow_deleting=True)
     _require_fresh_sign_in(authorization, "delete your account")
+    session = (claims_if_valid(authorization) or {}).get("session_id")
     with api_v1.db(user_id) as cur:
-        cur.execute("""INSERT INTO account_deletions (user_id, delete_after) VALUES (%s, %s)
-                       ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id RETURNING delete_after""",
-                    [user_id, datetime.now(timezone.utc) + DELETE_GRACE])
-        delete_after = cur.fetchone()[0]
-    _set_deleting(user_id, delete_after)
+        cur.execute("""INSERT INTO account_deletions (user_id, delete_after, keep_session) VALUES (%s, %s, %s)
+                       ON CONFLICT (user_id) DO UPDATE SET requested_at = now(), keep_session = EXCLUDED.keep_session
+                       RETURNING delete_after, requested_at""",
+                    [user_id, datetime.now(timezone.utc) + DELETE_GRACE, session])
+        delete_after, requested_at = cur.fetchone()
+    _set_deleting(user_id, delete_after, requested_at, session)
     api_v1.forget_token(user_id=user_id)
     logger.info(f"🗑️ Account deletion scheduled: {user_id[:8]} on {delete_after:%Y-%m-%d}")
     notify_admin(f"account_deleted:{user_id}", "🗑️ Account deletion scheduled",
@@ -2907,10 +2933,11 @@ def _purge_due_accounts() -> bool:
 def _load_deleting():
     """Who is inside the 15 days, from the database. A failure keeps the current map; a local change made
     while the query ran wins over what it read (the next reload picks the database up again)."""
-    global _deleting, _purged
+    global _deleting, _purged, _signout
     gen = _deleting_gen[0]
     try:
-        rows = _system_rows("SELECT user_id, delete_after, purged_at FROM pending_account_deletions()")
+        rows = _system_rows("SELECT user_id, delete_after, purged_at, requested_at, keep_session "
+                            "FROM pending_account_deletions()")
     except Exception as e:
         logger.warning(f"deletion list not reloaded: {e}")
         _reload_db_uses[0] = _db_uses[0]   # the failed attempt's own connection must not earn another one
@@ -2922,10 +2949,11 @@ def _load_deleting():
     with _deleting_lock:
         if _deleting_gen[0] != gen:   # a local change overlapped: the next tick reads again
             return
-        purged = {u for u, _, at in rows if at is not None}
+        purged = {u for u, _, at, _, _ in rows if at is not None}
         newly_purged = purged - _purged
         _purged = purged   # before _deleting: see _set_purged
-        _deleting = {u: d for u, d, at in rows if at is None}
+        _signout = {u: (req.timestamp(), keep) for u, _, at, req, keep in rows if at is None}
+        _deleting = {u: d for u, d, at, _, _ in rows if at is None}
         _reload_db_uses[0] = _db_uses[0]
         _deletion_loaded[0] = True
     for uid in newly_purged:   # purged by another instance: this one's cached tokens go too

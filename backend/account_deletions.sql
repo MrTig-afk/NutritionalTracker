@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS account_deletions (
 -- Set by the day-15 purge: the row then stays as a tombstone (the account is gone and its old access tokens are
 -- refused, across restarts) until no access token from before the purge can still be valid.
 ALTER TABLE account_deletions ADD COLUMN IF NOT EXISTS purged_at timestamptz;
+-- The session that asked for the delete: it stays signed in; every sign-in older than requested_at is signed out
+-- (owner 2026-09-25) while the account is pending.
+ALTER TABLE account_deletions ADD COLUMN IF NOT EXISTS keep_session varchar;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON account_deletions TO nutriscan_app;
 
@@ -35,9 +38,10 @@ CREATE POLICY user_isolation ON account_deletions
 -- Dropped first: CREATE OR REPLACE cannot change a function's result columns.
 DROP FUNCTION IF EXISTS pending_account_deletions();
 CREATE FUNCTION pending_account_deletions()
-RETURNS TABLE (user_id varchar, delete_after timestamptz, purged_at timestamptz)
+RETURNS TABLE (user_id varchar, delete_after timestamptz, purged_at timestamptz, requested_at timestamptz,
+               keep_session varchar)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT d.user_id, d.delete_after, d.purged_at FROM account_deletions d;
+  SELECT d.user_id, d.delete_after, d.purged_at, d.requested_at, d.keep_session FROM account_deletions d;
 $$;
 REVOKE ALL ON FUNCTION pending_account_deletions() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION pending_account_deletions() TO nutriscan_app;
