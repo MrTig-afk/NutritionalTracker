@@ -29,6 +29,7 @@ from pillow_heif import register_heif_opener
 register_heif_opener()   # iPhone HEIC photos: browsers that cannot decode them upload the original file
 from pydantic import BaseModel, ConfigDict, Field
 import re
+from urllib.parse import urlparse
 import threading
 import urllib.request
 import contextvars
@@ -39,6 +40,7 @@ from log_service import (entry_macros, sum_macros, rounded, load_nutrition, sett
 
 try:
     from pywebpush import webpush, WebPushException
+    from py_vapid import Vapid
     _webpush_ok = True
 except ImportError:
     _webpush_ok = False
@@ -77,9 +79,26 @@ DAILY_LIMIT    = 10
 
 # Admin alerts go to this user's PWA push subscriptions (see notify_admin()).
 ADMIN_USER_ID     = os.getenv("ADMIN_USER_ID", "")
-VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").replace("\\n", "\n")
 VAPID_PUBLIC_KEY  = os.getenv("VAPID_PUBLIC_KEY", "")
 VAPID_CLAIM       = os.getenv("VAPID_CLAIM", "mailto:theimpracticalguy007@gmail.com")
+
+
+def _load_vapid(value: str):
+    """The push signing key, loaded here: pywebpush reads only raw or DER base64 from a string, never PEM, so the
+    PEM key in VAPID_PRIVATE_KEY made every push fail (silently) until 2026-09-25. The first PRIVATE KEY block
+    wins, so a pasted block with the public key or a second key after it still works. None if unusable."""
+    value = (value or "").replace("\\n", "\n").strip()
+    if not value or not _webpush_ok:
+        return None
+    pem = re.search(r"-----BEGIN (?:EC )?PRIVATE KEY-----.*?-----END (?:EC )?PRIVATE KEY-----", value, re.S)
+    try:
+        return Vapid.from_pem(pem.group(0).encode()) if pem else Vapid.from_string(value)
+    except Exception as e:
+        logger.error(f"VAPID_PRIVATE_KEY is unreadable ({type(e).__name__}): no push can be sent")
+        return None
+
+
+VAPID_KEY = _load_vapid(os.getenv("VAPID_PRIVATE_KEY", ""))
 
 logger.info(f"📦 DATABASE_URL configured: {bool(DATABASE_URL)}")
 
@@ -670,25 +689,26 @@ app.add_middleware(
 
 def _webpush_all(subs: list, title: str, body: str):
     """Blocking; call from a thread. One failed device doesn't stop the rest."""
-    if not (_webpush_ok and VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY):
+    if not (VAPID_KEY and VAPID_PUBLIC_KEY):
         return
     for sub in subs:
         try:
             webpush(
                 subscription_info=sub,
                 data=json.dumps({"title": title, "body": body}),
-                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_private_key=VAPID_KEY,
                 vapid_claims={"sub": VAPID_CLAIM},
             )
-        except Exception as e:
-            logger.debug(f"Push send failed: {e}")
+        except Exception as e:   # the endpoint is a credential: log its host only
+            status = getattr(getattr(e, "response", None), "status_code", "-")
+            logger.warning(f"Push send failed to {urlparse(sub.get('endpoint', '')).hostname}: {type(e).__name__} {status}")
             if _spike("push_fail", 10, 600):
                 notify_admin("push_fail", "Notifications failing",
                              "Over 10 push deliveries failed in 10 minutes — VAPID keys may be wrong/expired or subscriptions stale, so users aren't getting notifications.")
 
 
 def send_push_to_user(user_id: str, title: str, body: str):
-    if not (_webpush_ok and VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY):
+    if not (VAPID_KEY and VAPID_PUBLIC_KEY):
         return
     def _send():
         try:
@@ -1515,7 +1535,7 @@ def startup():
     _load_budget()
     api_v1.load_prefixes()
     threading.Thread(target=_purge_recycle_bin, daemon=True).start()  # also daily from the scheduler
-    if MEAL_REMINDERS_ENABLED and _webpush_ok and VAPID_PRIVATE_KEY:
+    if MEAL_REMINDERS_ENABLED and VAPID_KEY:
         threading.Thread(target=_meal_reminder_loop, daemon=True).start()
         logger.info("⏰ Meal reminder scheduler started")
 
