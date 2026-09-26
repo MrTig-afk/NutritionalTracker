@@ -67,6 +67,8 @@ export default defineConfig({
               background_color: '#ffffff',
               display: 'standalone',
               orientation: 'portrait',
+              id: '/',
+              scope: '/',
               start_url: '/',
               icons: [
                 {
@@ -80,7 +82,7 @@ export default defineConfig({
                   type: 'image/png',
                 },
                 {
-                  src: '/icon-512.png',
+                  src: '/icon-maskable-512.png',
                   sizes: '512x512',
                   type: 'image/png',
                   purpose: 'maskable',
