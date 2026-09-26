@@ -1,4 +1,6 @@
 [
+  { "v": 31, "text": "Tapping Update now always opens the new version, instead of sometimes reloading the old one" },
+  { "v": 31, "text": "The home-screen icon keeps its edges on Android phones that round or circle their icons" },
   { "v": 30, "text": "Settings is now one short list: each setting shows its current value, and tapping it opens its own page" },
   { "v": 30, "text": "The Log buttons in your Library folders are easy to read in dark mode too" },
   { "v": 29, "text": "The Log Meal button on your meal templates is easy to read in dark mode" },

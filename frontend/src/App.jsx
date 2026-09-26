@@ -184,8 +184,17 @@ export default function App() {
 
   const handleUpdate = () => {
     navigator.serviceWorker.ready.then(reg => {
-      if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      window.location.reload();
+      // skipWaiting is async: reload only once the new worker has taken over, or the page reloads under the old one
+      // and serves the same version again (#25). An uncontrolled page gets no controllerchange, so it reloads now.
+      // The timer covers a takeover that never comes (a newer worker replaced the waiting one mid-tap).
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.addEventListener('controllerchange', () => window.location.reload(), { once: true });
+        setTimeout(() => window.location.reload(), 3000);
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+        window.location.reload();
+      }
     });
   };
 
