@@ -1070,25 +1070,27 @@ def validate_label_json(data) -> dict:
 # =============================================================================
 
 _pool = None
+_pool_lock = threading.Lock()
 
 def get_pool():
+    # Threaded: /mcp and the sync /v1 routes use the pool from the threadpool at once. The lock stops two
+    # threads each creating a pool, whose connections could then be returned to the wrong one.
     global _pool
-    if _pool is None:
-        if not DATABASE_URL:
-            raise Exception("DATABASE_URL environment variable not set")
-        _pool = psycopg2.pool.SimpleConnectionPool(1, 5, DATABASE_URL)
-        logger.info("✅ Connection pool initialised (min=1, max=5)")
+    with _pool_lock:
+        if _pool is None:
+            if not DATABASE_URL:
+                raise Exception("DATABASE_URL environment variable not set")
+            _pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+            logger.info("✅ Connection pool initialised (min=1, max=10)")
     return _pool
 
-def _reset_pool():
+def _retire_pool():
+    # No closeall: other threads still hold this pool's connections; release_db closes each as it comes back. The
+    # ones callers leaked (most routes call release_db only on success) go with the old pool.
+    # Known ceiling: a full pool is replaced, not waited on; releasing in a finally at every caller removes the leaks.
     global _pool
-    if _pool:
-        try:
-            _pool.closeall()
-        except Exception:
-            pass
-    _pool = None
-    return get_pool()
+    with _pool_lock:
+        _pool = None
 
 # ---------- NEON BUDGET ESTIMATE ----------
 # Neon's free plan cannot report its own usage over the API, so the server
@@ -1185,24 +1187,36 @@ def _load_budget():
             release_db(conn)
 
 
-def get_db(user_id: Optional[str] = None):
-    global _pool
+def _live_conn(pool):
+    conn = pool.getconn()
     try:
-        conn = get_pool().getconn()
         # autocommit must be set BEFORE the liveness probe: the probe opens a
-        # transaction, and psycopg2 refuses autocommit changes mid-transaction —
-        # the old order made every call take the reset path (full pool churn).
+        # transaction, and psycopg2 refuses autocommit changes mid-transaction.
         conn.autocommit = False
         conn.cursor().execute("SELECT 1")
+        return conn
     except Exception:
-        logger.debug("Pool stale — resetting (Neon cold start)")
+        pool.putconn(conn, close=True)
+        raise
+
+
+def get_db(user_id: Optional[str] = None):
+    # A Neon cold start leaves the idle connection dead. Drop just that one and take the next, which is fresh
+    # (the pool keeps at most minconn=1 idle). Never reset the whole pool: other threads hold its connections,
+    # and closing them under them broke those requests (2026-10-02).
+    try:
+        conn = _live_conn(get_pool())
+    except psycopg2.pool.PoolError:   # every slot taken: a burst or leaked connections, not a dead database
+        logger.warning("Connection pool full - starting a fresh one")
+        _retire_pool()
+        conn = _live_conn(get_pool())
+    except Exception:
+        logger.debug("Dead connection dropped (Neon cold start)")
         try:
-            _reset_pool()
-            conn = _pool.getconn()
-            conn.autocommit = False
+            conn = _live_conn(get_pool())   # also retries a pool that could not be created (Neon asleep)
         except Exception as e:
             notify_admin("db_unreachable", "Database unreachable",
-                         f"Connection pool reset failed — Neon is likely down or at its connection limit, so requests are failing. Detail: {str(e)[:120]}")
+                         f"No live database connection — Neon is likely down or at its connection limit, so requests are failing. Detail: {str(e)[:120]}")
             raise
     _note_db_use()
     # RLS: bind the request's user to a transaction-local GUC so Postgres
@@ -1226,7 +1240,10 @@ def release_db(conn):
         conn.rollback()
     except Exception:
         pass
-    get_pool().putconn(conn)
+    try:
+        get_pool().putconn(conn)
+    except psycopg2.pool.PoolError:   # it came from a pool _retire_pool replaced ("trying to put unkeyed connection")
+        conn.close()
 
 
 def _db_error(e) -> HTTPException:
