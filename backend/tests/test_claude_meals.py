@@ -55,7 +55,8 @@ class MealTool(PreviewBase):
     def test_the_meal_rule_is_in_the_description(self):
         d = self.tools()["log_meal"]["description"]
         for phrase in ("a single food is a meal of one item", "Say yes, or tell me a different name",
-                       "Never ask for the name or the date"):
+                       "Never ask for the name or the date", "the preview message is the user's ONE confirmation",
+                       "at once and without asking again"):
             self.assertIn(phrase, d)
 
 

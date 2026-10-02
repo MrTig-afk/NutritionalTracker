@@ -1671,10 +1671,14 @@ MCP_TOOL = {
         "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": TODAY_HINT}}},
     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}}
 
-TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Show the user the change as a short table "
-              "(food, amount, kcal, protein, carbs, fat, date in words like \"Thu 24 Sep\") and ask yes or no. Only "
-              "after an explicit yes, call confirm_change with the code; never call it without the user's yes. If "
-              "more than one entry matches what the user means, list them and ask; never guess.")
+TOOL_RULES = (" PREVIEW ONLY: this saves nothing and returns a confirm_code. Call it as soon as you know what to "
+              "preview (after the lookups and any question this tool's description asks before previewing, such as "
+              "\"which one?\"): never show the numbers or ask \"shall I log it?\" before it; the preview message is "
+              "the user's ONE confirmation, together with any Library question it carries. Show the user the change "
+              "as a short table (food, amount, kcal, protein, carbs, fat, date in words like \"Thu 24 Sep\") and ask yes or no. Only "
+              "after an explicit yes, call confirm_change with the code, at once and without asking again; never call "
+              "it without the user's yes. If more than one entry matches what the user means, list them and ask; "
+              "never guess.")
 LIBRARY_RULE = (" A food the user names: call search_library first (its numbers, and ask_before_saving). For a food "
                 "not in the Library yet, while ask_before_saving is true: include save_to_library in this preview and "
                 "ask in the same preview message whether to save it to the Library too; if the user says yes to the "
