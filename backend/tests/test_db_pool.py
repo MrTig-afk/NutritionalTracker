@@ -85,6 +85,15 @@ class ColdStart(unittest.TestCase):
         main.release_db(conn)   # used to raise and turn a finished request into a 500
         conn.close.assert_called_once()
 
+    def test_release_with_no_pool_closes_instead_of_opening_one(self):
+        conn = Conn()
+        conn.close = mock.Mock()
+        main._pool = None   # retired, and Neon may be unreachable: a release must never connect
+        with mock.patch.object(main.psycopg2.pool, "ThreadedConnectionPool") as new_pool:
+            main.release_db(conn)
+        new_pool.assert_not_called()
+        conn.close.assert_called_once()
+
     def test_a_pool_that_cannot_be_created_alerts(self):
         with mock.patch.object(main, "get_pool", side_effect=main.psycopg2.OperationalError("could not connect")), \
                 mock.patch.object(main, "notify_admin") as alert, self.assertRaises(main.psycopg2.OperationalError):
