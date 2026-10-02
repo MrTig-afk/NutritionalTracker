@@ -444,6 +444,7 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
     """Upsert user email and enforce daily rate limit."""
     today = client_date or date.today().isoformat()
     duplicate = _is_duplicate_scan(user_id, scan_id)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -461,7 +462,7 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
         row = cur.fetchone()
         if row:
             if row[0] >= DAILY_LIMIT:
-                cur.close(); release_db(conn)
+                cur.close()
                 notify_admin("scan_limit", "📊 Scan Limit Hit", f"User {user_id[:8]} hit the {DAILY_LIMIT}/day scan limit")
                 send_push_to_user(user_id, "📊 Scan Limit Reached", f"You've used all {DAILY_LIMIT} scans for today. Come back tomorrow!")
                 raise HTTPException(status_code=429, detail={
@@ -482,7 +483,6 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
                 )
         conn.commit()
         cur.close()
-        release_db(conn)
         if is_new_user:
             notify_admin(f"signup:{user_id[:8]}", "New signup",
                          f"A new user just signed up: {user_id[:8]}")
@@ -493,6 +493,9 @@ def check_and_track(user_id: str, email: str, client_date: str = None, scan_id: 
         raise
     except Exception as e:
         logger.warning(f"⚠️ Usage tracking failed (non-fatal): {e}")
+    finally:
+        if conn:
+            release_db(conn)
 
 
 # ---------- ALERT HELPERS ----------
@@ -783,13 +786,13 @@ def send_push_to_user(user_id: str, title: str, body: str):
     if not (VAPID_KEY and VAPID_PUBLIC_KEY) or user_id in _deleting:   # nothing to log inside the 15 days
         return
     def _send():
+        conn = None
         try:
             conn = get_db(user_id)
             cur  = conn.cursor()
             cur.execute("SELECT subscription_json FROM push_subscriptions WHERE user_id = %s", [user_id])
             rows = cur.fetchall()
             cur.close()
-            release_db(conn)
             subs = [r[0] if isinstance(r[0], dict) else json.loads(r[0]) for r in rows]
         except Exception as e:
             logger.debug(f"Push subscription lookup failed: {e}")
@@ -797,28 +800,34 @@ def send_push_to_user(user_id: str, title: str, body: str):
                 notify_admin("push_fail", "Notifications failing",
                              "Over 10 push deliveries failed in 10 minutes — VAPID keys may be wrong/expired or subscriptions stale, so users aren't getting notifications.")
             return
+        finally:
+            if conn:
+                release_db(conn)
         _webpush_all(subs, title, body)
     threading.Thread(target=_send, daemon=True).start()
 
 
 def _check_goal_and_push(user_id: str, today: str):
+    conn = None
     try:
         conn = get_db(user_id)
         cur  = conn.cursor()
         cur.execute("SELECT calories FROM user_goals WHERE user_id = %s", [user_id])
         goal_row = cur.fetchone()
         if not goal_row or not goal_row[0]:
-            cur.close(); release_db(conn); return
+            cur.close(); return
         goal_cal = goal_row[0]
         cur.execute("SELECT servings, nutrition FROM daily_log WHERE user_id = %s AND date = %s", [user_id, today])
         rows = cur.fetchall()
         cur.close()
-        release_db(conn)
         total = sum_macros(rows)["calories"]
         if total >= goal_cal:
             send_push_to_user(user_id, "🎯 Daily Goal Hit!", f"You've reached {round(total)} kcal — goal was {round(goal_cal)} kcal!")
     except Exception as e:
         logger.debug(f"Goal push check failed: {e}")
+    finally:
+        if conn:
+            release_db(conn)
 
 
 # ---------- PYDANTIC MODELS ----------
@@ -1240,9 +1249,11 @@ def release_db(conn):
         conn.rollback()
     except Exception:
         pass
+    # Runs in callers' finally blocks, so it must not raise: with no current pool, or one _retire_pool replaced
+    # ("trying to put unkeyed connection"), the connection is just closed. Never create a pool only to hand one back.
     try:
-        get_pool().putconn(conn)
-    except psycopg2.pool.PoolError:   # it came from a pool _retire_pool replaced ("trying to put unkeyed connection")
+        _pool.putconn(conn)
+    except Exception:
         conn.close()
 
 
@@ -1259,6 +1270,7 @@ def _db_error(e) -> HTTPException:
 
 def init_db():
     """Create all tables if they don't exist. Safe to run on every startup."""
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -1378,11 +1390,13 @@ def init_db():
 
         conn.commit()
         cur.close()
-        release_db(conn)
         logger.info("✅ PostgreSQL database initialized (all tables)")
     except Exception as e:
         logger.error(f"❌ DB init failed: {e}")
         raise
+    finally:
+        if conn:
+            release_db(conn)
 
 
 # ---------- MEAL REMINDER SCHEDULER ----------
@@ -1427,20 +1441,22 @@ def _mark_schedule_dirty():
 def _reload_reminder_schedule() -> list:
     rows = []
     conn = get_db("__system__")
-    cur  = conn.cursor()
-    cur.execute("""
-        SELECT DISTINCT p.user_id, np.prefs
-        FROM push_subscriptions p
-        LEFT JOIN notification_prefs np ON np.user_id = p.user_id
-    """)
-    for uid, prefs in cur.fetchall():
-        prefs = prefs if isinstance(prefs, dict) else (json.loads(prefs) if prefs else {})
-        for key, threshold, dflt, title, body in _MEAL_REMINDERS:
-            if prefs.get(key):
-                t = prefs.get(f"{key}_time", dflt)
-                rows.append((uid, key, threshold, t if _TIME_RE.match(str(t)) else dflt, title, body))
-    cur.close()
-    release_db(conn)
+    try:
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT p.user_id, np.prefs
+            FROM push_subscriptions p
+            LEFT JOIN notification_prefs np ON np.user_id = p.user_id
+        """)
+        for uid, prefs in cur.fetchall():
+            prefs = prefs if isinstance(prefs, dict) else (json.loads(prefs) if prefs else {})
+            for key, threshold, dflt, title, body in _MEAL_REMINDERS:
+                if prefs.get(key):
+                    t = prefs.get(f"{key}_time", dflt)
+                    rows.append((uid, key, threshold, t if _TIME_RE.match(str(t)) else dflt, title, body))
+        cur.close()
+    finally:
+        release_db(conn)
     logger.info(f"⏰ Reminder schedule reloaded: {len(rows)} slot(s) across users")
     return rows
 
@@ -1450,39 +1466,41 @@ _weekly_summary_sent: dict = {}
 
 def _run_weekly_summary(today_local):
     conn = get_db("__system__")
-    cur  = conn.cursor()
-    start = (today_local - timedelta(days=6)).isoformat()
-    cur.execute("""
-        SELECT p.user_id
-        FROM push_subscriptions p
-        LEFT JOIN notification_prefs np ON np.user_id = p.user_id
-        WHERE COALESCE((np.prefs->>'weekly_summary')::boolean, false)
-        GROUP BY p.user_id
-    """)
-    users = [r[0] for r in cur.fetchall()]
-    sent = 0
-    for uid in users:
-        try:
-            cur.execute(
-                "SELECT servings, nutrition, date FROM daily_log WHERE user_id = %s AND date >= %s",
-                [uid, start],
-            )
-            rows = cur.fetchall()
-            if not rows:
-                continue
-            days_logged = len({r[2] for r in rows})
-            total_cal   = sum_macros((r[0], r[1]) for r in rows)["calories"]
-            avg_cal     = round(total_cal / max(days_logged, 1))
-            cur.execute("SELECT calories FROM user_goals WHERE user_id = %s", [uid])
-            goal_row = cur.fetchone()
-            goal_txt = f" (goal {round(goal_row[0])})" if goal_row and goal_row[0] else ""
-            send_push_to_user(uid, "Your week in review",
-                              f"Avg {avg_cal} kcal/day{goal_txt} across {days_logged} logged day(s). Keep it up!")
-            sent += 1
-        except Exception as e:
-            logger.debug(f"weekly summary for {uid[:8]} failed: {e}")
-    cur.close()
-    release_db(conn)
+    try:
+        cur  = conn.cursor()
+        start = (today_local - timedelta(days=6)).isoformat()
+        cur.execute("""
+            SELECT p.user_id
+            FROM push_subscriptions p
+            LEFT JOIN notification_prefs np ON np.user_id = p.user_id
+            WHERE COALESCE((np.prefs->>'weekly_summary')::boolean, false)
+            GROUP BY p.user_id
+        """)
+        users = [r[0] for r in cur.fetchall()]
+        sent = 0
+        for uid in users:
+            try:
+                cur.execute(
+                    "SELECT servings, nutrition, date FROM daily_log WHERE user_id = %s AND date >= %s",
+                    [uid, start],
+                )
+                rows = cur.fetchall()
+                if not rows:
+                    continue
+                days_logged = len({r[2] for r in rows})
+                total_cal   = sum_macros((r[0], r[1]) for r in rows)["calories"]
+                avg_cal     = round(total_cal / max(days_logged, 1))
+                cur.execute("SELECT calories FROM user_goals WHERE user_id = %s", [uid])
+                goal_row = cur.fetchone()
+                goal_txt = f" (goal {round(goal_row[0])})" if goal_row and goal_row[0] else ""
+                send_push_to_user(uid, "Your week in review",
+                                  f"Avg {avg_cal} kcal/day{goal_txt} across {days_logged} logged day(s). Keep it up!")
+                sent += 1
+            except Exception as e:
+                logger.debug(f"weekly summary for {uid[:8]} failed: {e}")
+        cur.close()
+    finally:
+        release_db(conn)
     logger.info(f"📅 Weekly summary queued for {sent} user(s)")
 
 # Supabase free tier pauses projects after ~7 days without API activity, which
@@ -1512,6 +1530,7 @@ _DAILY_PULSE_SLOT = 20 * 60  # 20:00 local
 _daily_pulse_sent: dict = {}
 
 def _run_daily_pulse():
+    conn = None
     try:
         conn = get_db("__system__")
         cur  = conn.cursor()
@@ -1521,25 +1540,29 @@ def _run_daily_pulse():
         cur.execute("SELECT COUNT(*) FROM users")
         total = cur.fetchone()[0]
         cur.close()
-        release_db(conn)
         notify_admin("daily_pulse", "Daily pulse",
                      f"Today: {scans} scan(s) by {active} active user(s). {total} users total.")
     except Exception as e:
         logger.debug(f"daily pulse failed: {e}")
+    finally:
+        if conn:
+            release_db(conn)
 
 def _fire_due_reminders(due: list, today: str):
     """due: schedule rows whose time matched this tick. One DB round-trip for
     today's log counts, then push to users still under their threshold."""
     uids = list({r[0] for r in due})
     conn = get_db("__system__")
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT user_id, count(*) FROM daily_log WHERE date = %s AND user_id = ANY(%s) GROUP BY user_id",
-        [today, uids],
-    )
-    counts = dict(cur.fetchall())
-    cur.close()
-    release_db(conn)
+    try:
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT user_id, count(*) FROM daily_log WHERE date = %s AND user_id = ANY(%s) GROUP BY user_id",
+            [today, uids],
+        )
+        counts = dict(cur.fetchall())
+        cur.close()
+    finally:
+        release_db(conn)
     sent = 0
     for uid, key, threshold, _t, title, body in due:
         _reminder_sent[(uid, key)] = today  # handled either way for today
@@ -1822,12 +1845,15 @@ async def health_check(deep: bool = False):
     db_status = "skipped"
     if deep:
         db_status = "ok"
+        conn = None
         try:
             conn = get_db()
             conn.cursor().execute("SELECT 1")
-            release_db(conn)
         except Exception:
             db_status = "unavailable"
+        finally:
+            if conn:
+                release_db(conn)
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -1875,6 +1901,7 @@ async def check_provider(request: Request, email: str = Query(...)):
 async def get_usage(authorization: Optional[str] = Header(default=None), client_date: Optional[str] = None):
     user_id = get_user_id(authorization)
     today   = client_date or date.today().isoformat()
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -1884,9 +1911,11 @@ async def get_usage(authorization: Optional[str] = Header(default=None), client_
         )
         row = cur.fetchone()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"used": row[0] if row else 0, "limit": DAILY_LIMIT, "date": today}
 
 
@@ -1946,6 +1975,7 @@ async def analyze_label(
     result["raw_url"]       = raw_url
     result["processed_url"] = processed_url
 
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -1955,9 +1985,11 @@ async def analyze_label(
         )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         logger.warning(f"⚠️ DB insert failed (non-fatal): {e}")
+    finally:
+        if conn:
+            release_db(conn)
 
     return result
 
@@ -2023,6 +2055,7 @@ async def analyze_labels(
     except LabelRejected as e:
         raise _label_rejected(e, f"batch-{len(files)}")
 
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2037,9 +2070,11 @@ async def analyze_labels(
             )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         logger.warning(f"⚠️ Batch DB insert failed (non-fatal): {e}")
+    finally:
+        if conn:
+            release_db(conn)
 
     return results
 
@@ -2055,6 +2090,7 @@ async def create_folder(
 ):
     user_id   = get_user_id(authorization)
     folder_id = str(uuid.uuid4())
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2064,15 +2100,18 @@ async def create_folder(
         )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"folder_id": folder_id, "name": body.name}
 
 
 @app.get("/folders")
 async def list_folders(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2082,9 +2121,11 @@ async def list_folders(authorization: Optional[str] = Header(default=None)):
         )
         rows = cur.fetchall()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return [{"folder_id": r[0], "name": r[1]} for r in rows]
 
 
@@ -2094,6 +2135,7 @@ async def get_folder(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2103,7 +2145,7 @@ async def get_folder(
         )
         folder = cur.fetchone()
         if not folder:
-            cur.close(); release_db(conn)
+            cur.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Folder not found"})
         cur.execute(
             "SELECT item_id, name, nutrition FROM folder_items WHERE folder_id = %s AND user_id = %s ORDER BY created_at DESC",
@@ -2111,11 +2153,13 @@ async def get_folder(
         )
         items = cur.fetchall()
         cur.close()
-        release_db(conn)
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
 
     return {
         "folder_id": folder[0],
@@ -2139,6 +2183,7 @@ async def add_folder_item(
 ):
     user_id = get_user_id(authorization)
     item_id = str(uuid.uuid4())
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2148,9 +2193,11 @@ async def add_folder_item(
         )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"item_id": item_id, "name": body.name}
 
 
@@ -2161,6 +2208,7 @@ async def delete_folder_item(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2170,9 +2218,11 @@ async def delete_folder_item(
         )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"deleted": True}
 
 
@@ -2182,6 +2232,7 @@ async def delete_folder(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2189,9 +2240,11 @@ async def delete_folder(
         cur.execute("DELETE FROM folders WHERE folder_id = %s AND user_id = %s", [folder_id, user_id])
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"deleted": True}
 
 
@@ -2206,6 +2259,7 @@ async def set_goals(
 ):
     user_id = get_user_id(authorization)
     fibre   = body.fibre or 0.0
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2223,9 +2277,11 @@ async def set_goals(
             )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {
         "user_id": user_id, "calories": body.calories, "protein": body.protein,
         "carbs": body.carbs, "fat": body.fat, "fibre": fibre,
@@ -2235,6 +2291,7 @@ async def set_goals(
 @app.get("/goals")
 async def get_goals(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2244,9 +2301,11 @@ async def get_goals(authorization: Optional[str] = Header(default=None)):
         )
         row = cur.fetchone()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     if not row:
         return {"calories": 2000.0, "protein": 150.0, "carbs": 250.0, "fat": 65.0, "fibre": 30.0}
     fibre = row[4] if len(row) > 4 and row[4] is not None else 0.0
@@ -2265,6 +2324,7 @@ async def add_log_entry(
     user_id = get_user_id(authorization)
     log_id  = str(uuid.uuid4())
     today   = body.log_date or date.today().isoformat()
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2274,9 +2334,11 @@ async def add_log_entry(
         )
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     threading.Thread(target=_check_goal_and_push, args=(user_id, today), daemon=True).start()
     return {"log_id": log_id, "date": today, "name": body.name, "servings": body.servings}
 
@@ -2288,6 +2350,7 @@ async def get_daily_log(
 ):
     user_id     = get_user_id(authorization)
     target_date = log_date or date.today().isoformat()
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2297,9 +2360,11 @@ async def get_daily_log(
         )
         rows = cur.fetchall()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
 
     items = []
     for log_id, name, servings, nutrition_raw in rows:
@@ -2333,6 +2398,7 @@ async def get_log_calendar(
     days_in_month = (date(year + (month // 12), (month % 12) + 1, 1) - timedelta(days=1)).day
     first = f"{year}-{str(month).zfill(2)}-01"
     last  = f"{year}-{str(month).zfill(2)}-{str(days_in_month).zfill(2)}"
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2342,9 +2408,11 @@ async def get_log_calendar(
         )
         rows = cur.fetchall()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     dates = [r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0]) for r in rows]
     return {"dates": dates}
 
@@ -2365,6 +2433,7 @@ async def get_log_trends(
         end_date = date.today()
     start_date = end_date - timedelta(days=days - 1)
 
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2374,9 +2443,11 @@ async def get_log_trends(
         )
         rows = cur.fetchall()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
 
     daily = {
         (start_date + timedelta(i)).isoformat(): {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0, "fibre": 0.0}
@@ -2407,6 +2478,7 @@ async def update_log_entry(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
@@ -2415,7 +2487,7 @@ async def update_log_entry(
             [log_id, user_id],
         )
         if not cur.fetchone():
-            cur.close(); release_db(conn)
+            cur.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Log entry not found"})
         cur.execute(
             "UPDATE daily_log SET name=%s, servings=%s, nutrition=%s WHERE log_id=%s AND user_id=%s",
@@ -2423,11 +2495,13 @@ async def update_log_entry(
         )
         conn.commit()
         cur.close()
-        release_db(conn)
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"log_id": log_id, "name": body.name, "servings": body.servings}
 
 
@@ -2437,15 +2511,18 @@ async def delete_log_entry(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db()
         cur  = conn.cursor()
         cur.execute("DELETE FROM daily_log WHERE log_id = %s AND user_id = %s", [log_id, user_id])
         conn.commit()
         cur.close()
-        release_db(conn)
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"deleted": True}
 
 
@@ -2457,21 +2534,26 @@ async def delete_log_entry(
 async def create_meal_template(body: MealTemplateCreate, authorization: Optional[str] = Header(default=None)):
     user_id     = get_user_id(authorization)
     template_id = str(uuid.uuid4())
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute(
             "INSERT INTO meal_templates (template_id, user_id, name, created_at) VALUES (%s, %s, %s, %s)",
             [template_id, user_id, body.name, datetime.now()],
         )
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"template_id": template_id, "name": body.name, "item_count": 0}
 
 
 @app.get("/meal-templates")
 async def list_meal_templates(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute(
@@ -2483,31 +2565,38 @@ async def list_meal_templates(authorization: Optional[str] = Header(default=None
                ORDER BY mt.created_at DESC""",
             [user_id],
         )
-        rows = cur.fetchall(); cur.close(); release_db(conn)
+        rows = cur.fetchall(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return [{"template_id": r[0], "name": r[1], "item_count": r[2]} for r in rows]
 
 
 @app.get("/meal-templates/{template_id}")
 async def get_meal_template(template_id: str, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("SELECT template_id, name FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
         tmpl = cur.fetchone()
         if not tmpl:
-            cur.close(); release_db(conn)
+            cur.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
         cur.execute(
             "SELECT item_id, name, nutrition, servings FROM meal_template_items WHERE template_id = %s ORDER BY created_at",
             [template_id],
         )
-        items = cur.fetchall(); cur.close(); release_db(conn)
+        items = cur.fetchall(); cur.close()
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {
         "template_id": tmpl[0],
         "name": tmpl[1],
@@ -2523,48 +2612,57 @@ async def get_meal_template(template_id: str, authorization: Optional[str] = Hea
 @app.delete("/meal-templates/{template_id}")
 async def delete_meal_template(template_id: str, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         # Ownership first: someone else's template id touches nothing, even as neondb_owner (BYPASSRLS).
         cur.execute("SELECT 1 FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
         if not cur.fetchone():
-            cur.close(); release_db(conn)
+            cur.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
         cur.execute("DELETE FROM meal_template_items WHERE template_id = %s AND user_id = %s", [template_id, user_id])
         cur.execute("DELETE FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"deleted": True}
 
 
 @app.post("/meal-templates/{template_id}/items")
 async def add_meal_template_item(template_id: str, body: MealTemplateItemCreate, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("SELECT template_id FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
         if not cur.fetchone():
-            cur.close(); release_db(conn)
+            cur.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
         item_id = str(uuid.uuid4())
         cur.execute(
             "INSERT INTO meal_template_items (item_id, template_id, user_id, name, nutrition, servings, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
             [item_id, template_id, user_id, body.name, json.dumps(settle_kcal(body.nutrition, False)), body.servings, datetime.now()],
         )
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"item_id": item_id, "name": body.name, "servings": body.servings}
 
 
 @app.put("/meal-templates/{template_id}/items/{item_id}")
 async def update_meal_template_item(template_id: str, item_id: str, body: MealTemplateItemUpdate, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute(
@@ -2572,9 +2670,12 @@ async def update_meal_template_item(template_id: str, item_id: str, body: MealTe
             [body.servings, item_id, template_id, user_id],
         )
         updated = cur.rowcount
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     if not updated:
         raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template item not found"})
     return {"item_id": item_id, "servings": body.servings}
@@ -2583,12 +2684,16 @@ async def update_meal_template_item(template_id: str, item_id: str, body: MealTe
 @app.delete("/meal-templates/{template_id}/items/{item_id}")
 async def delete_meal_template_item(template_id: str, item_id: str, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("DELETE FROM meal_template_items WHERE item_id = %s AND template_id = %s AND user_id = %s", [item_id, template_id, user_id])
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"deleted": True}
 
 
@@ -2596,18 +2701,19 @@ async def delete_meal_template_item(template_id: str, item_id: str, authorizatio
 async def log_meal_template(template_id: str, log_date: Optional[str] = None, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
     today   = log_date or date.today().isoformat()
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("SELECT name FROM meal_templates WHERE template_id = %s AND user_id = %s", [template_id, user_id])
         tmpl = cur.fetchone()
         if not tmpl:
-            cur.close(); release_db(conn)
+            cur.close()
             raise HTTPException(status_code=404, detail={"error_type": "not_found", "message": "Template not found"})
         template_name = tmpl[0]
         cur.execute("SELECT name, nutrition, servings FROM meal_template_items WHERE template_id = %s", [template_id])
         items = cur.fetchall()
         if not items:
-            cur.close(); release_db(conn)
+            cur.close()
             return {"logged": 0}
         # Log each item as its own row (so ingredients stay individually editable),
         # but stamp them all with one meal_group + label. The Tracker collapses a
@@ -2623,11 +2729,14 @@ async def log_meal_template(template_id: str, log_date: Optional[str] = None, au
                 "INSERT INTO daily_log (log_id, user_id, date, name, servings, nutrition, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 [log_id, user_id, today, name, servings, json.dumps(n), datetime.now()],
             )
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     threading.Thread(target=_check_goal_and_push, args=(user_id, today), daemon=True).start()
     return {"logged": len(items)}
 
@@ -2648,6 +2757,7 @@ async def push_subscribe(body: PushSubscriptionCreate, authorization: Optional[s
     user_id  = get_user_id(authorization)
     sub_id   = str(uuid.uuid4())
     sub_json = {"endpoint": body.endpoint, "expirationTime": body.expirationTime, "keys": body.keys}
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("""
@@ -2655,9 +2765,12 @@ async def push_subscribe(body: PushSubscriptionCreate, authorization: Optional[s
             VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (user_id, endpoint) DO UPDATE SET subscription_json = EXCLUDED.subscription_json
         """, [sub_id, user_id, body.endpoint, json.dumps(sub_json), datetime.now()])
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     _mark_schedule_dirty()
     if user_id == ADMIN_USER_ID:
         _load_admin_subs()
@@ -2667,12 +2780,16 @@ async def push_subscribe(body: PushSubscriptionCreate, authorization: Optional[s
 @app.delete("/push/unsubscribe")
 async def push_unsubscribe(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization, allow_deleting=True)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("DELETE FROM push_subscriptions WHERE user_id = %s", [user_id])
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     _mark_schedule_dirty()
     if user_id == ADMIN_USER_ID:
         _load_admin_subs()
@@ -2686,13 +2803,17 @@ async def push_unsubscribe(authorization: Optional[str] = Header(default=None)):
 @app.get("/settings/notifications")
 async def get_notification_prefs(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("SELECT prefs FROM notification_prefs WHERE user_id = %s", [user_id])
         row = cur.fetchone()
-        cur.close(); release_db(conn)
+        cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     stored = row[0] if row and row[0] else {}
     if not isinstance(stored, dict):
         stored = json.loads(stored)
@@ -2736,25 +2857,33 @@ def set_library_settings(body: LibrarySettings, authorization: Optional[str] = H
 @app.get("/settings/energy-unit")
 async def get_energy_unit(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("SELECT prefs->>'energy_unit' FROM notification_prefs WHERE user_id = %s", [user_id])
         row = cur.fetchone()
-        cur.close(); release_db(conn)
+        cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"unit": row[0] if row and row[0] in ("kcal", "kJ") else "kcal"}
 
 
 @app.put("/settings/energy-unit")
 async def set_energy_unit(body: EnergyUnit, authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id(authorization)
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute(api_v1.PREFS_MERGE_SQL, [user_id, json.dumps({"energy_unit": body.unit})])
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     return {"unit": body.unit}
 
 
@@ -2771,6 +2900,7 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
                     "message": f"Invalid time for {tk} — use HH:MM (24h).",
                 })
             clean[tk] = t
+    conn = None
     try:
         conn = get_db(); cur = conn.cursor()
         cur.execute("""
@@ -2780,11 +2910,14 @@ async def set_notification_prefs(body: NotificationPrefs, authorization: Optiona
                 -- replace only the reminder keys: other settings share this row (/settings/energy-unit, /settings/library)
                 prefs = (COALESCE(notification_prefs.prefs, '{}'::jsonb) - %s::text[]) || EXCLUDED.prefs
         """, [user_id, json.dumps(clean), datetime.now(), NOTIF_PREF_KEYS + list(NOTIF_TIME_DEFAULTS)])
-        conn.commit(); cur.close(); release_db(conn)
+        conn.commit(); cur.close()
     except HTTPException:
         raise
     except Exception as e:
         raise _db_error(e)
+    finally:
+        if conn:
+            release_db(conn)
     _mark_schedule_dirty()
     out = {k: clean.get(k, False) for k in NOTIF_PREF_KEYS}
     out.update({tk: clean.get(tk, dflt) for tk, dflt in NOTIF_TIME_DEFAULTS.items()})
@@ -3090,6 +3223,7 @@ async def chat(
 
     # Fetch enriched context. Non-fatal if it fails.
     context = ""
+    conn = None
     try:
         try:
             today = date.fromisoformat(body.client_date) if body.client_date else date.today()
@@ -3116,7 +3250,6 @@ async def chat(
         trend_rows = cur.fetchall()
 
         cur.close()
-        release_db(conn)
 
         parts = []
 
@@ -3175,6 +3308,9 @@ async def chat(
         context = " ".join(parts)
     except Exception:
         pass
+    finally:
+        if conn:
+            release_db(conn)
 
     system = _CHAT_SYSTEM + (
         "\n\nENERGY UNIT: The user reads energy in kJ, and every energy figure in the user data below is in kJ. "
