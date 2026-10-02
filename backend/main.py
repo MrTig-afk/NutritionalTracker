@@ -1087,7 +1087,7 @@ def get_pool():
 def _retire_pool():
     # No closeall: other threads still hold this pool's connections; release_db closes each as it comes back. The
     # ones callers leaked (most routes call release_db only on success) go with the old pool.
-    # ponytail: a full pool is replaced, not waited on; release_db in a finally at every caller removes the leaks.
+    # Known ceiling: a full pool is replaced, not waited on; releasing in a finally at every caller removes the leaks.
     global _pool
     with _pool_lock:
         _pool = None
