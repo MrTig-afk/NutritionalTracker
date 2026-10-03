@@ -11,6 +11,7 @@
 
 # 2) ...then re-allow the runtime surface.
 !/.gitignore
+!/.gitattributes
 !/README.md
 !/CONTRIBUTING.md
 !/SECURITY.md
